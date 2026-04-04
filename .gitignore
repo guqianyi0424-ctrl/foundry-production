@@ -77,8 +77,8 @@ Desktop.ini
 *.swp
 *.sif
 
-# Foundry framework (large directory)
-foundry-production/
+# Foundry framework - keep model code, exclude weights
+# foundry-production/  # Commented out to include model framework code
 
 # Output files
 outputs/
