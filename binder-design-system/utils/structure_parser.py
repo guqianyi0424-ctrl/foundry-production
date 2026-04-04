@@ -6,7 +6,8 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 import biotite.structure as struc
-import biotite.structure.io as io
+import biotite.structure.io.pdb as pdb
+import biotite.structure.io.cif as cif
 import numpy as np
 
 
@@ -37,10 +38,10 @@ class StructureParser:
         suffix = self.file_path.suffix.lower()
         
         if suffix == ".pdb":
-            pdb_file = io.pdb.PDBFile.read(str(self.file_path))
+            pdb_file = pdb.PDBFile.read(str(self.file_path))
             self.atom_array = pdb_file.get_structure(model=1)
         elif suffix == ".cif":
-            cif_file = io.pdb.CIFFile.read(str(self.file_path))
+            cif_file = cif.CIFFile.read(str(self.file_path))
             self.atom_array = cif_file.get_structure(model=1)
         else:
             raise ValueError(f"不支持的文件格式: {suffix}")
@@ -207,7 +208,7 @@ class StructureParser:
             raise ValueError("未加载结构数据")
         
         # 转换为PDB格式
-        pdb_file = io.pdb.PDBFile()
+        pdb_file = pdb.PDBFile()
         pdb_file.set_structure(atom_array)
         
         # 获取字符串
