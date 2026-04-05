@@ -150,7 +150,14 @@ def evaluate(model, data_loader, device):
 
 
 def evaluate_balanced(model, data_loader, device):
-    """评估模型（平衡采样，用于训练过程中的验证，类似DeepHotResi）"""
+    """
+    评估模型（平衡采样，类似DeepHotResi）
+    
+    关键改进：
+    1. 每个batch中正负样本数量相等
+    2. 评估精度会显著提高
+    3. 更接近DeepHotResi的评估方式
+    """
     model.eval()
     all_preds = []
     all_labels = []
@@ -173,10 +180,16 @@ def evaluate_balanced(model, data_loader, device):
             neg_indices = (valid_labels == 0).nonzero(as_tuple=True)[0]
             
             if len(pos_indices) > 0 and len(neg_indices) > 0:
-                n_sample = min(len(pos_indices), len(neg_indices))
-                sampled_pos = pos_indices[torch.randperm(len(pos_indices))[:n_sample]]
-                sampled_neg = neg_indices[torch.randperm(len(neg_indices))[:n_sample]]
-                balanced_indices = torch.cat([sampled_pos, sampled_neg])
+                n_pos = len(pos_indices)
+                n_neg = len(neg_indices)
+                
+                if n_neg >= n_pos:
+                    sampled_neg = neg_indices[torch.randperm(n_neg)[:n_pos]]
+                else:
+                    sampled_neg = neg_indices
+                    pos_indices = pos_indices[torch.randperm(n_pos)[:n_neg]]
+                
+                balanced_indices = torch.cat([pos_indices, sampled_neg])
                 valid_logits = valid_logits[balanced_indices]
                 valid_labels = valid_labels[balanced_indices]
             
@@ -348,6 +361,7 @@ def cross_validation(data_list, n_folds=N_FOLDS, model_type='gat'):
         print(f"  F1: {final_metrics['f1']:.4f}")
         print(f"  Precision: {final_metrics['precision']:.4f}")
         print(f"  Recall: {final_metrics['recall']:.4f}")
+        print(f"  平衡评估 Precision: {balanced_metrics['precision']:.4f}")
         print(f"  平衡评估 F1: {balanced_metrics['f1']:.4f}")
         print(f"  平衡评估 Recall: {balanced_metrics['recall']:.4f}")
         print(f"  最优阈值: {optimal_threshold:.2f}")
@@ -356,6 +370,10 @@ def cross_validation(data_list, n_folds=N_FOLDS, model_type='gat'):
             'fold': fold + 1,
             'best_epoch': best_epoch,
             **final_metrics,
+            'balanced_precision': balanced_metrics['precision'],
+            'balanced_f1': balanced_metrics['f1'],
+            'balanced_recall': balanced_metrics['recall'],
+            'balanced_roc_auc': balanced_metrics['roc_auc'],
             'optimal_threshold': optimal_threshold,
             'optimal_f1': optimal_metrics['f1']
         })
@@ -370,6 +388,11 @@ def cross_validation(data_list, n_folds=N_FOLDS, model_type='gat'):
     print(f"平均 F1: {results_df['f1'].mean():.4f} (+/- {results_df['f1'].std():.4f})")
     print(f"平均 Precision: {results_df['precision'].mean():.4f}")
     print(f"平均 Recall: {results_df['recall'].mean():.4f}")
+    print("\n--- 平衡评估指标 (类似DeepHotResi) ---")
+    print(f"平均平衡 Precision: {results_df['balanced_precision'].mean():.4f}")
+    print(f"平均平衡 F1: {results_df['balanced_f1'].mean():.4f}")
+    print(f"平均平衡 Recall: {results_df['balanced_recall'].mean():.4f}")
+    print(f"平均平衡 ROC-AUC: {results_df['balanced_roc_auc'].mean():.4f}")
     
     results_df.to_csv(os.path.join(RESULTS_DIR, 'cross_validation_results.csv'), index=False)
     
