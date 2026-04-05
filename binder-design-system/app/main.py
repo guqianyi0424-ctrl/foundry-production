@@ -136,7 +136,7 @@ if uploaded_file is not None:
             
             chain_info = {}
             for res in residues:
-                chain_id = res.get("chain", "A")
+                chain_id = res.get("chain_id", "A")
                 if chain_id not in chain_info:
                     chain_info[chain_id] = []
                 chain_info[chain_id].append(res)
@@ -160,13 +160,13 @@ if uploaded_file is not None:
                         idx = start_idx + i
                         if idx < len(chain_residues):
                             res = chain_residues[idx]
-                            res_label = f"{res['residue_name']}{res['residue_id']}"
-                            is_selected = res_label in st.session_state.selected_residues or idx in [r.get('index', -1) for r in (st.session_state.hotspot_results or {}).get('hotspots_detail', []) if r.get('residue_name') == res['residue_name'] and r.get('residue_id') == res['residue_id']]
+                            res_label = f"{res['res_name']}{res['res_id']}"
+                            is_selected = res_label in st.session_state.selected_residues or idx in [r.get('index', -1) for r in (st.session_state.hotspot_results or {}).get('hotspots_detail', []) if r.get('residue_name') == res['res_name'] and r.get('residue_id') == res['res_id']]
                             
                             button_type = "primary" if is_selected else "secondary"
                             
                             if col.button(
-                                res["residue_name"],
+                                res["res_name"],
                                 key=f"seq_{chain_id}_{idx}",
                                 use_container_width=True,
                                 type=button_type
@@ -212,14 +212,14 @@ if uploaded_file is not None:
                 for sel in selected_list[:10]:
                     match = None
                     for res in residues:
-                        label = f"{res['residue_name']}{res['residue_id']}"
+                        label = f"{res['res_name']}{res['res_id']}"
                         if label == sel:
                             match = res
                             break
                     
                     if match:
-                        chain = match.get("chain", "A")
-                        res_id = match.get("residue_id", "")
+                        chain = match.get("chain_id", "A")
+                        res_id = match.get("res_id", "")
                         selection_parts.append((chain, res_id))
                 
                 if selection_parts:
