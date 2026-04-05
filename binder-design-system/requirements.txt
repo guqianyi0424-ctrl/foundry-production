@@ -11,10 +11,15 @@ seaborn>=0.12.0
 torch>=2.0.0
 rc-foundry[all]
 
-# 机器学习（热点残基预测）
+# 机器学习（热点残基预测 - ML方法）
 autogluon-tabular[all]>=0.8.0
 scipy>=1.10.0
 xgboost>=1.7.0
+
+# 深度学习（热点残基预测 - DL方法）
+dgl>=1.1.0
+transformers>=4.30.0
+sentencepiece>=0.1.99
 
 # 云存储
 cos-python-sdk-v5>=1.9.0
