@@ -111,6 +111,52 @@ def calculate_metrics(labels, probs, threshold=0.5):
     return metrics
 
 
+def calculate_balanced_metrics(labels, probs, threshold=0.5):
+    """计算平衡评估指标（类似DeepHotResi）"""
+    preds = (probs >= threshold).astype(int)
+    
+    pos_indices = np.where(labels == 1)[0]
+    neg_indices = np.where(labels == 0)[0]
+    
+    if len(pos_indices) == 0 or len(neg_indices) == 0:
+        return None
+    
+    n_pos = len(pos_indices)
+    n_neg = len(neg_indices)
+    
+    if n_neg >= n_pos:
+        sampled_neg = np.random.choice(neg_indices, size=n_pos, replace=False)
+    else:
+        sampled_neg = neg_indices
+        pos_indices = np.random.choice(pos_indices, size=n_neg, replace=False)
+    
+    balanced_indices = np.concatenate([pos_indices, sampled_neg])
+    balanced_labels = labels[balanced_indices]
+    balanced_probs = probs[balanced_indices]
+    balanced_preds = (balanced_probs >= threshold).astype(int)
+    
+    cm = confusion_matrix(balanced_labels, balanced_preds)
+    tn = cm[0, 0] if cm.shape == (2, 2) else 0
+    fp = cm[0, 1] if cm.shape == (2, 2) else 0
+    fn = cm[1, 0] if cm.shape == (2, 2) else 0
+    tp = cm[1, 1] if cm.shape == (2, 2) else 0
+    
+    specificity = tn / (tn + fp) if (tn + fp) > 0 else 0
+    
+    metrics = {
+        'roc_auc': roc_auc_score(balanced_labels, balanced_probs),
+        'pr_auc': average_precision_score(balanced_labels, balanced_probs),
+        'accuracy': accuracy_score(balanced_labels, balanced_preds),
+        'precision': precision_score(balanced_labels, balanced_preds, zero_division=0),
+        'recall': recall_score(balanced_labels, balanced_preds, zero_division=0),
+        'specificity': specificity,
+        'f1': f1_score(balanced_labels, balanced_preds, zero_division=0),
+        'mcc': matthews_corrcoef(balanced_labels, balanced_preds),
+    }
+    
+    return metrics
+
+
 def find_optimal_threshold(labels, probs):
     """找到最优阈值"""
     fpr, tpr, thresholds = roc_curve(labels, probs)
@@ -161,7 +207,7 @@ def plot_pr_curve(labels, probs, save_path):
     print(f"PR曲线已保存: {save_path}")
 
 
-def generate_report(metrics, save_path, model_path, threshold):
+def generate_report(metrics, balanced_metrics, save_path, model_path, threshold):
     """生成评估报告"""
     report = []
     report.append("=" * 60)
@@ -170,16 +216,29 @@ def generate_report(metrics, save_path, model_path, threshold):
     report.append(f"\n模型路径: {model_path}")
     report.append(f"使用阈值: {threshold:.4f}")
     report.append("\n" + "-" * 40)
-    report.append("评估指标:")
+    report.append("标准评估指标:")
     report.append("-" * 40)
     report.append(f"ROC-AUC:     {metrics['roc_auc']:.4f}")
     report.append(f"PR-AUC:      {metrics['pr_auc']:.4f}")
     report.append(f"Accuracy:    {metrics['accuracy']:.4f}")
     report.append(f"Precision:   {metrics['precision']:.4f}")
-    report.append(f"Recall:      {metrics['recall']:.4f}")
+    report.append(f"Recall (SEN): {metrics['recall']:.4f}")
     report.append(f"F1 Score:    {metrics['f1']:.4f}")
-    report.append(f"Specificity: {metrics['specificity']:.4f}")
+    report.append(f"Specificity (SPE): {metrics['specificity']:.4f}")
     report.append(f"MCC:         {metrics['mcc']:.4f}")
+    
+    if balanced_metrics:
+        report.append("\n" + "-" * 40)
+        report.append("平衡评估指标 (类似DeepHotResi):")
+        report.append("-" * 40)
+        report.append(f"ROC-AUC:     {balanced_metrics['roc_auc']:.4f}")
+        report.append(f"PR-AUC:      {balanced_metrics['pr_auc']:.4f}")
+        report.append(f"Precision:   {balanced_metrics['precision']:.4f}")
+        report.append(f"Recall (SEN): {balanced_metrics['recall']:.4f}")
+        report.append(f"Specificity (SPE): {balanced_metrics['specificity']:.4f}")
+        report.append(f"F1 Score:    {balanced_metrics['f1']:.4f}")
+        report.append(f"MCC:         {balanced_metrics['mcc']:.4f}")
+    
     report.append("\n" + "-" * 40)
     report.append("混淆矩阵:")
     report.append("-" * 40)
@@ -267,13 +326,15 @@ def main(args=None):
     
     metrics = calculate_metrics(labels, probs, threshold)
     
+    balanced_metrics = calculate_balanced_metrics(labels, probs, threshold)
+    
     os.makedirs(RESULTS_DIR, exist_ok=True)
     
     report_path = os.path.join(RESULTS_DIR, 'test_evaluation_report.txt')
     roc_path = os.path.join(RESULTS_DIR, 'test_roc_curve.png')
     pr_path = os.path.join(RESULTS_DIR, 'test_pr_curve.png')
     
-    generate_report(metrics, report_path, model_paths[0], threshold)
+    generate_report(metrics, balanced_metrics, report_path, model_paths[0], threshold)
     plot_roc_curve(labels, probs, roc_path)
     plot_pr_curve(labels, probs, pr_path)
     
