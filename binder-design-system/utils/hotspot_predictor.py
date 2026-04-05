@@ -392,39 +392,48 @@ class HotspotPredictor:
         return min(conservation, 1.0)
     
     def _compute_rule_based_scores(self, residues_df: 'pd.DataFrame', method: str = "ml") -> np.ndarray:
-        """基于规则计算热点得分"""
+        """基于规则计算热点得分 - ML方法专用"""
         n_residues = len(residues_df)
         scores = np.zeros(n_residues)
         
-        hotspot_residues = {'TRP', 'TYR', 'PHE', 'ARG', 'HIS', 'LEU', 'ILE', 'VAL'}
+        ml_hotspot_weights = {
+            'TRP': 0.40, 'TYR': 0.35, 'PHE': 0.35, 'ARG': 0.30,
+            'HIS': 0.28, 'LEU': 0.25, 'ILE': 0.25, 'VAL': 0.20,
+            'MET': 0.22, 'LYS': 0.15, 'ASP': 0.12, 'GLU': 0.12,
+            'ASN': 0.10, 'GLN': 0.10, 'CYS': 0.18, 'SER': 0.08,
+            'THR': 0.08, 'ALA': 0.05, 'GLY': 0.03, 'PRO': 0.10
+        }
         
         for idx, row in residues_df.iterrows():
             score = 0.0
             
             res_name = row.get('res_name', '')
-            if res_name in hotspot_residues:
-                score += 0.3
+            score += ml_hotspot_weights.get(res_name, 0.05)
             
             sasa = row.get('sasa', 50)
-            if sasa > 80:
-                score += 0.25
-            elif sasa > 50:
-                score += 0.15
+            if sasa > 90:
+                score += 0.30
+            elif sasa > 60:
+                score += 0.20
+            elif sasa > 30:
+                score += 0.10
             
             conservation = row.get('conservation', 0.5)
-            score += conservation * 0.25
+            score += conservation * 0.20
             
             energy = row.get('energy', 0)
-            if energy < -1:
-                score += 0.2
+            if energy < -2:
+                score += 0.25
+            elif energy < -1:
+                score += 0.15
             elif energy < 0:
-                score += 0.1
+                score += 0.08
             
             dist = row.get('dist_to_center', 15)
-            if dist > 15:
+            if dist > 18:
                 score += 0.15
-            elif dist > 10:
-                score += 0.1
+            elif dist > 12:
+                score += 0.08
             
             scores[idx] = min(score, 1.0)
         
