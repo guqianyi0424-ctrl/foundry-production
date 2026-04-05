@@ -208,10 +208,15 @@ def evaluate_balanced(model, data_loader, device):
 
 def calculate_metrics(y_true, y_pred, y_prob):
     """计算评估指标"""
+    tn, fp, fn, tp = metrics.confusion_matrix(y_true, y_pred).ravel()
+    
+    specificity = tn / (tn + fp) if (tn + fp) > 0 else 0
+    
     metrics_dict = {
         'accuracy': metrics.accuracy_score(y_true, y_pred),
         'precision': metrics.precision_score(y_true, y_pred, zero_division=0),
         'recall': metrics.recall_score(y_true, y_pred, zero_division=0),
+        'specificity': specificity,
         'f1': metrics.f1_score(y_true, y_pred, zero_division=0),
         'roc_auc': metrics.roc_auc_score(y_true, y_prob) if len(np.unique(y_true)) > 1 else 0.5,
         'mcc': metrics.matthews_corrcoef(y_true, y_pred)
@@ -362,11 +367,14 @@ def cross_validation(data_list, n_folds=N_FOLDS, model_type='gat'):
         print(f"  ROC-AUC: {final_metrics['roc_auc']:.4f}")
         print(f"  PR-AUC: {final_metrics['pr_auc']:.4f}")
         print(f"  F1: {final_metrics['f1']:.4f}")
-        print(f"  Precision: {final_metrics['precision']:.4f}")
-        print(f"  Recall: {final_metrics['recall']:.4f}")
+        print(f"  Precision (PRE): {final_metrics['precision']:.4f}")
+        print(f"  Recall (SEN): {final_metrics['recall']:.4f}")
+        print(f"  Specificity (SPE): {final_metrics['specificity']:.4f}")
+        print(f"  MCC: {final_metrics['mcc']:.4f}")
         print(f"  平衡评估 Precision: {balanced_metrics['precision']:.4f}")
         print(f"  平衡评估 F1: {balanced_metrics['f1']:.4f}")
         print(f"  平衡评估 Recall: {balanced_metrics['recall']:.4f}")
+        print(f"  平衡评估 Specificity: {balanced_metrics['specificity']:.4f}")
         print(f"  最优阈值: {optimal_threshold:.2f}")
         
         all_results.append({
@@ -376,7 +384,9 @@ def cross_validation(data_list, n_folds=N_FOLDS, model_type='gat'):
             'balanced_precision': balanced_metrics['precision'],
             'balanced_f1': balanced_metrics['f1'],
             'balanced_recall': balanced_metrics['recall'],
+            'balanced_specificity': balanced_metrics['specificity'],
             'balanced_roc_auc': balanced_metrics['roc_auc'],
+            'balanced_mcc': balanced_metrics['mcc'],
             'optimal_threshold': optimal_threshold,
             'optimal_f1': optimal_metrics['f1']
         })
@@ -389,13 +399,17 @@ def cross_validation(data_list, n_folds=N_FOLDS, model_type='gat'):
     print(f"平均 ROC-AUC: {results_df['roc_auc'].mean():.4f} (+/- {results_df['roc_auc'].std():.4f})")
     print(f"平均 PR-AUC: {results_df['pr_auc'].mean():.4f} (+/- {results_df['pr_auc'].std():.4f})")
     print(f"平均 F1: {results_df['f1'].mean():.4f} (+/- {results_df['f1'].std():.4f})")
-    print(f"平均 Precision: {results_df['precision'].mean():.4f}")
-    print(f"平均 Recall: {results_df['recall'].mean():.4f}")
+    print(f"平均 Precision (PRE): {results_df['precision'].mean():.4f}")
+    print(f"平均 Recall (SEN): {results_df['recall'].mean():.4f}")
+    print(f"平均 Specificity (SPE): {results_df['specificity'].mean():.4f}")
+    print(f"平均 MCC: {results_df['mcc'].mean():.4f}")
     print("\n--- 平衡评估指标 (类似DeepHotResi) ---")
     print(f"平均平衡 Precision: {results_df['balanced_precision'].mean():.4f}")
     print(f"平均平衡 F1: {results_df['balanced_f1'].mean():.4f}")
-    print(f"平均平衡 Recall: {results_df['balanced_recall'].mean():.4f}")
+    print(f"平均平衡 Recall (SEN): {results_df['balanced_recall'].mean():.4f}")
+    print(f"平均平衡 Specificity (SPE): {results_df['balanced_specificity'].mean():.4f}")
     print(f"平均平衡 ROC-AUC: {results_df['balanced_roc_auc'].mean():.4f}")
+    print(f"平均平衡 MCC: {results_df['balanced_mcc'].mean():.4f}")
     
     results_df.to_csv(os.path.join(RESULTS_DIR, 'cross_validation_results.csv'), index=False)
     
