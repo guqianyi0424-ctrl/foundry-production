@@ -53,7 +53,10 @@ class HotspotPredictor:
             from autogluon.tabular import TabularPredictor
             
             if self.ml_model_path.exists():
-                self._ml_predictor = TabularPredictor.load(str(self.ml_model_path))
+                self._ml_predictor = TabularPredictor.load(
+                    str(self.ml_model_path),
+                    require_version_match=False
+                )
                 print(f"✅ ML模型加载成功: {self.ml_model_path}")
             else:
                 print(f"❌ ML模型路径不存在: {self.ml_model_path}")
