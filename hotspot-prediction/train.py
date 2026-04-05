@@ -55,6 +55,9 @@ class Logger:
     def flush(self):
         self.terminal.flush()
         self.log.flush()
+    
+    def isatty(self):
+        return False
         
     def close(self):
         self.log.write(f"\n{'='*60}\n")
@@ -484,6 +487,9 @@ class Logger:
     
     def flush(self):
         pass
+    
+    def isatty(self):
+        return False
     
     def close(self):
         self.log.close()
