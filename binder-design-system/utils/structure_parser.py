@@ -244,8 +244,12 @@ class StructureParser:
         import io as io_module
         string_io = io_module.StringIO()
         
+        # 直接使用PDBFile类，它可以写入StringIO
         if HAS_GENERIC_IO:
-            save_structure(string_io, atom_array)
+            from biotite.structure.io.pdb import PDBFile
+            pdb_file = PDBFile()
+            pdb_file.set_structure(atom_array)
+            pdb_file.write(string_io)
         else:
             pdb_file = pdb_io.PDBFile()
             pdb_file.set_structure(atom_array)
