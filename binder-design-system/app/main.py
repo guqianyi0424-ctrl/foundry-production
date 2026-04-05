@@ -8,6 +8,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import streamlit as st
+import streamlit.components.v1 as components
 import py3Dmol
 from utils.structure_parser import StructureParser
 
@@ -94,8 +95,8 @@ if uploaded_file is not None:
             view.setStyle({"cartoon": {"color": "spectrum"}})
             view.zoomTo()
             
-            # 显示
-            stmol.show_mol_viewer(view)
+            # 显示3D结构
+            components.html(view._make_html(), width=650, height=550)
         
         with col_seq:
             st.subheader("🧪 氨基酸序列")
