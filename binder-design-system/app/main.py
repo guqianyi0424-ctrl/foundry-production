@@ -7,10 +7,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import streamlit as st
-import streamlit.components.v1 as components
 import py3Dmol
 import numpy as np
 from utils.structure_parser import StructureParser
+
+import streamlit.components.v1 as components
 
 st.set_page_config(
     page_title="蛋白质Binder设计系统",

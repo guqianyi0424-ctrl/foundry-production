@@ -223,18 +223,19 @@ class HotspotPredictor:
                 if len(res_atoms) == 0:
                     continue
                 
-                res_name = res_atoms.res_name[0]
-                res_id = res_atoms.res_id[0]
-                chain_id = res_atoms.chain_id[0]
+                res_name = str(res_atoms.res_name[0])
+                res_id = int(res_atoms.res_id[0])
+                chain_id = str(res_atoms.chain_id[0])
                 
-                ca_atoms = res_atoms[res_atoms.atom_name == "CA"]
+                ca_mask = res_atoms.atom_name == "CA"
+                ca_atoms = res_atoms[ca_mask]
                 if len(ca_atoms) > 0:
                     ca_coord = ca_atoms.coord[0]
                 else:
                     ca_coord = res_atoms.coord[0]
                 
                 center = atom_array.coord.mean(axis=0)
-                dist_to_center = np.linalg.norm(ca_coord - center)
+                dist_to_center = float(np.linalg.norm(ca_coord - center))
                 
                 sasa = self._estimate_sasa(res_atoms, dist_to_center)
                 
@@ -247,17 +248,19 @@ class HotspotPredictor:
                     "chain_id": chain_id,
                     "res_id": res_id,
                     "res_name": res_name,
-                    "sasa": round(sasa, 2),
-                    "energy": round(energy, 3),
-                    "conservation": round(conservation, 3),
+                    "sasa": round(float(sasa), 2),
+                    "energy": round(float(energy), 3),
+                    "conservation": round(float(conservation), 3),
                     "dist_to_center": round(dist_to_center, 2),
-                    "num_atoms": len(res_atoms)
+                    "num_atoms": int(len(res_atoms))
                 })
             
             df = pd.DataFrame(residue_info)
             return df
             
         except Exception as e:
+            import traceback
+            traceback.print_exc()
             print(f"提取残基特征时出错: {e}")
             import pandas as pd
             return pd.DataFrame()
