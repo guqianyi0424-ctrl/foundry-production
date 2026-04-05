@@ -62,6 +62,9 @@ env/
 *.onnx
 *.bin
 
+# Exception: allow ppihotspotid model weights
+!ppihotspotid-main/**/*.pkl
+
 # Logs
 *.log
 logs/
