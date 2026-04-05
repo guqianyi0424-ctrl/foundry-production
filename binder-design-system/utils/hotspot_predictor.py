@@ -55,7 +55,8 @@ class HotspotPredictor:
             if self.ml_model_path.exists():
                 self._ml_predictor = TabularPredictor.load(
                     str(self.ml_model_path),
-                    require_version_match=False
+                    require_version_match=False,
+                    require_py_version_match=False
                 )
                 print(f"✅ ML模型加载成功: {self.ml_model_path}")
             else:
