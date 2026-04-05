@@ -48,14 +48,14 @@ class StructureParser:
         suffix = self.file_path.suffix.lower()
         
         if HAS_GENERIC_IO:
-            self.atom_array = load_structure(str(self.file_path))
+            atom_array = load_structure(str(self.file_path))
         elif suffix == ".pdb":
             pdb_file = pdb_io.PDBFile.read(str(self.file_path))
-            self.atom_array = pdb_file.get_structure(model=1)
+            atom_array = pdb_file.get_structure(model=1)
         elif suffix == ".cif":
             if HAS_CIF:
                 cif_file = cif_io.CIFFile.read(str(self.file_path))
-                self.atom_array = cif_file.get_structure(model=1)
+                atom_array = cif_file.get_structure(model=1)
             else:
                 raise ValueError(
                     f"CIF格式不支持。请升级biotite库: pip install --upgrade biotite\n"
@@ -63,6 +63,14 @@ class StructureParser:
                 )
         else:
             raise ValueError(f"不支持的文件格式: {suffix}，仅支持 .pdb 和 .cif")
+        
+        # 过滤掉非氨基酸残基（如水分子、配体等）
+        try:
+            atom_array = atom_array[struc.filter_amino_acids(atom_array)]
+        except Exception:
+            pass
+        
+        self.atom_array = atom_array
         
         return self.atom_array
     
@@ -107,10 +115,18 @@ class StructureParser:
         if atom_array is None:
             raise ValueError("未加载结构数据")
         
-        # 获取氨基酸序列
-        sequence = struc.to_sequence(atom_array)[0]
+        # 确保只包含氨基酸
+        try:
+            atom_array = atom_array[struc.filter_amino_acids(atom_array)]
+        except Exception:
+            pass
         
-        return str(sequence)
+        # 获取氨基酸序列
+        try:
+            sequence = struc.to_sequence(atom_array)[0]
+            return str(sequence)
+        except Exception as e:
+            raise ValueError(f"无法提取氨基酸序列: {str(e)}")
     
     def get_chain_ids(self, atom_array: Optional[struc.AtomArray] = None) -> List[str]:
         """
