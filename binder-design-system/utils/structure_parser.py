@@ -6,13 +6,20 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 import biotite.structure as struc
-import biotite.structure.io.pdb as pdb_io
 import numpy as np
 
 try:
-    import biotite.structure.io.cif as cif_io
+    from biotite.structure.io import load_structure, save_structure
+    HAS_GENERIC_IO = True
 except ImportError:
-    cif_io = None
+    HAS_GENERIC_IO = False
+    import biotite.structure.io.pdb as pdb_io
+
+try:
+    import biotite.structure.io.cif as cif_io
+    HAS_CIF = True
+except ImportError:
+    HAS_CIF = False
 
 
 class StructureParser:
@@ -38,21 +45,24 @@ class StructureParser:
         if not self.file_path.exists():
             raise FileNotFoundError(f"文件不存在: {file_path}")
         
-        # 根据文件扩展名选择解析器
         suffix = self.file_path.suffix.lower()
         
-        if suffix == ".pdb":
+        if HAS_GENERIC_IO:
+            self.atom_array = load_structure(str(self.file_path))
+        elif suffix == ".pdb":
             pdb_file = pdb_io.PDBFile.read(str(self.file_path))
             self.atom_array = pdb_file.get_structure(model=1)
         elif suffix == ".cif":
-            if cif_io is not None:
+            if HAS_CIF:
                 cif_file = cif_io.CIFFile.read(str(self.file_path))
                 self.atom_array = cif_file.get_structure(model=1)
             else:
-                cif_file = pdb_io.CIFFile.read(str(self.file_path))
-                self.atom_array = cif_file.get_structure(model=1)
+                raise ValueError(
+                    f"CIF格式不支持。请升级biotite库: pip install --upgrade biotite\n"
+                    f"或使用PDB格式的文件。"
+                )
         else:
-            raise ValueError(f"不支持的文件格式: {suffix}")
+            raise ValueError(f"不支持的文件格式: {suffix}，仅支持 .pdb 和 .cif")
         
         return self.atom_array
     
@@ -215,13 +225,14 @@ class StructureParser:
         if atom_array is None:
             raise ValueError("未加载结构数据")
         
-        # 转换为PDB格式
-        pdb_file = pdb_io.PDBFile()
-        pdb_file.set_structure(atom_array)
-        
-        # 获取字符串
         import io as io_module
         string_io = io_module.StringIO()
-        pdb_file.write(string_io)
+        
+        if HAS_GENERIC_IO:
+            save_structure(string_io, atom_array)
+        else:
+            pdb_file = pdb_io.PDBFile()
+            pdb_file.set_structure(atom_array)
+            pdb_file.write(string_io)
         
         return string_io.getvalue()
