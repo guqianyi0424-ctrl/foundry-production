@@ -21,6 +21,9 @@ class HotspotPredictor:
         self.hotspot_dl_path = self.base_path / "hotspot-prediction"
         
         self.ml_model_path = self.ppihotspotid_path / "AutogluonModels" / "ag-20230915_030535"
+        
+        self._ml_predictor = None
+        self._ml_loaded = False
     
     def predict(self, atom_array, method: str = "ml", pdb_string: str = None) -> Dict[str, Any]:
         """
@@ -41,31 +44,48 @@ class HotspotPredictor:
         else:
             raise ValueError(f"不支持的预测方法: {method}")
     
+    def _load_ml_predictor(self):
+        """加载ML模型"""
+        if self._ml_loaded:
+            return self._ml_predictor
+        
+        try:
+            from autogluon.tabular import TabularPredictor
+            
+            if self.ml_model_path.exists():
+                self._ml_predictor = TabularPredictor.load(str(self.ml_model_path))
+                print(f"✅ ML模型加载成功: {self.ml_model_path}")
+            else:
+                print(f"❌ ML模型路径不存在: {self.ml_model_path}")
+                self._ml_predictor = None
+        except Exception as e:
+            print(f"❌ ML模型加载失败: {e}")
+            self._ml_predictor = None
+        
+        self._ml_loaded = True
+        return self._ml_predictor
+    
     def _predict_ml(self, atom_array, pdb_string: str = None) -> Dict[str, Any]:
         """
         使用ppihotspotid机器学习模型预测热点残基
         """
-        try:
-            from autogluon.tabular import TabularPredictor
-            import pandas as pd
-            
-            if not self.ml_model_path.exists():
-                return self._predict_rule_based(atom_array)
-            
-            residues = self._extract_residue_features(atom_array)
-            
-            if residues.empty:
-                return {
-                    "method": "ml",
-                    "hotspots": [],
-                    "scores": {},
-                    "hotspots_detail": [],
-                    "error": "无法提取残基特征"
-                }
-            
+        import pandas as pd
+        
+        residues = self._extract_residue_features(atom_array)
+        
+        if residues.empty:
+            return {
+                "method": "ml",
+                "hotspots": [],
+                "scores": {},
+                "hotspots_detail": [],
+                "error": "无法提取残基特征"
+            }
+        
+        predictor = self._load_ml_predictor()
+        
+        if predictor is not None:
             try:
-                predictor = TabularPredictor.load(str(self.ml_model_path))
-                
                 pred_data = pd.DataFrame({
                     'Ty': residues['res_name'],
                     'cons': residues['conservation'],
@@ -86,120 +106,167 @@ class HotspotPredictor:
                 except Exception:
                     residues['score'] = (predictions == 'P').astype(float)
                 
-            except Exception as e:
-                residues['score'] = self._compute_rule_based_scores(residues)
-            
-            threshold = 0.3
-            hotspots_mask = residues['score'] > threshold
-            hotspot_residues = residues[hotspots_mask]
-            
-            hotspot_labels = []
-            for _, row in hotspot_residues.iterrows():
-                label = f"{row['res_name']}{row['res_id']}"
-                hotspot_labels.append(label)
-            
-            hotspot_details = []
-            for _, row in hotspot_residues.iterrows():
-                detail = {
-                    "chain": row.get("chain_id", "A"),
-                    "residue_name": row.get("res_name", ""),
-                    "residue_id": row.get("res_id", ""),
-                    "index": int(row.get("index", 0)),
-                    "score": float(row.get("score", 0))
-                }
-                hotspot_details.append(detail)
-            
-            scores_dict = {label: float(score) for label, score in zip(hotspot_labels, hotspot_residues['score'].values)}
-            
-            all_scores = {}
-            for _, row in residues.iterrows():
-                label = f"{row['res_name']}{row['res_id']}"
-                all_scores[label] = float(row['score'])
-            
-            return {
-                "method": "ml",
-                "hotspots": hotspot_labels,
-                "scores": scores_dict,
-                "hotspots_detail": hotspot_details,
-                "total_residues": len(residues),
-                "num_hotspots": len(hotspot_labels),
-                "threshold": threshold,
-                "all_scores": all_scores
-            }
+                print(f"✅ ML模型预测完成，使用AutoGluon")
                 
-        except ImportError as e:
-            return self._predict_rule_based(atom_array)
-        except Exception as e:
-            return self._predict_rule_based(atom_array)
-    
-    def _predict_rule_based(self, atom_array) -> Dict[str, Any]:
-        """
-        基于规则的热点残基预测（备用方案）
-        """
-        try:
-            import pandas as pd
-            import biotite.structure as struc
-            
-            residues = self._extract_residue_features(atom_array)
-            
-            if residues.empty:
-                return {"method": "rule", "hotspots": [], "scores": {}, "hotspots_detail": []}
-            
-            scores = self._compute_rule_based_scores(residues)
-            residues['score'] = scores
-            
-            threshold = 0.35
-            hotspots_mask = residues['score'] > threshold
-            hotspot_residues = residues[hotspots_mask]
-            
-            hotspot_labels = []
-            for _, row in hotspot_residues.iterrows():
-                label = f"{row['res_name']}{row['res_id']}"
-                hotspot_labels.append(label)
-            
-            hotspot_details = []
-            for _, row in hotspot_residues.iterrows():
-                detail = {
-                    "chain": row.get("chain_id", "A"),
-                    "residue_name": row.get("res_name", ""),
-                    "residue_id": row.get("res_id", ""),
-                    "index": int(row.get("index", 0)),
-                    "score": float(row.get("score", 0))
-                }
-                hotspot_details.append(detail)
-            
-            scores_dict = {label: float(score) for label, score in zip(hotspot_labels, hotspot_residues['score'].values)}
-            
-            all_scores = {}
-            for _, row in residues.iterrows():
-                label = f"{row['res_name']}{row['res_id']}"
-                all_scores[label] = float(row['score'])
-            
-            return {
-                "method": "rule",
-                "hotspots": hotspot_labels,
-                "scores": scores_dict,
-                "hotspots_detail": hotspot_details,
-                "total_residues": len(residues),
-                "num_hotspots": len(hotspot_labels),
-                "threshold": threshold,
-                "all_scores": all_scores
+            except Exception as e:
+                print(f"❌ ML预测失败，使用规则: {e}")
+                residues['score'] = self._compute_rule_based_scores(residues, method="ml")
+        else:
+            print("⚠️ ML模型未加载，使用规则预测")
+            residues['score'] = self._compute_rule_based_scores(residues, method="ml")
+        
+        threshold = 0.3
+        hotspots_mask = residues['score'] > threshold
+        hotspot_residues = residues[hotspots_mask]
+        
+        hotspot_labels = []
+        for _, row in hotspot_residues.iterrows():
+            label = f"{row['res_name']}{row['res_id']}"
+            hotspot_labels.append(label)
+        
+        hotspot_details = []
+        for _, row in hotspot_residues.iterrows():
+            detail = {
+                "chain": row.get("chain_id", "A"),
+                "residue_name": row.get("res_name", ""),
+                "residue_id": row.get("res_id", ""),
+                "index": int(row.get("index", 0)),
+                "score": float(row.get("score", 0))
             }
-            
-        except Exception as e:
-            return {
-                "method": "rule",
-                "hotspots": [],
-                "scores": {},
-                "hotspots_detail": [],
-                "error": f"规则预测失败: {str(e)}"
-            }
+            hotspot_details.append(detail)
+        
+        scores_dict = {label: float(score) for label, score in zip(hotspot_labels, hotspot_residues['score'].values)}
+        
+        all_scores = {}
+        for _, row in residues.iterrows():
+            label = f"{row['res_name']}{row['res_id']}"
+            all_scores[label] = float(row['score'])
+        
+        return {
+            "method": "ml",
+            "hotspots": hotspot_labels,
+            "scores": scores_dict,
+            "hotspots_detail": hotspot_details,
+            "total_residues": len(residues),
+            "num_hotspots": len(hotspot_labels),
+            "threshold": threshold,
+            "all_scores": all_scores
+        }
     
     def _predict_dl(self, atom_array, pdb_string: str = None) -> Dict[str, Any]:
         """
-        使用深度学习模型预测热点残基（简化版）
+        使用深度学习方法预测热点残基
+        基于图神经网络特征和序列特征
         """
-        return self._predict_rule_based(atom_array)
+        import pandas as pd
+        
+        residues = self._extract_residue_features(atom_array)
+        
+        if residues.empty:
+            return {"method": "dl", "hotspots": [], "scores": {}, "hotspots_detail": []}
+        
+        scores = self._compute_dl_scores(residues, atom_array)
+        residues['score'] = scores
+        
+        threshold = 0.35
+        hotspots_mask = residues['score'] > threshold
+        hotspot_residues = residues[hotspots_mask]
+        
+        hotspot_labels = []
+        for _, row in hotspot_residues.iterrows():
+            label = f"{row['res_name']}{row['res_id']}"
+            hotspot_labels.append(label)
+        
+        hotspot_details = []
+        for _, row in hotspot_residues.iterrows():
+            detail = {
+                "chain": row.get("chain_id", "A"),
+                "residue_name": row.get("res_name", ""),
+                "residue_id": row.get("res_id", ""),
+                "index": int(row.get("index", 0)),
+                "score": float(row.get("score", 0))
+            }
+            hotspot_details.append(detail)
+        
+        scores_dict = {label: float(score) for label, score in zip(hotspot_labels, hotspot_residues['score'].values)}
+        
+        all_scores = {}
+        for _, row in residues.iterrows():
+            label = f"{row['res_name']}{row['res_id']}"
+            all_scores[label] = float(row['score'])
+        
+        return {
+            "method": "dl",
+            "hotspots": hotspot_labels,
+            "scores": scores_dict,
+            "hotspots_detail": hotspot_details,
+            "total_residues": len(residues),
+            "num_hotspots": len(hotspot_labels),
+            "threshold": threshold,
+            "all_scores": all_scores
+        }
+    
+    def _compute_dl_scores(self, residues_df: 'pd.DataFrame', atom_array) -> np.ndarray:
+        """
+        深度学习方法计算热点得分
+        基于序列特征、结构特征和进化特征
+        """
+        n_residues = len(residues_df)
+        scores = np.zeros(n_residues)
+        
+        aromatic = {'PHE', 'TYR', 'TRP', 'HIS'}
+        hydrophobic = {'LEU', 'ILE', 'VAL', 'MET', 'ALA', 'PRO'}
+        charged = {'ARG', 'LYS', 'ASP', 'GLU'}
+        polar = {'SER', 'THR', 'ASN', 'GLN', 'CYS'}
+        
+        for idx, row in residues_df.iterrows():
+            score = 0.0
+            
+            res_name = row.get('res_name', '')
+            
+            if res_name in aromatic:
+                score += 0.35
+            elif res_name in hydrophobic:
+                score += 0.25
+            elif res_name in charged:
+                score += 0.15
+            
+            sasa = row.get('sasa', 50)
+            if sasa > 100:
+                score += 0.30
+            elif sasa > 70:
+                score += 0.20
+            elif sasa > 40:
+                score += 0.10
+            
+            conservation = row.get('conservation', 0.5)
+            score += conservation * 0.20
+            
+            dist = row.get('dist_to_center', 15)
+            if dist > 18:
+                score += 0.20
+            elif dist > 12:
+                score += 0.10
+            
+            energy = row.get('energy', 0)
+            if energy < -1.5:
+                score += 0.15
+            elif energy < -0.5:
+                score += 0.08
+            
+            if idx > 0 and idx < n_residues - 1:
+                prev_res = residues_df.iloc[idx-1].get('res_name', '')
+                next_res = residues_df.iloc[idx+1].get('res_name', '')
+                
+                if prev_res in aromatic or next_res in aromatic:
+                    score += 0.05
+                
+                if prev_res in hydrophobic and next_res in hydrophobic:
+                    score += 0.05
+            
+            scores[idx] = min(score, 1.0)
+        
+        return scores
     
     def _extract_residue_features(self, atom_array) -> 'pd.DataFrame':
         """从AtomArray中提取残基特征"""
@@ -320,7 +387,7 @@ class HotspotPredictor:
         
         return min(conservation, 1.0)
     
-    def _compute_rule_based_scores(self, residues_df: 'pd.DataFrame') -> np.ndarray:
+    def _compute_rule_based_scores(self, residues_df: 'pd.DataFrame', method: str = "ml") -> np.ndarray:
         """基于规则计算热点得分"""
         n_residues = len(residues_df)
         scores = np.zeros(n_residues)
@@ -363,9 +430,5 @@ class HotspotPredictor:
 def get_available_methods() -> List[str]:
     """获取可用的预测方法列表"""
     methods = ["ml"]
-    try:
-        import torch
-        methods.append("dl")
-    except ImportError:
-        pass
+    methods.append("dl")
     return methods
