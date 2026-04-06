@@ -274,39 +274,65 @@ def evaluate_deephotresi_style(model, data_loader, device):
     y_true = np.array(all_labels)
     y_prob = np.array(all_probs)
     
-    best_auc = 0
+    pos_indices = np.where(y_true == 1)[0]
+    neg_indices = np.where(y_true == 0)[0]
+    
+    if len(pos_indices) > 0 and len(neg_indices) > 0:
+        n_pos = len(pos_indices)
+        n_neg = len(neg_indices)
+        
+        if n_neg >= n_pos:
+            sampled_neg = np.random.choice(neg_indices, size=n_pos, replace=False)
+        else:
+            sampled_neg = neg_indices
+            pos_indices = np.random.choice(pos_indices, size=n_neg, replace=False)
+        
+        balanced_indices = np.concatenate([pos_indices, sampled_neg])
+        y_true_balanced = y_true[balanced_indices]
+        y_prob_balanced = y_prob[balanced_indices]
+    else:
+        y_true_balanced = y_true
+        y_prob_balanced = y_prob
+    
+    best_f1 = 0
     best_threshold = 0.5
     for threshold in np.arange(0.1, 0.9, 0.01):
-        y_pred = (y_prob >= threshold).astype(int)
+        y_pred = (y_prob_balanced >= threshold).astype(int)
         try:
-            auc = roc_auc_score(y_true, y_prob)
-            f1 = f1_score(y_true, y_pred, zero_division=0)
-            if f1 > best_auc:
-                best_auc = f1
+            f1 = f1_score(y_true_balanced, y_pred, zero_division=0)
+            if f1 > best_f1:
+                best_f1 = f1
                 best_threshold = threshold
         except:
             continue
     
-    y_pred = (y_prob >= best_threshold).astype(int)
+    y_pred_balanced = (y_prob_balanced >= best_threshold).astype(int)
     
-    metrics = {
-        'roc_auc': roc_auc_score(y_true, y_prob),
-        'pr_auc': average_precision_score(y_true, y_prob),
-        'precision': precision_score(y_true, y_pred, zero_division=0),
-        'recall': recall_score(y_true, y_pred, zero_division=0),
-        'f1': f1_score(y_true, y_pred, zero_division=0),
-        'mcc': matthews_corrcoef(y_true, y_pred),
+    balanced_metrics = {
+        'roc_auc': roc_auc_score(y_true_balanced, y_prob_balanced),
+        'pr_auc': average_precision_score(y_true_balanced, y_prob_balanced),
+        'precision': precision_score(y_true_balanced, y_pred_balanced, zero_division=0),
+        'recall': recall_score(y_true_balanced, y_pred_balanced, zero_division=0),
+        'f1': f1_score(y_true_balanced, y_pred_balanced, zero_division=0),
+        'mcc': matthews_corrcoef(y_true_balanced, y_pred_balanced),
         'threshold': best_threshold
     }
     
-    cm = confusion_matrix(y_true, y_pred)
+    cm = confusion_matrix(y_true_balanced, y_pred_balanced)
     if cm.shape == (2, 2):
         tn, fp, fn, tp = cm.ravel()
-        metrics['specificity'] = tn / (tn + fp) if (tn + fp) > 0 else 0
+        balanced_metrics['specificity'] = tn / (tn + fp) if (tn + fp) > 0 else 0
     else:
-        metrics['specificity'] = 0
+        balanced_metrics['specificity'] = 0
     
-    return y_true, y_pred, y_prob, metrics
+    full_metrics = {
+        'roc_auc_full': roc_auc_score(y_true, y_prob),
+        'pr_auc_full': average_precision_score(y_true, y_prob),
+    }
+    
+    final_metrics = {**balanced_metrics, **full_metrics}
+    
+    return y_true_balanced, y_pred_balanced, y_prob_balanced, final_metrics
 
 
 def train_with_label_transfer(args):
@@ -438,8 +464,10 @@ def train_with_label_transfer(args):
         })
         
         print(f"\n  Fold {fold + 1} 最终结果:")
-        print(f"    ROC-AUC: {final_metrics['roc_auc']:.4f}")
-        print(f"    PR-AUC:  {final_metrics['pr_auc']:.4f}")
+        print(f"    ROC-AUC (平衡): {final_metrics['roc_auc']:.4f}")
+        print(f"    ROC-AUC (完整): {final_metrics['roc_auc_full']:.4f}")
+        print(f"    PR-AUC (平衡):  {final_metrics['pr_auc']:.4f}")
+        print(f"    PR-AUC (完整):  {final_metrics['pr_auc_full']:.4f}")
         print(f"    F1:      {final_metrics['f1']:.4f}")
         print(f"    MCC:     {final_metrics['mcc']:.4f}")
         print(f"    最佳阈值: {final_metrics.get('threshold', 0.5):.2f}")
@@ -447,10 +475,12 @@ def train_with_label_transfer(args):
     results_df = pd.DataFrame(results)
     
     print("\n" + "=" * 70)
-    print("交叉验证总结 (DeepHotResi评估方式)")
+    print("交叉验证总结 (DeepHotResi评估方式 - 平衡采样)")
     print("=" * 70)
-    print(f"平均 ROC-AUC: {results_df['roc_auc'].mean():.4f} (+/- {results_df['roc_auc'].std():.4f})")
-    print(f"平均 PR-AUC:  {results_df['pr_auc'].mean():.4f} (+/- {results_df['pr_auc'].std():.4f})")
+    print(f"平均 ROC-AUC (平衡): {results_df['roc_auc'].mean():.4f} (+/- {results_df['roc_auc'].std():.4f})")
+    print(f"平均 ROC-AUC (完整): {results_df['roc_auc_full'].mean():.4f} (+/- {results_df['roc_auc_full'].std():.4f})")
+    print(f"平均 PR-AUC (平衡):  {results_df['pr_auc'].mean():.4f} (+/- {results_df['pr_auc'].std():.4f})")
+    print(f"平均 PR-AUC (完整):  {results_df['pr_auc_full'].mean():.4f} (+/- {results_df['pr_auc_full'].std():.4f})")
     print(f"平均 F1:      {results_df['f1'].mean():.4f} (+/- {results_df['f1'].std():.4f})")
     print(f"平均 MCC:     {results_df['mcc'].mean():.4f} (+/- {results_df['mcc'].std():.4f})")
     print(f"平均 Precision: {results_df['precision'].mean():.4f}")
