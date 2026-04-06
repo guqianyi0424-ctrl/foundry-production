@@ -226,7 +226,7 @@ def train_with_label_transfer(args):
     print(f"原始数据: {len(df)} 条记录")
     
     print("\n准备数据集...")
-    data_list = prepare_dataset(force_reload=args.force_reload)
+    data_list = prepare_dataset()
     
     if args.use_label_transfer:
         print("\n应用标签转移策略...")
