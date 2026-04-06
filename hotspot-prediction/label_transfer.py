@@ -275,6 +275,10 @@ class LabelTransfer:
         visited = set()
         clusters = []
         
+        max_seq_sim = 0
+        max_struct_sim = 0
+        high_sim_pairs = []
+        
         for chain in chain_ids:
             if chain in visited:
                 continue
@@ -290,12 +294,24 @@ class LabelTransfer:
                 if key in similarity_matrix:
                     seq_sim, struct_sim = similarity_matrix[key]
                     
+                    max_seq_sim = max(max_seq_sim, seq_sim)
+                    max_struct_sim = max(max_struct_sim, struct_sim)
+                    
                     if seq_sim >= self.seq_similarity_threshold and struct_sim >= self.tm_score_threshold:
                         cluster.append(other)
                         visited.add(other)
+                    
+                    if seq_sim >= 0.2 or struct_sim >= 0.2:
+                        high_sim_pairs.append((chain, other, seq_sim, struct_sim))
             
             if len(cluster) > 1:
                 clusters.append(cluster)
+        
+        print(f"相似度统计: 最大序列相似度={max_seq_sim:.4f}, 最大结构相似度={max_struct_sim:.4f}")
+        print(f"高相似度对(>0.2): {len(high_sim_pairs)} 对")
+        if high_sim_pairs and len(high_sim_pairs) <= 10:
+            for pair in high_sim_pairs[:5]:
+                print(f"  {pair[0]} vs {pair[1]}: seq={pair[2]:.4f}, struct={pair[3]:.4f}")
         
         self.clusters = clusters
         print(f"找到 {len(clusters)} 个聚类")
