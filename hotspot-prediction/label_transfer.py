@@ -68,18 +68,25 @@ class LabelTransfer:
             
             if result.returncode != 0 or not result.stdout.strip():
                 return None
-                
-            parts = result.stdout.strip().split('\t')
-            if len(parts) >= 4:
-                pident = float(parts[0])
-                length = float(parts[1])
-                qlen = float(parts[2])
-                slen = float(parts[3])
-                
-                coverage = length / max(qlen, slen)
-                similarity = (pident / 100) * coverage
-                
-                return similarity
+            
+            lines = result.stdout.strip().split('\n')
+            for line in lines:
+                if not line.strip():
+                    continue
+                parts = line.strip().split('\t')
+                if len(parts) >= 4:
+                    try:
+                        pident = float(parts[0])
+                        length = float(parts[1])
+                        qlen = float(parts[2])
+                        slen = float(parts[3])
+                        
+                        coverage = length / max(qlen, slen)
+                        similarity = (pident / 100) * coverage
+                        
+                        return similarity
+                    except ValueError:
+                        continue
                 
         except Exception as e:
             print(f"BLAST运行失败: {e}")
