@@ -10,6 +10,7 @@
 import os
 import sys
 import argparse
+import pickle
 import numpy as np
 import pandas as pd
 import torch
@@ -24,7 +25,7 @@ import warnings
 warnings.filterwarnings('ignore')
 
 from config import (
-    MODELS_DIR, RESULTS_DIR, DEVICE, INPUT_DIM, HIDDEN_DIM, 
+    MODELS_DIR, RESULTS_DIR, FEATURES_DIR, DEVICE, INPUT_DIM, HIDDEN_DIM, 
     NUM_HEADS, NUM_LAYERS, DROPOUT, LEARNING_RATE, WEIGHT_DECAY,
     NUM_EPOCHS, N_FOLDS
 )
@@ -242,13 +243,17 @@ def train_with_label_transfer(args):
     print("整合标签转移策略的训练")
     print("=" * 70)
     
-    print("\n加载数据...")
-    df = load_raw_data()
+    dataset_file = os.path.join(FEATURES_DIR, 'dataset.pkl')
     
-    print(f"原始数据: {len(df)} 条记录")
+    if os.path.exists(dataset_file):
+        print("\n加载已处理的数据集...")
+        with open(dataset_file, 'rb') as f:
+            data_list = pickle.load(f)
+    else:
+        print("\n处理数据集...")
+        data_list = prepare_dataset()
     
-    print("\n准备数据集...")
-    data_list = prepare_dataset()
+    print(f"数据集大小: {len(data_list)} 个蛋白质")
     
     if args.use_label_transfer:
         print("\n应用标签转移策略...")
