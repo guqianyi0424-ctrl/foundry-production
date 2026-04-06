@@ -26,7 +26,7 @@ warnings.filterwarnings('ignore')
 from config import (
     MODELS_DIR, RESULTS_DIR, DEVICE, INPUT_DIM, HIDDEN_DIM, 
     NUM_HEADS, NUM_LAYERS, DROPOUT, LEARNING_RATE, WEIGHT_DECAY,
-    NUM_EPOCHS, NUM_FOLDS
+    NUM_EPOCHS, N_FOLDS
 )
 from dataset import (
     load_raw_data, download_pdb_files, extract_sequence_and_coords,
@@ -245,18 +245,18 @@ def train_with_label_transfer(args):
     print(f"  不平衡比例: {class_weights_info['imbalance_ratio']:.2f}:1")
     
     n_total = len(data_list)
-    fold_size = n_total // NUM_FOLDS
+    fold_size = n_total // N_FOLDS
     indices = np.random.permutation(n_total)
     
     results = []
     
-    for fold in range(NUM_FOLDS):
+    for fold in range(N_FOLDS):
         print(f"\n{'=' * 60}")
-        print(f"Fold {fold + 1}/{NUM_FOLDS}")
+        print(f"Fold {fold + 1}/{N_FOLDS}")
         print(f"{'=' * 60}")
         
         val_start = fold * fold_size
-        val_end = (fold + 1) * fold_size if fold < NUM_FOLDS - 1 else n_total
+        val_end = (fold + 1) * fold_size if fold < N_FOLDS - 1 else n_total
         val_indices = indices[val_start:val_end]
         train_indices = np.concatenate([indices[:val_start], indices[val_end:]])
         
