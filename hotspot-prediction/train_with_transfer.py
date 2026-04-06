@@ -27,7 +27,7 @@ warnings.filterwarnings('ignore')
 from config import (
     MODELS_DIR, RESULTS_DIR, FEATURES_DIR, DEVICE, INPUT_DIM, HIDDEN_DIM, 
     NUM_HEADS, NUM_LAYERS, DROPOUT, LEARNING_RATE, WEIGHT_DECAY,
-    NUM_EPOCHS, N_FOLDS
+    NUM_EPOCHS, N_FOLDS, PATIENCE
 )
 from dataset import (
     load_raw_data, download_pdb_files, extract_sequence_and_coords,
@@ -350,14 +350,16 @@ def train_with_label_transfer(args):
                       f"Val AUC={metrics['roc_auc']:.4f}, "
                       f"Val F1={metrics['f1']:.4f}")
             
-            if patience_counter >= 20:
+            model.scheduler.step(metrics['roc_auc'])
+            
+            if patience_counter >= PATIENCE:
                 print(f"  早停: {patience_counter} epochs 无改善")
                 break
         
         checkpoint = torch.load(os.path.join(MODELS_DIR, f'best_model_fold{fold + 1}_transfer.pth'))
         model.load_state_dict(checkpoint['model_state_dict'])
         
-        y_true, y_pred, y_prob = evaluate_balanced(model, val_loader, DEVICE)
+        y_true, y_pred, y_prob = evaluate_balanced(model, val_loader, use_device)
         final_metrics = calculate_metrics(y_true, y_pred, y_prob)
         
         results.append({
