@@ -8,22 +8,30 @@
 """
 import os
 import sys
+print("导入os, sys完成")
 import time
 import random
 import pickle
+print("导入time, random, pickle完成")
 import numpy as np
 import pandas as pd
+print("导入numpy, pandas完成")
 import torch
+print("导入torch完成")
 import torch.nn.functional as F
+print("导入torch.nn.functional完成")
 import dgl
+print("导入dgl完成")
 from torch.utils.data import DataLoader
 from sklearn.model_selection import KFold, StratifiedKFold
 from sklearn import metrics
+print("导入sklearn完成")
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 import warnings
 from datetime import datetime
 warnings.filterwarnings('ignore')
+print("导入其他模块完成")
 
 from config import (
     MODELS_DIR, RESULTS_DIR, LOGS_DIR, FEATURES_DIR,
