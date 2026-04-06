@@ -213,9 +213,14 @@ def calculate_metrics(y_true, y_pred, y_prob):
     specificity = tn / (tn + fp) if (tn + fp) > 0 else 0
     
     metrics_dict = {
+        'TP': int(tp),
+        'FN': int(fn),
+        'TN': int(tn),
+        'FP': int(fp),
         'accuracy': metrics.accuracy_score(y_true, y_pred),
         'precision': metrics.precision_score(y_true, y_pred, zero_division=0),
         'recall': metrics.recall_score(y_true, y_pred, zero_division=0),
+        'sensitivity': metrics.recall_score(y_true, y_pred, zero_division=0),
         'specificity': specificity,
         'f1': metrics.f1_score(y_true, y_pred, zero_division=0),
         'roc_auc': metrics.roc_auc_score(y_true, y_prob) if len(np.unique(y_true)) > 1 else 0.5,
@@ -403,6 +408,11 @@ def cross_validation(data_list, n_folds=N_FOLDS, model_type='gat'):
     print(f"平均 Recall (SEN): {results_df['recall'].mean():.4f}")
     print(f"平均 Specificity (SPE): {results_df['specificity'].mean():.4f}")
     print(f"平均 MCC: {results_df['mcc'].mean():.4f}")
+    print("\n--- 混淆矩阵统计 ---")
+    print(f"平均 TP: {results_df['TP'].mean():.0f}")
+    print(f"平均 FN: {results_df['FN'].mean():.0f}")
+    print(f"平均 TN: {results_df['TN'].mean():.0f}")
+    print(f"平均 FP: {results_df['FP'].mean():.0f}")
     print("\n--- 平衡评估指标 (类似DeepHotResi) ---")
     print(f"平均平衡 Precision: {results_df['balanced_precision'].mean():.4f}")
     print(f"平均平衡 F1: {results_df['balanced_f1'].mean():.4f}")
