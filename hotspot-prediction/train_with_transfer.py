@@ -69,11 +69,14 @@ def apply_label_transfer(data_list, use_external_tools=False):
         labels = item.get('labels', np.array([]))
         hotspots = list(np.where(np.array(labels) == 1)[0] + 1) if len(labels) > 0 else []
         
+        from config import PDB_DIR
+        pdb_file = os.path.join(PDB_DIR, f'pdb{pdb_id}.ent')
+        
         protein_data[chain_id] = {
             'sequence': item.get('sequence', ''),
             'coords': item.get('coords'),
             'hotspots': hotspots,
-            'pdb_file': item.get('pdb_file')
+            'pdb_file': pdb_file if os.path.exists(pdb_file) else None
         }
     
     transfer = LabelTransfer(
