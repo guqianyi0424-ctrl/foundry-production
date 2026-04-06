@@ -546,4 +546,6 @@ def main():
 
 
 if __name__ == '__main__':
+    print("正在启动训练脚本...")
+    print("正在导入模块...")
     main()

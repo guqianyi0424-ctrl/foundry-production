@@ -510,6 +510,9 @@ def train_with_label_transfer(args):
 
 
 def main():
+    print("正在启动训练脚本...")
+    print("正在导入模块...")
+    
     parser = argparse.ArgumentParser(description='整合标签转移策略的训练')
     parser.add_argument('--use-label-transfer', action='store_true', 
                         help='使用标签转移策略')
@@ -521,6 +524,7 @@ def main():
                         help='强制重新处理数据')
     args = parser.parse_args()
     
+    print("参数解析完成，开始训练...")
     results = train_with_label_transfer(args)
     
     print("\n训练完成！")
