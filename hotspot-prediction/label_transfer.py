@@ -297,7 +297,7 @@ class LabelTransfer:
                     max_seq_sim = max(max_seq_sim, seq_sim)
                     max_struct_sim = max(max_struct_sim, struct_sim)
                     
-                    if seq_sim >= self.seq_similarity_threshold and struct_sim >= self.tm_score_threshold:
+                    if (seq_sim >= self.seq_similarity_threshold or struct_sim >= self.tm_score_threshold):
                         cluster.append(other)
                         visited.add(other)
                     

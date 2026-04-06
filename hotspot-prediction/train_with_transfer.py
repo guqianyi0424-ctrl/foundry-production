@@ -77,8 +77,8 @@ def apply_label_transfer(data_list, use_external_tools=False):
         }
     
     transfer = LabelTransfer(
-        seq_similarity_threshold=0.3,
-        tm_score_threshold=0.3
+        seq_similarity_threshold=0.15,
+        tm_score_threshold=0.20
     )
     
     enhanced_data, stats = transfer.augment_dataset(protein_data, use_external_tools)
