@@ -54,16 +54,19 @@ def apply_label_transfer(data_list, use_external_tools=False):
     protein_data = {}
     
     for item in data_list:
-        pdb_id = item.get('pdb_id', '')
-        chain = item.get('chain', 'A')
+        pdb_id_full = item.get('pdb_id', '')
+        if '_' in pdb_id_full:
+            parts = pdb_id_full.rsplit('_', 1)
+            pdb_id = parts[0]
+            chain = parts[1] if len(parts) > 1 else 'A'
+        else:
+            pdb_id = pdb_id_full
+            chain = 'A'
+        
         chain_id = f"{pdb_id}_{chain}"
         
-        hotspots = item.get('hotspots', [])
-        if isinstance(hotspots, str):
-            try:
-                hotspots = eval(hotspots)
-            except:
-                hotspots = []
+        labels = item.get('labels', np.array([]))
+        hotspots = list(np.where(np.array(labels) == 1)[0] + 1) if len(labels) > 0 else []
         
         protein_data[chain_id] = {
             'sequence': item.get('sequence', ''),
@@ -81,17 +84,25 @@ def apply_label_transfer(data_list, use_external_tools=False):
     
     enhanced_list = []
     for chain_id, data in enhanced_data.items():
-        pdb_id, chain = chain_id.rsplit('_', 1)
+        parts = chain_id.rsplit('_', 1)
+        pdb_id = parts[0]
+        chain = parts[1] if len(parts) > 1 else 'A'
         
         original_item = None
         for item in data_list:
-            if item.get('pdb_id', '') == pdb_id and item.get('chain', 'A') == chain:
+            item_pdb = item.get('pdb_id', '')
+            if item_pdb == chain_id or item_pdb == f"{pdb_id}_{chain}":
                 original_item = item
                 break
         
         if original_item:
             new_item = original_item.copy()
-            new_item['hotspots'] = data['hotspots']
+            new_hotspots = data['hotspots']
+            new_labels = np.zeros(len(original_item.get('labels', [])), dtype=np.int64)
+            for hs in new_hotspots:
+                if 1 <= hs <= len(new_labels):
+                    new_labels[hs - 1] = 1
+            new_item['labels'] = new_labels
             new_item['transferred'] = data.get('transferred', False)
             enhanced_list.append(new_item)
     
@@ -109,7 +120,13 @@ def train_epoch_with_balance(model, data_loader, device):
         
         node_features = batch['node_features'].to(device)
         labels = batch['labels'].to(device)
-        graphs = batch['graphs'].to(device)
+        try:
+            graphs = batch['graphs'].to(device)
+        except Exception as e:
+            print(f"警告: 无法将图移动到GPU，使用CPU: {e}")
+            graphs = batch['graphs']
+            node_features = batch['node_features']
+            labels = batch['labels']
         
         logits = model(graphs, node_features)
         
@@ -155,7 +172,12 @@ def evaluate_balanced(model, data_loader, device):
         for batch in data_loader:
             node_features = batch['node_features'].to(device)
             labels = batch['labels'].to(device)
-            graphs = batch['graphs'].to(device)
+            try:
+                graphs = batch['graphs'].to(device)
+            except Exception as e:
+                graphs = batch['graphs']
+                node_features = batch['node_features']
+                labels = batch['labels']
             
             logits = model(graphs, node_features)
             
