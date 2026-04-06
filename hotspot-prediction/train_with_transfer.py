@@ -118,15 +118,15 @@ def train_epoch_with_balance(model, data_loader, device):
     for batch in data_loader:
         model.optimizer.zero_grad()
         
-        node_features = batch['node_features'].to(device)
-        labels = batch['labels'].to(device)
         try:
+            node_features = batch['node_features'].to(device)
+            labels = batch['labels'].to(device)
             graphs = batch['graphs'].to(device)
         except Exception as e:
-            print(f"警告: 无法将图移动到GPU，使用CPU: {e}")
-            graphs = batch['graphs']
+            print(f"警告: 无法将数据移动到GPU，使用CPU: {e}")
             node_features = batch['node_features']
             labels = batch['labels']
+            graphs = batch['graphs']
         
         logits = model(graphs, node_features)
         
@@ -170,14 +170,14 @@ def evaluate_balanced(model, data_loader, device):
     
     with torch.no_grad():
         for batch in data_loader:
-            node_features = batch['node_features'].to(device)
-            labels = batch['labels'].to(device)
             try:
+                node_features = batch['node_features'].to(device)
+                labels = batch['labels'].to(device)
                 graphs = batch['graphs'].to(device)
             except Exception as e:
-                graphs = batch['graphs']
                 node_features = batch['node_features']
                 labels = batch['labels']
+                graphs = batch['graphs']
             
             logits = model(graphs, node_features)
             
@@ -291,8 +291,19 @@ def train_with_label_transfer(args):
         train_loader = DataLoader(train_dataset, batch_size=1, shuffle=True, collate_fn=collate_fn)
         val_loader = DataLoader(val_dataset, batch_size=1, shuffle=False, collate_fn=collate_fn)
         
+        use_device = DEVICE
+        if DEVICE.type == 'cuda':
+            try:
+                import dgl
+                test_g = dgl.DGLGraph()
+                test_g = test_g.to(DEVICE)
+                del test_g
+            except Exception as e:
+                print(f"  警告: GPU不可用，使用CPU: {e}")
+                use_device = torch.device('cpu')
+        
         model = create_model('gat')
-        model = model.to(DEVICE)
+        model = model.to(use_device)
         
         if args.use_focal_loss:
             model.criterion = WeightedFocalLoss(
@@ -306,9 +317,9 @@ def train_with_label_transfer(args):
         patience_counter = 0
         
         for epoch in range(NUM_EPOCHS):
-            train_loss = train_epoch_with_balance(model, train_loader, DEVICE)
+            train_loss = train_epoch_with_balance(model, train_loader, use_device)
             
-            y_true, y_pred, y_prob = evaluate_balanced(model, val_loader, DEVICE)
+            y_true, y_pred, y_prob = evaluate_balanced(model, val_loader, use_device)
             metrics = calculate_metrics(y_true, y_pred, y_prob)
             
             if metrics['roc_auc'] > best_val_auc:
