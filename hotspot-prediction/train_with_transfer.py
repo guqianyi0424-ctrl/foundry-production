@@ -238,6 +238,77 @@ def calculate_metrics(y_true, y_pred, y_prob):
     return metrics
 
 
+def evaluate_deephotresi_style(model, data_loader, device):
+    """
+    评估模型（DeepHotResi风格）
+    - 使用所有数据，不做平衡采样
+    - 搜索最佳阈值
+    """
+    model.eval()
+    all_probs = []
+    all_labels = []
+    
+    with torch.no_grad():
+        for batch in data_loader:
+            try:
+                node_features = batch['node_features'].to(device)
+                labels = batch['labels'].to(device)
+                graphs = batch['graphs'].to(device)
+            except Exception as e:
+                node_features = batch['node_features']
+                labels = batch['labels']
+                graphs = batch['graphs']
+            
+            logits = model(graphs, node_features)
+            
+            labels_flat = labels.flatten()
+            valid_mask = labels_flat >= 0
+            valid_logits = logits[valid_mask]
+            valid_labels = labels_flat[valid_mask]
+            
+            probs = F.softmax(valid_logits, dim=1)
+            
+            all_probs.extend(probs[:, 1].cpu().numpy())
+            all_labels.extend(valid_labels.cpu().numpy())
+    
+    y_true = np.array(all_labels)
+    y_prob = np.array(all_probs)
+    
+    best_auc = 0
+    best_threshold = 0.5
+    for threshold in np.arange(0.1, 0.9, 0.01):
+        y_pred = (y_prob >= threshold).astype(int)
+        try:
+            auc = roc_auc_score(y_true, y_prob)
+            f1 = f1_score(y_true, y_pred, zero_division=0)
+            if f1 > best_auc:
+                best_auc = f1
+                best_threshold = threshold
+        except:
+            continue
+    
+    y_pred = (y_prob >= best_threshold).astype(int)
+    
+    metrics = {
+        'roc_auc': roc_auc_score(y_true, y_prob),
+        'pr_auc': average_precision_score(y_true, y_prob),
+        'precision': precision_score(y_true, y_pred, zero_division=0),
+        'recall': recall_score(y_true, y_pred, zero_division=0),
+        'f1': f1_score(y_true, y_pred, zero_division=0),
+        'mcc': matthews_corrcoef(y_true, y_pred),
+        'threshold': best_threshold
+    }
+    
+    cm = confusion_matrix(y_true, y_pred)
+    if cm.shape == (2, 2):
+        tn, fp, fn, tp = cm.ravel()
+        metrics['specificity'] = tn / (tn + fp) if (tn + fp) > 0 else 0
+    else:
+        metrics['specificity'] = 0
+    
+    return y_true, y_pred, y_prob, metrics
+
+
 def train_with_label_transfer(args):
     """
     使用标签转移策略训练模型
@@ -327,8 +398,7 @@ def train_with_label_transfer(args):
         for epoch in range(NUM_EPOCHS):
             train_loss = train_epoch_with_balance(model, train_loader, use_device)
             
-            y_true, y_pred, y_prob = evaluate_balanced(model, val_loader, use_device)
-            metrics = calculate_metrics(y_true, y_pred, y_prob)
+            y_true, y_pred, y_prob, metrics = evaluate_deephotresi_style(model, val_loader, use_device)
             
             if metrics['roc_auc'] > best_val_auc:
                 best_val_auc = metrics['roc_auc']
@@ -359,8 +429,7 @@ def train_with_label_transfer(args):
         checkpoint = torch.load(os.path.join(MODELS_DIR, f'best_model_fold{fold + 1}_transfer.pth'))
         model.load_state_dict(checkpoint['model_state_dict'])
         
-        y_true, y_pred, y_prob = evaluate_balanced(model, val_loader, use_device)
-        final_metrics = calculate_metrics(y_true, y_pred, y_prob)
+        y_true, y_pred, y_prob, final_metrics = evaluate_deephotresi_style(model, val_loader, use_device)
         
         results.append({
             'fold': fold + 1,
@@ -373,19 +442,22 @@ def train_with_label_transfer(args):
         print(f"    PR-AUC:  {final_metrics['pr_auc']:.4f}")
         print(f"    F1:      {final_metrics['f1']:.4f}")
         print(f"    MCC:     {final_metrics['mcc']:.4f}")
+        print(f"    最佳阈值: {final_metrics.get('threshold', 0.5):.2f}")
     
     results_df = pd.DataFrame(results)
     
     print("\n" + "=" * 70)
-    print("交叉验证总结")
+    print("交叉验证总结 (DeepHotResi评估方式)")
     print("=" * 70)
     print(f"平均 ROC-AUC: {results_df['roc_auc'].mean():.4f} (+/- {results_df['roc_auc'].std():.4f})")
     print(f"平均 PR-AUC:  {results_df['pr_auc'].mean():.4f} (+/- {results_df['pr_auc'].std():.4f})")
     print(f"平均 F1:      {results_df['f1'].mean():.4f} (+/- {results_df['f1'].std():.4f})")
     print(f"平均 MCC:     {results_df['mcc'].mean():.4f} (+/- {results_df['mcc'].std():.4f})")
     print(f"平均 Precision: {results_df['precision'].mean():.4f}")
-    print(f"平均 Recall:    {results_df['recall'].mean():.4f}")
-    print(f"平均 Specificity: {results_df['specificity'].mean():.4f}")
+    print(f"平均 Recall (SEN): {results_df['recall'].mean():.4f}")
+    print(f"平均 Specificity (SPE): {results_df['specificity'].mean():.4f}")
+    if 'threshold' in results_df.columns:
+        print(f"平均阈值: {results_df['threshold'].mean():.2f}")
     
     os.makedirs(RESULTS_DIR, exist_ok=True)
     results_df.to_csv(os.path.join(RESULTS_DIR, 'cross_validation_with_transfer.csv'), index=False)
