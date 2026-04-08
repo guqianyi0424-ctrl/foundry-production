@@ -242,15 +242,15 @@ def calculate_metrics(y_true, y_pred, y_prob):
 
 
 def find_optimal_threshold(y_true, y_prob):
-    """寻找最优阈值"""
+    """寻找最优阈值（基于MCC）"""
     best_threshold = 0.5
-    best_f1 = 0
+    best_mcc = -1
     
-    for threshold in np.arange(0.1, 0.9, 0.01):
+    for threshold in np.arange(0.1, 0.9, 0.005):
         y_pred = (y_prob >= threshold).astype(int)
-        f1 = metrics.f1_score(y_true, y_pred, zero_division=0)
-        if f1 > best_f1:
-            best_f1 = f1
+        mcc = metrics.matthews_corrcoef(y_true, y_pred)
+        if mcc > best_mcc:
+            best_mcc = mcc
             best_threshold = threshold
     
     return best_threshold
@@ -399,6 +399,7 @@ def cross_validation(data_list, n_folds=N_FOLDS, model_type='gat'):
             'balanced_recall': balanced_metrics['recall'],
             'balanced_specificity': balanced_metrics['specificity'],
             'balanced_roc_auc': balanced_metrics['roc_auc'],
+            'balanced_pr_auc': balanced_metrics['pr_auc'],
             'balanced_mcc': balanced_metrics['mcc'],
             'optimal_threshold': optimal_threshold,
             'optimal_f1': optimal_metrics['f1']
@@ -410,7 +411,7 @@ def cross_validation(data_list, n_folds=N_FOLDS, model_type='gat'):
     print("交叉验证总结 (DeepHotResi评估方式 - 平衡采样)")
     print("=" * 60)
     print(f"平均 ROC-AUC: {results_df['balanced_roc_auc'].mean():.4f} (+/- {results_df['balanced_roc_auc'].std():.4f})")
-    print(f"平均 PR-AUC:  {results_df['balanced_roc_auc'].mean():.4f} (+/- {results_df['balanced_roc_auc'].std():.4f})")
+    print(f"平均 PR-AUC:  {results_df['balanced_pr_auc'].mean():.4f} (+/- {results_df['balanced_pr_auc'].std():.4f})")
     print(f"平均 F1:      {results_df['balanced_f1'].mean():.4f} (+/- {results_df['balanced_f1'].std():.4f})")
     print(f"平均 MCC:     {results_df['balanced_mcc'].mean():.4f} (+/- {results_df['balanced_mcc'].std():.4f})")
     print(f"平均 Precision (PRE): {results_df['balanced_precision'].mean():.4f}")
