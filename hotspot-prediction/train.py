@@ -408,19 +408,48 @@ def cross_validation(data_list, n_folds=N_FOLDS, model_type='gat'):
     results_df = pd.DataFrame(all_results)
     
     print("\n" + "=" * 60)
-    print("交叉验证总结 (DeepHotResi评估方式 - 平衡采样)")
+    print("交叉验证总结")
     print("=" * 60)
+    
+    print("\n【原始数据集评估】")
+    print("-" * 40)
+    avg_tp = results_df['TP'].mean()
+    avg_fn = results_df['FN'].mean()
+    avg_tn = results_df['TN'].mean()
+    avg_fp = results_df['FP'].mean()
+    
+    total_pos = avg_tp + avg_fn
+    total_neg = avg_tn + avg_fp
+    total_samples = total_pos + total_neg
+    
+    orig_precision = avg_tp / (avg_tp + avg_fp) if (avg_tp + avg_fp) > 0 else 0
+    orig_recall = avg_tp / (avg_tp + avg_fn) if (avg_tp + avg_fn) > 0 else 0
+    orig_specificity = avg_tn / (avg_tn + avg_fp) if (avg_tn + avg_fp) > 0 else 0
+    orig_accuracy = (avg_tp + avg_tn) / total_samples if total_samples > 0 else 0
+    orig_mcc = ((avg_tp * avg_tn) - (avg_fp * avg_fn)) / \
+               (np.sqrt((avg_tp + avg_fp) * (avg_tp + avg_fn) * (avg_tn + avg_fp) * (avg_tn + avg_fn))) \
+               if (avg_tp + avg_fp) * (avg_tp + avg_fn) * (avg_tn + avg_fp) * (avg_tn + avg_fn) > 0 else 0
+    
+    print(f"平均 TP: {avg_tp:.0f}")
+    print(f"平均 FN: {avg_fn:.0f}")
+    print(f"平均 TN: {avg_tn:.0f}")
+    print(f"平均 FP: {avg_fp:.0f}")
+    print(f"总样本数: {total_samples:.0f} (正样本: {total_pos:.0f}, 负样本: {total_neg:.0f})")
+    print(f"平均 Precision: {orig_precision:.4f} ({orig_precision*100:.2f}%)")
+    print(f"平均 Recall (SEN): {orig_recall:.4f} ({orig_recall*100:.2f}%)")
+    print(f"平均 Specificity (SPE): {orig_specificity:.4f} ({orig_specificity*100:.2f}%)")
+    print(f"平均 Accuracy: {orig_accuracy:.4f} ({orig_accuracy*100:.2f}%)")
+    print(f"平均 MCC: {orig_mcc:.4f}")
+    
+    print("\n【平衡采样评估 (DeepHotResi方式)】")
+    print("-" * 40)
     print(f"平均 ROC-AUC: {results_df['balanced_roc_auc'].mean():.4f} (+/- {results_df['balanced_roc_auc'].std():.4f})")
     print(f"平均 PR-AUC:  {results_df['balanced_pr_auc'].mean():.4f} (+/- {results_df['balanced_pr_auc'].std():.4f})")
     print(f"平均 F1:      {results_df['balanced_f1'].mean():.4f} (+/- {results_df['balanced_f1'].std():.4f})")
     print(f"平均 MCC:     {results_df['balanced_mcc'].mean():.4f} (+/- {results_df['balanced_mcc'].std():.4f})")
-    print(f"平均 Precision (PRE): {results_df['balanced_precision'].mean():.4f}")
-    print(f"平均 Recall (SEN):    {results_df['balanced_recall'].mean():.4f}")
-    print(f"平均 Specificity (SPE): {results_df['balanced_specificity'].mean():.4f}")
-    print(f"平均 TP: {results_df['TP'].mean():.0f}")
-    print(f"平均 FN: {results_df['FN'].mean():.0f}")
-    print(f"平均 TN: {results_df['TN'].mean():.0f}")
-    print(f"平均 FP: {results_df['FP'].mean():.0f}")
+    print(f"平均 Precision: {results_df['balanced_precision'].mean():.4f}")
+    print(f"平均 Recall:    {results_df['balanced_recall'].mean():.4f}")
+    print(f"平均 Specificity: {results_df['balanced_specificity'].mean():.4f}")
     
     results_df.to_csv(os.path.join(RESULTS_DIR, 'cross_validation_results.csv'), index=False)
     
