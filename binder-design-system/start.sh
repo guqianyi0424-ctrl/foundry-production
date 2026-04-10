@@ -1,26 +1,32 @@
 #!/bin/bash
-# 快速启动脚本
+set -e
 
 echo "=========================================="
-echo "蛋白质Binder设计系统 - 启动脚本"
+echo "蛋白质Binder设计系统 - 快速启动"
+echo "Top-K=3 | ML+DL | RFD3+MPNN+RF3"
 echo "=========================================="
 
-# 进入项目目录
-cd /root/binder-design-system
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
 
-# 检查依赖
-echo "检查依赖..."
-pip list | grep streamlit > /dev/null
-if [ $? -ne 0 ]; then
-    echo "安装依赖..."
-    pip install -r requirements.txt
+if [ -d "venv" ]; then
+    source venv/bin/activate
 fi
 
-# 启动应用
-echo "启动Streamlit应用..."
-streamlit run app/main.py \
-    --server.port 8501 \
-    --server.address 0.0.0.0 \
-    --browser.gatherUsageStats false
+pip list 2>/dev/null | grep streamlit > /dev/null
+if [ $? -ne 0 ]; then
+    echo "安装依赖..."
+    pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple 2>/dev/null || pip install -r requirements.txt
+fi
 
-echo "应用已启动！"
+mkdir -p outputs data models
+
+PORT=${STREAMLIT_PORT:-8501}
+
+echo "启动应用: http://0.0.0.0:$PORT"
+streamlit run app/binder_app.py \
+    --server.port $PORT \
+    --server.address 0.0.0.0 \
+    --server.headless true \
+    --browser.gatherUsageStats false \
+    --server.maxUploadSize 200
