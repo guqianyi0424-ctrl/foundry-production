@@ -479,7 +479,7 @@ def run_five_fold_with_curves(data_list, device):
     all_fpr, all_tpr, all_auc = [], [], []
     all_recall, all_precision, all_pr_auc = [], [], []
     all_y_true_bal, all_y_pred_bal, all_y_prob_bal = [], [], []
-    all_y_true_full, all_y_prob_full = [], [], []
+    all_y_true_full, all_y_prob_full = [], []
     
     for fold, (train_idx, val_idx) in enumerate(kf.split(data_list)):
         print(f"\nFold {fold+1}/{N_FOLDS}")
