@@ -37,7 +37,7 @@ from config import (
     MODELS_DIR, RESULTS_DIR, LOGS_DIR, FEATURES_DIR,
     BATCH_SIZE, NUM_EPOCHS, PATIENCE, N_FOLDS, RANDOM_SEED, DEVICE,
     USE_WEIGHTED_SAMPLER, USE_CLASS_WEIGHTS, USE_SMOTE, POS_WEIGHT_RATIO,
-    NOISE_FACTOR
+    NOISE_FACTOR, ACCUMULATION_STEPS
 )
 from dataset import (
     PPIHotspotDataset, collate_fn, prepare_dataset,
@@ -87,14 +87,14 @@ def set_seed(seed=RANDOM_SEED):
 
 
 def train_one_epoch(model, data_loader, device):
-    """训练一个epoch - 对齐DeepHotResi训练方式"""
+    """训练一个epoch - 加入梯度累积(DeepHotResi: 每4步更新)"""
     model.train()
     total_loss = 0
     n_batches = 0
     
-    for batch in data_loader:
-        model.optimizer.zero_grad()
-        
+    model.optimizer.zero_grad()
+    
+    for i, batch in enumerate(data_loader):
         node_features = batch['node_features'].to(device)
         labels = batch['labels'].to(device)
         graphs = batch['graphs'].to(device)
@@ -123,13 +123,21 @@ def train_one_epoch(model, data_loader, device):
             valid_labels = valid_labels[balanced_indices]
         
         loss = model.criterion(valid_logits, valid_labels)
-        
+        loss = loss / ACCUMULATION_STEPS
         loss.backward()
+        
+        if (i + 1) % ACCUMULATION_STEPS == 0:
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            model.optimizer.step()
+            model.optimizer.zero_grad()
+        
+        total_loss += loss.item() * ACCUMULATION_STEPS
+        n_batches += 1
+    
+    if n_batches % ACCUMULATION_STEPS != 0:
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
         model.optimizer.step()
-        
-        total_loss += loss.item()
-        n_batches += 1
+        model.optimizer.zero_grad()
     
     return total_loss / max(n_batches, 1)
 
@@ -261,14 +269,15 @@ def find_optimal_threshold(y_true, y_prob):
 
 
 def train_model(model, train_loader, val_loader, device, fold=0, epochs=NUM_EPOCHS):
-    """训练模型"""
-    best_val_auc = 0
+    """训练模型 - 基于AUPRC(DeepHotResi方式)选择最优模型"""
+    best_val_auprc = 0
     best_epoch = 0
     patience_counter = 0
     
     history = {
         'train_loss': [],
         'val_auc': [],
+        'val_auprc': [],
         'val_f1': []
     }
     
@@ -280,13 +289,14 @@ def train_model(model, train_loader, val_loader, device, fold=0, epochs=NUM_EPOC
         
         history['train_loss'].append(train_loss)
         history['val_auc'].append(val_metrics['roc_auc'])
+        history['val_auprc'].append(val_metrics['pr_auc'])
         history['val_f1'].append(val_metrics['f1'])
         
         print(f"Epoch {epoch+1}/{epochs} - Loss: {train_loss:.4f} - "
-              f"Val AUC: {val_metrics['roc_auc']:.4f} - Val F1: {val_metrics['f1']:.4f}")
+              f"Val AUC: {val_metrics['roc_auc']:.4f} - Val AUPRC: {val_metrics['pr_auc']:.4f} - Val F1: {val_metrics['f1']:.4f}")
         
-        if val_metrics['roc_auc'] > best_val_auc:
-            best_val_auc = val_metrics['roc_auc']
+        if val_metrics['pr_auc'] > best_val_auprc:
+            best_val_auprc = val_metrics['pr_auc']
             best_epoch = epoch + 1
             patience_counter = 0
             
@@ -295,18 +305,18 @@ def train_model(model, train_loader, val_loader, device, fold=0, epochs=NUM_EPOC
                 'epoch': epoch,
                 'model_state_dict': model.state_dict(),
                 'optimizer_state_dict': model.optimizer.state_dict(),
-                'val_auc': best_val_auc,
+                'val_auprc': best_val_auprc,
             }, model_path)
         else:
             patience_counter += 1
         
-        model.scheduler.step(val_metrics['roc_auc'])
+        model.scheduler.step(val_metrics['pr_auc'])
         
         if patience_counter >= PATIENCE:
             print(f"Early stopping at epoch {epoch+1}")
             break
     
-    return model, history, best_epoch, best_val_auc
+    return model, history, best_epoch, best_val_auprc
 
 
 def cross_validation(data_list, n_folds=N_FOLDS, model_type='gat'):
@@ -567,7 +577,7 @@ def main():
     
     print("=" * 60)
     print("PPI热点残基预测 - 深度学习方法")
-    print("基于图注意力网络和ESM-2预训练模型 (对齐DeepHotResi)")
+    print("基于图注意力网络和ESM-2预训练模型 (增强版)")
     print("=" * 60)
     print(f"设备: {DEVICE}")
     print(f"时间: {timestamp}")
