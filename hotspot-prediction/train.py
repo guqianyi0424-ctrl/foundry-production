@@ -36,8 +36,7 @@ print("导入其他模块完成")
 from config import (
     MODELS_DIR, RESULTS_DIR, LOGS_DIR, FEATURES_DIR,
     BATCH_SIZE, NUM_EPOCHS, PATIENCE, N_FOLDS, RANDOM_SEED, DEVICE,
-    USE_WEIGHTED_SAMPLER, USE_CLASS_WEIGHTS, USE_SMOTE, POS_WEIGHT_RATIO,
-    NOISE_FACTOR, ACCUMULATION_STEPS
+    USE_WEIGHTED_SAMPLER, USE_CLASS_WEIGHTS, USE_SMOTE, POS_WEIGHT_RATIO
 )
 from dataset import (
     PPIHotspotDataset, collate_fn, prepare_dataset,
@@ -87,20 +86,15 @@ def set_seed(seed=RANDOM_SEED):
 
 
 def train_one_epoch(model, data_loader, device):
-    """训练一个epoch - 加入梯度累积(DeepHotResi: 每4步更新)"""
+    """训练一个epoch"""
     model.train()
     total_loss = 0
     n_batches = 0
-    
-    model.optimizer.zero_grad()
     
     for i, batch in enumerate(data_loader):
         node_features = batch['node_features'].to(device)
         labels = batch['labels'].to(device)
         graphs = batch['graphs'].to(device)
-        
-        if NOISE_FACTOR > 0:
-            node_features = node_features + NOISE_FACTOR * torch.randn_like(node_features)
         
         logits = model(graphs, node_features)
         
@@ -112,32 +106,15 @@ def train_one_epoch(model, data_loader, device):
         if len(valid_labels) == 0:
             continue
         
-        pos_indices = (valid_labels == 1).nonzero(as_tuple=True)[0]
-        neg_indices = (valid_labels == 0).nonzero(as_tuple=True)[0]
-        
-        if len(pos_indices) > 0 and len(neg_indices) > 0:
-            n_sample = min(len(pos_indices), len(neg_indices))
-            sampled_neg = neg_indices[torch.randperm(len(neg_indices))[:n_sample]]
-            balanced_indices = torch.cat([pos_indices, sampled_neg])
-            valid_logits = valid_logits[balanced_indices]
-            valid_labels = valid_labels[balanced_indices]
-        
         loss = model.criterion(valid_logits, valid_labels)
-        loss = loss / ACCUMULATION_STEPS
+        
+        model.optimizer.zero_grad()
         loss.backward()
-        
-        if (i + 1) % ACCUMULATION_STEPS == 0:
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-            model.optimizer.step()
-            model.optimizer.zero_grad()
-        
-        total_loss += loss.item() * ACCUMULATION_STEPS
-        n_batches += 1
-    
-    if n_batches % ACCUMULATION_STEPS != 0:
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
         model.optimizer.step()
-        model.optimizer.zero_grad()
+        
+        total_loss += loss.item()
+        n_batches += 1
     
     return total_loss / max(n_batches, 1)
 
@@ -269,8 +246,8 @@ def find_optimal_threshold(y_true, y_prob):
 
 
 def train_model(model, train_loader, val_loader, device, fold=0, epochs=NUM_EPOCHS):
-    """训练模型 - 基于AUPRC(DeepHotResi方式)选择最优模型"""
-    best_val_auprc = 0
+    """训练模型 - 基于ROC-AUC选择最优模型"""
+    best_val_auc = 0
     best_epoch = 0
     patience_counter = 0
     
@@ -295,8 +272,8 @@ def train_model(model, train_loader, val_loader, device, fold=0, epochs=NUM_EPOC
         print(f"Epoch {epoch+1}/{epochs} - Loss: {train_loss:.4f} - "
               f"Val AUC: {val_metrics['roc_auc']:.4f} - Val AUPRC: {val_metrics['pr_auc']:.4f} - Val F1: {val_metrics['f1']:.4f}")
         
-        if val_metrics['pr_auc'] > best_val_auprc:
-            best_val_auprc = val_metrics['pr_auc']
+        if val_metrics['roc_auc'] > best_val_auc:
+            best_val_auc = val_metrics['roc_auc']
             best_epoch = epoch + 1
             patience_counter = 0
             
@@ -305,18 +282,18 @@ def train_model(model, train_loader, val_loader, device, fold=0, epochs=NUM_EPOC
                 'epoch': epoch,
                 'model_state_dict': model.state_dict(),
                 'optimizer_state_dict': model.optimizer.state_dict(),
-                'val_auprc': best_val_auprc,
+                'val_auc': best_val_auc,
             }, model_path)
         else:
             patience_counter += 1
         
-        model.scheduler.step(val_metrics['pr_auc'])
+        model.scheduler.step(val_metrics['roc_auc'])
         
         if patience_counter >= PATIENCE:
             print(f"Early stopping at epoch {epoch+1}")
             break
     
-    return model, history, best_epoch, best_val_auprc
+    return model, history, best_epoch, best_val_auc
 
 
 def cross_validation(data_list, n_folds=N_FOLDS, model_type='gat'):

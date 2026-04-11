@@ -1,1041 +1,690 @@
 """
-论文实验脚本 - 完整版 v2.0
-生成所有论文所需的图表和数据表格
-包含与PPI-hotspotID和DeepHotResi的对比分析
+论文数据生成脚本
+功能：
+1. 特征消融实验 (类似DeepHotResi Table 4)
+2. ROC曲线 (5折 + 平均, 类似DeepHotResi Figure 3)
+3. PR曲线
+4. 混淆矩阵
+5. 注意力权重可视化
+6. 与基线方法对比表
+7. 独立测试集评估
 """
-
 import os
 import sys
+import pickle
 import numpy as np
 import pandas as pd
 import torch
+import torch.nn.functional as F
 from torch.utils.data import DataLoader
+from sklearn.model_selection import KFold
 from sklearn import metrics
-import matplotlib.pyplot as plt
+from sklearn.metrics import (
+    roc_auc_score, average_precision_score, f1_score,
+    precision_score, recall_score, accuracy_score,
+    matthews_corrcoef, confusion_matrix, roc_curve,
+    precision_recall_curve
+)
 import matplotlib
 matplotlib.use('Agg')
-plt.rcParams['font.sans-serif'] = ['SimHei', 'DejaVu Sans']
-plt.rcParams['axes.unicode_minus'] = False
-plt.rcParams['figure.dpi'] = 150
-from collections import defaultdict
-import re
-import json
+import matplotlib.pyplot as plt
+from matplotlib import rcParams
+from tqdm import tqdm
+import warnings
+warnings.filterwarnings('ignore')
 
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from config import FEATURES_DIR, MODELS_DIR, RESULTS_DIR, DATA_DIR, DEVICE
-from dataset import PPIHotspotDataset, collate_fn, prepare_test_dataset
-from model import create_model
+from config import (
+    MODELS_DIR, RESULTS_DIR, FEATURES_DIR, LOGS_DIR,
+    BATCH_SIZE, NUM_EPOCHS, PATIENCE, N_FOLDS, RANDOM_SEED, DEVICE,
+    USE_WEIGHTED_SAMPLER, USE_CLASS_WEIGHTS,
+    INPUT_DIM, ESM2_DIM, PSSM_DIM, HMM_DIM, TRADITIONAL_DIM,
+    HIDDEN_DIM, NUM_HEADS, NUM_LAYERS, DROPOUT,
+    FOCAL_ALPHA, FOCAL_GAMMA, LABEL_SMOOTHING, USE_LABEL_SMOOTHING,
+    NUM_CLASSES, LEARNING_RATE, WEIGHT_DECAY
+)
+from dataset import (
+    PPIHotspotDataset, collate_fn, prepare_dataset,
+    calculate_sample_weights, get_weighted_sampler,
+    calculate_class_weights
+)
+from model import PPIHotspotGAT, SELayer, FocalLoss, WeightedFocalLoss, FocalLossWithLabelSmoothing
+
+PAPER_DIR = os.path.join(RESULTS_DIR, 'paper_figures')
+os.makedirs(PAPER_DIR, exist_ok=True)
+
+rcParams['font.family'] = 'Arial'
+rcParams['font.size'] = 12
+rcParams['axes.linewidth'] = 1.5
+rcParams['xtick.major.width'] = 1.5
+rcParams['ytick.major.width'] = 1.5
 
 
-class PaperExperiments:
-    """论文实验类 - 完整版"""
-    
-    def __init__(self):
-        self.results_dir = os.path.join(RESULTS_DIR, 'paper_figures')
-        os.makedirs(self.results_dir, exist_ok=True)
-        self.models = None
-        self.test_labels = None
-        self.test_probs = None
-        self.test_pdb_ids = None
-        self.training_log_path = os.path.join(
-            os.path.dirname(os.path.abspath(__file__)),
-            'logs', 'training_20260404_081034.log'
-        )
-    
-    def load_models(self):
-        """加载5折集成模型"""
-        print("\n" + "=" * 70)
-        print("📦 加载5折集成模型...")
-        print("=" * 70)
+def set_seed(seed=RANDOM_SEED):
+    import random
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+
+
+def evaluate_model(model, data_loader, device):
+    model.eval()
+    all_preds, all_labels, all_probs = [], [], []
+    with torch.no_grad():
+        for batch in data_loader:
+            node_features = batch['node_features'].to(device)
+            labels = batch['labels'].to(device)
+            graphs = batch['graphs'].to(device)
+            logits = model(graphs, node_features)
+            labels_flat = labels.flatten()
+            valid_mask = labels_flat >= 0
+            valid_logits = logits[valid_mask]
+            valid_labels = labels_flat[valid_mask]
+            probs = F.softmax(valid_logits, dim=1)
+            preds = valid_logits.argmax(dim=1)
+            all_preds.extend(preds.cpu().numpy())
+            all_labels.extend(valid_labels.cpu().numpy())
+            all_probs.extend(probs[:, 1].cpu().numpy())
+    return np.array(all_labels), np.array(all_preds), np.array(all_probs)
+
+
+def evaluate_balanced(model, data_loader, device):
+    model.eval()
+    all_preds, all_labels, all_probs = [], [], []
+    with torch.no_grad():
+        for batch in data_loader:
+            node_features = batch['node_features'].to(device)
+            labels = batch['labels'].to(device)
+            graphs = batch['graphs'].to(device)
+            logits = model(graphs, node_features)
+            labels_flat = labels.flatten()
+            valid_mask = labels_flat >= 0
+            valid_logits = logits[valid_mask]
+            valid_labels = labels_flat[valid_mask]
+            pos_indices = (valid_labels == 1).nonzero(as_tuple=True)[0]
+            neg_indices = (valid_labels == 0).nonzero(as_tuple=True)[0]
+            if len(pos_indices) > 0 and len(neg_indices) > 0:
+                n_pos = len(pos_indices)
+                n_neg = len(neg_indices)
+                if n_neg >= n_pos:
+                    sampled_neg = neg_indices[torch.randperm(n_neg)[:n_pos]]
+                else:
+                    sampled_neg = neg_indices
+                    pos_indices = pos_indices[torch.randperm(n_pos)[:n_neg]]
+                balanced_indices = torch.cat([pos_indices, sampled_neg])
+                valid_logits = valid_logits[balanced_indices]
+                valid_labels = valid_labels[balanced_indices]
+            probs = F.softmax(valid_logits, dim=1)
+            preds = valid_logits.argmax(dim=1)
+            all_preds.extend(preds.cpu().numpy())
+            all_labels.extend(valid_labels.cpu().numpy())
+            all_probs.extend(probs[:, 1].cpu().numpy())
+    return np.array(all_labels), np.array(all_preds), np.array(all_probs)
+
+
+def calc_metrics(y_true, y_pred, y_prob):
+    tn, fp, fn, tp = confusion_matrix(y_true, y_pred).ravel()
+    specificity = tn / (tn + fp) if (tn + fp) > 0 else 0
+    result = {
+        'TP': int(tp), 'FN': int(fn), 'TN': int(tn), 'FP': int(fp),
+        'SEN': tp / (tp + fn) if (tp + fn) > 0 else 0,
+        'SPE': specificity,
+        'PRE': tp / (tp + fp) if (tp + fp) > 0 else 0,
+        'F1': f1_score(y_true, y_pred, zero_division=0),
+        'MCC': matthews_corrcoef(y_true, y_pred),
+        'AUC': roc_auc_score(y_true, y_prob) if len(np.unique(y_true)) > 1 else 0.5,
+    }
+    precisions, recalls, _ = precision_recall_curve(y_true, y_prob)
+    result['PR-AUC'] = metrics.auc(recalls, precisions)
+    return result
+
+
+def train_fold(model, train_loader, val_loader, device, fold, epochs=NUM_EPOCHS):
+    best_val_auc = 0
+    patience_counter = 0
+    for epoch in range(epochs):
+        model.train()
+        total_loss = 0
+        n_batches = 0
+        for batch in train_loader:
+            node_features = batch['node_features'].to(device)
+            labels = batch['labels'].to(device)
+            graphs = batch['graphs'].to(device)
+            logits = model(graphs, node_features)
+            labels_flat = labels.flatten()
+            valid_mask = labels_flat >= 0
+            valid_logits = logits[valid_mask]
+            valid_labels = labels_flat[valid_mask]
+            if len(valid_labels) == 0:
+                continue
+            loss = model.criterion(valid_logits, valid_labels)
+            model.optimizer.zero_grad()
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            model.optimizer.step()
+            total_loss += loss.item()
+            n_batches += 1
         
-        self.models = []
-        for fold in range(1, 6):
+        y_true, y_pred, y_prob = evaluate_balanced(model, val_loader, device)
+        val_metrics = calc_metrics(y_true, y_pred, y_prob)
+        
+        if val_metrics['AUC'] > best_val_auc:
+            best_val_auc = val_metrics['AUC']
+            patience_counter = 0
             model_path = os.path.join(MODELS_DIR, f'best_model_fold{fold}.pth')
-            if os.path.exists(model_path):
-                model = create_model('gat')
-                checkpoint = torch.load(model_path, map_location=DEVICE)
-                model.load_state_dict(checkpoint['model_state_dict'])
-                model = model.to(DEVICE)
-                model.eval()
-                self.models.append(model)
-                print(f"  ✅ Fold {fold}: {model_path}")
-            else:
-                print(f"  ❌ 未找到: {model_path}")
-        
-        print(f"\n共加载 {len(self.models)}/5 个模型")
-        return len(self.models) > 0
-    
-    def predict_test_set(self):
-        """预测测试集"""
-        print("\n" + "=" * 70)
-        print("🔮 预测测试集...")
-        print("=" * 70)
-        
-        test_data = prepare_test_dataset()
-        if len(test_data) == 0:
-            print("❌ 测试数据集为空")
-            return False
-        
-        print(f"测试数据集大小: {len(test_data)} 个蛋白质")
-        
-        test_dataset = PPIHotspotDataset(test_data)
-        test_loader = DataLoader(test_dataset, batch_size=1, shuffle=False, collate_fn=collate_fn)
-        
-        all_probs = []
-        all_labels = []
-        all_pdb_ids = []
-        
-        with torch.no_grad():
-            for batch in test_loader:
-                node_features = batch['node_features'].to(DEVICE)
-                labels = batch['labels'].to(DEVICE)
-                graphs = batch['graphs'].to(DEVICE)
-                pdb_id = batch['pdb_ids'][0]
-                
-                batch_probs = []
-                for model in self.models:
-                    logits = model(graphs, node_features)
-                    labels_flat = labels.flatten()
-                    valid_mask = labels_flat >= 0
-                    valid_logits = logits[valid_mask]
-                    probs = torch.softmax(valid_logits, dim=1)[:, 1]
-                    batch_probs.append(probs.cpu().numpy())
-                
-                avg_probs = np.mean(batch_probs, axis=0)
-                valid_labels = labels_flat[valid_mask].cpu().numpy()
-                
-                all_probs.extend(avg_probs)
-                all_labels.extend(valid_labels)
-                all_pdb_ids.extend([pdb_id] * len(valid_labels))
-        
-        self.test_labels = np.array(all_labels)
-        self.test_probs = np.array(all_probs)
-        self.test_pdb_ids = all_pdb_ids
-        
-        n_pos = self.test_labels.sum()
-        n_neg = (self.test_labels == 0).sum()
-        ratio = n_neg / max(n_pos, 1)
-        
-        print(f"\n预测完成:")
-        print(f"  总样本数: {len(self.test_labels)}")
-        print(f"  正样本 (Hotspot): {n_pos} ({100*n_pos/len(self.test_labels):.2f}%)")
-        print(f"  负样本 (Non-Hotspot): {n_neg} ({100*n_neg/len(self.test_labels):.2f}%)")
-        print(f"  不平衡比例: {ratio:.1f}:1")
-        
-        return True
-    
-    # ==================== Figure 1: 模型架构图 (文字描述) ====================
-    
-    def generate_architecture_description(self):
-        """生成模型架构说明文档"""
-        desc = """
-╔══════════════════════════════════════════════════════════════════════════════╗
-║                     PPI-HotspotGAT 模型架构                                   ║
-╠══════════════════════════════════════════════════════════════════════════════╣
-║                                                                              ║
-║  ┌─────────────────────────────────────────────────────────────────────┐     ║
-║  │                        输入特征层                                    │     ║
-║  ├─────────────────────────────────────────────────────────────────────┤     ║
-║  │  ESM-2 (650M)  │  PSSM (20d)  │  HMM (30d)  │  Traditional (27d)   │     ║
-║  │    1280维      │             │             │                       │     ║
-║  └─────────────────────────────────────────────────────────────────────┘     ║
-║                              ↓ 特征拼接 (1357维)                              ║
-║  ┌─────────────────────────────────────────────────────────────────────┐     ║
-║  │              图注意力网络 (GAT) × 2层                                 │     ║
-║  ├─────────────────────────────────────────────────────────────────────┤     ║
-║  │  • Multi-head Attention: 2 heads                                     │     ║
-║  │  • Hidden Dimension: 32                                              │     ║
-║  │  • Dropout: 0.6                                                       │     ║
-║  │  • ELU Activation + Layer Normalization                              │     ║
-║  └─────────────────────────────────────────────────────────────────────┘     ║
-║                              ↓                                              ║
-║  ┌─────────────────────────────────────────────────────────────────────┐     ║
-║  │           Squeeze-and-Excitation (SE) 注意力机制                      │     ║
-║  ├─────────────────────────────────────────────────────────────────────┤     ║
-║  │  • Global Average Pooling → FC → ReLU → FC → Sigmoid                 │     ║
-║  │  • 通道注意力加权                                                    │     ║
-║  └─────────────────────────────────────────────────────────────────────┘     ║
-║                              ↓                                              ║
-║  ┌─────────────────────────────────────────────────────────────────────┐     ║
-║  │                      分类输出层                                       │     ║
-║  ├─────────────────────────────────────────────────────────────────────┤     ║
-║  │  • Linear(32 → 2)                                                    │     ║
-║  │  • Focal Loss (α=0.98, γ=2.0)                                        │     ║
-║  │  • Class Weighting (pos_weight=23.75)                                │     ║
-║  └─────────────────────────────────────────────────────────────────────┘     ║
-║                                                                              ║
-║  关键创新点:                                                                 ║
-║  1. 融合ESM-2预训练蛋白质语言模型特征与传统序列/结构特征                      ║
-║  2. GAT捕获蛋白质残基间的空间相互作用关系                                    ║
-║  3. SE注意力机制自适应调整特征重要性                                        ║
-║  4. Focal Loss + Balanced Sampling 处理46:1极端不平衡                      ║
-║                                                                              ║
-╚══════════════════════════════════════════════════════════════════════════════╝
-"""
-        path = os.path.join(self.results_dir, 'architecture_description.txt')
-        with open(path, 'w', encoding='utf-8') as f:
-            f.write(desc)
-        print(f"\n✅ 架构说明已保存: {path}")
-        return desc
-    
-    # ==================== Figure 2: ROC曲线对比 ====================
-    
-    def plot_roc_curve_comparison(self):
-        """绘制ROC曲线 - 与baseline对比 (Figure 2)"""
-        print("\n" + "-" * 50)
-        print("📈 生成 ROC 曲线对比 (Figure 2)")
-        print("-" * 50)
-        
-        fpr, tpr, _ = metrics.roc_curve(self.test_labels, self.test_probs)
-        auc_score = metrics.roc_auc_score(self.test_labels, self.test_probs)
-        
-        fig, ax = plt.subplots(figsize=(9, 7))
-        
-        ax.plot(fpr, tpr, color='#E74C3C', linewidth=3,
-                label=f'PPI-HotspotGAT (Ours)\nAUC = {auc_score:.4f}',
-                marker='', zorder=5)
-        
-        ppihotspotid_auc = 0.78
-        x_rand = np.linspace(0, 1, 100)
-        y_ppi = np.power(x_rand, 1/(ppihotspotid_auc*2))
-        y_ppi = np.clip(y_ppi, 0, 1)
-        ax.plot(x_rand, y_ppi, color='#3498DB', linewidth=2.5, linestyle='--',
-                label=f'PPI-hotspotID [Baseline]\nAUC ≈ {ppihotspotid_auc:.2f}',
-                zorder=3)
-        
-        deephotresi_auc = 0.89
-        y_deep = np.power(x_rand, 1/(deephotresi_auc*2))
-        y_deep = np.clip(y_deep, 0, 1)
-        ax.plot(x_rand, y_deep, color='#27AE60', linewidth=2.5, linestyle='-.',
-                label=f'DeepHotResi [Reference]\nAUC ≈ {deephotresi_auc:.2f}',
-                zorder=4)
-        
-        ax.fill_between(fpr, tpr, alpha=0.15, color='#E74C3C', zorder=1)
-        ax.plot([0, 1], [0, 1], color='gray', linestyle=':', linewidth=1.5,
-                label='Random (AUC = 0.5000)', alpha=0.7, zorder=2)
-        
-        ax.set_xlabel('False Positive Rate (FPR)', fontsize=13, fontweight='bold')
-        ax.set_ylabel('True Positive Rate (TPR / Recall)', fontsize=13, fontweight='bold')
-        ax.set_title('ROC Curve Comparison for PPI Hotspot Prediction',
-                     fontsize=15, fontweight='bold', pad=15)
-        ax.legend(loc='lower right', fontsize=11, framealpha=0.95)
-        ax.grid(True, alpha=0.3, linestyle='--')
-        ax.set_xlim([-0.02, 1.02])
-        ax.set_ylim([-0.02, 1.02])
-        
-        textstr = f'Improvement vs Baseline:\n+{(auc_score-ppihotspotid_auc)*100:.1f}% AUC'
-        props = dict(boxstyle='round,pad=0.5', facecolor='#E74C3C', alpha=0.15)
-        ax.text(0.55, 0.35, textstr, transform=ax.transAxes, fontsize=11,
-                verticalalignment='top', bbox=props, fontweight='bold')
-        
-        plt.tight_layout()
-        path = os.path.join(self.results_dir, 'figure2_roc_comparison.png')
-        fig.savefig(path, dpi=300, bbox_inches='tight')
-        plt.close(fig)
-        print(f"  ✅ 已保存: {path}")
-        
-        return {'ours': auc_score, 'ppihotspotid': ppihotspotid_auc, 'deephotresi': deephotresi_auc}
-    
-    # ==================== Figure 3: PR曲线对比 ====================
-    
-    def plot_pr_curve_comparison(self):
-        """绘制PR曲线 - 不平衡数据性能 (Figure 3)"""
-        print("\n" + "-" * 50)
-        print("📉 生成 PR 曲线对比 (Figure 3)")
-        print("-" * 50)
-        
-        precision, recall, _ = metrics.precision_recall_curve(self.test_labels, self.test_probs)
-        pr_auc = metrics.average_precision_score(self.test_labels, self.test_probs)
-        baseline_pr = self.test_labels.sum() / len(self.test_labels)
-        
-        fig, ax = plt.subplots(figsize=(9, 7))
-        
-        ax.plot(recall, precision, color='#E74C3C', linewidth=3,
-                label=f'PPI-HotspotGAT (Ours)\nPR-AUC = {pr_auc:.4f}',
-                zorder=5)
-        
-        ax.axhline(y=baseline_pr, color='gray', linestyle='--', linewidth=2,
-                   label=f'Random Baseline\n(PR-AUC = {baseline_pr:.4f})',
-                   alpha=0.8, zorder=2)
-        
-        ppihotspotid_pr = 0.08
-        recall_interp = np.linspace(0, 1, 100)
-        precision_ppi = ppihotspotid_pr * (1 + 0.5 * (1 - recall_interp))
-        precision_ppi = np.clip(precision_ppi, 0, 0.35)
-        ax.plot(recall_interp, precision_ppi, color='#3498DB', linewidth=2.5, linestyle='--',
-                label=f'PPI-hotspotID\nPR-AUC ≈ {ppihotspotid_pr:.2f}',
-                zorder=3)
-        
-        deephotresi_pr = 0.18
-        precision_deep = deephotresi_pr * (1 + 0.8 * (1 - recall_interp))
-        precision_deep = np.clip(precision_deep, 0, 0.50)
-        ax.plot(recall_interp, precision_deep, color='#27AE60', linewidth=2.5, linestyle='-.',
-                label=f'DeepHotResi\nPR-AUC ≈ {deephotresi_pr:.2f}',
-                zorder=4)
-        
-        ax.fill_between(recall, precision, alpha=0.15, color='#E74C3C', zorder=1)
-        
-        ax.set_xlabel('Recall (Sensitivity)', fontsize=13, fontweight='bold')
-        ax.set_ylabel('Precision', fontsize=13, fontweight='bold')
-        ax.set_title('Precision-Recall Curve (Class Imbalance: 46.49:1)',
-                     fontsize=15, fontweight='bold', pad=15)
-        ax.legend(loc='upper right', fontsize=10, framealpha=0.95)
-        ax.grid(True, alpha=0.3, linestyle='--')
-        ax.set_xlim([-0.02, 1.02])
-        ax.set_ylim([-0.02, 0.55])
-        
-        textstr = f'Imbalance Ratio: 46.49:1\nPositive: {self.test_labels.sum()} samples'
-        props = dict(boxstyle='round,pad=0.5', facecolor='wheat', alpha=0.5)
-        ax.text(0.02, 0.98, textstr, transform=ax.transAxes, fontsize=10,
-                verticalalignment='top', bbox=props)
-        
-        plt.tight_layout()
-        path = os.path.join(self.results_dir, 'figure3_pr_comparison.png')
-        fig.savefig(path, dpi=300, bbox_inches='tight')
-        plt.close(fig)
-        print(f"  ✅ 已保存: {path}")
-        
-        return {'ours': pr_auc, 'baseline': baseline_pr}
-    
-    # ==================== Figure 4: 消融实验 ====================
-    
-    def generate_ablation_study(self):
-        """消融实验 - 特征重要性分析 (Figure 4 & Table 2)"""
-        print("\n" + "-" * 50)
-        print("🔬 生成消融实验结果 (Figure 4 & Table 2)")
-        print("-" * 50)
-        
-        ablation_csv = os.path.join(RESULTS_DIR, 'ablation_results.csv')
-        
-        if os.path.exists(ablation_csv):
-            df_existing = pd.read_csv(ablation_csv)
-            print(f"  📂 从文件加载已有消融结果: {ablation_csv}")
+            torch.save({
+                'epoch': epoch,
+                'model_state_dict': model.state_dict(),
+                'optimizer_state_dict': model.optimizer.state_dict(),
+                'val_auc': best_val_auc,
+            }, model_path)
         else:
-            df_existing = None
+            patience_counter += 1
         
-        ablation_data = {
-            'Configuration': [
-                'Full Model (Ours)',
-                'w/o ESM-2 Features',
-                'w/o PSSM Features',
-                'w/o HMM Features',
-                'w/o Traditional Features',
-                'ESM-2 Only'
-            ],
-            'Features': [
-                'All (ESM2+PSSM+HMM+Trad)',
-                'PSSM + HMM + Traditional',
-                'ESM2 + HMM + Traditional',
-                'ESM2 + PSSM + Traditional',
-                'ESM2 + PSSM + HMM',
-                'ESM-2 only'
-            ],
-            'Input_Dim': [1357, 77, 1337, 1327, 1330, 1280],
-            'ROC_AUC': [0.9148, 0.72, 0.9012, 0.9089, 0.8934, 0.7385],
-            'PR_AUC': [0.1683, 0.045, 0.1521, 0.1612, 0.1398, 0.0549],
-            'F1_Score': [0.1606, 0.08, 0.148, 0.156, 0.134, 0.140],
-            'Balanced_F1': [0.7905, 0.52, 0.76, 0.78, 0.73, 0.55],
-            'Recall': [0.9113, 0.78, 0.89, 0.90, 0.87, 0.42],
-            'Precision': [0.0885, 0.04, 0.082, 0.086, 0.075, 0.084]
-        }
+        model.scheduler.step(val_metrics['AUC'])
         
-        if df_existing is not None:
-            for col in ['ROC_AUC', 'PR_AUC', 'F1_Score']:
-                if col in df_existing.columns:
-                    for i, row in df_existing.iterrows():
-                        exp_name = row.get('experiment', row.get('Experiment', ''))
-                        if 'Full' in str(exp_name) or 'all' in str(exp_name).lower():
-                            ablation_data['ROC_AUC'][0] = row.get('roc_auc', ablation_data['ROC_AUC'][0])
-                            ablation_data['PR_AUC'][0] = row.get('pr_auc', ablation_data['PR_AUC'][0])
-                            ablation_data['F1_Score'][0] = row.get('f1', ablation_data['F1_Score'][0])
-                        elif 'ESM2_only' in str(exp_name) or 'esm2' in str(exp_name).lower():
-                            ablation_data['ROC_AUC'][5] = row.get('roc_auc', ablation_data['ROC_AUC'][5])
-                            ablation_data['PR_AUC'][5] = row.get('pr_auc', ablation_data['PR_AUC'][5])
-                            ablation_data['F1_Score'][5] = row.get('f1', ablation_data['F1_Score'][5])
-        
-        df = pd.DataFrame(ablation_data)
-        
-        fig, axes = plt.subplots(1, 2, figsize=(16, 6.5))
-        
-        colors = ['#E74C3C', '#95A5A6', '#F39C12', '#3498DB', '#9B59B6', '#1ABC9C']
-        x = np.arange(len(df))
-        width = 0.35
-        
-        bars1 = axes[0].bar(x - width/2, df['ROC_AUC'], width, 
-                            label='ROC-AUC', color=colors, edgecolor='black', linewidth=1.2)
-        axes[0].set_xlabel('Feature Configuration', fontsize=12, fontweight='bold')
-        axes[0].set_ylabel('ROC-AUC Score', fontsize=12, fontweight='bold')
-        axes[0].set_title('Ablation Study: ROC-AUC', fontsize=14, fontweight='bold')
-        axes[0].set_xticks(x)
-        axes[0].set_xticklabels([c.replace(' ', '\n') for c in df['Configuration']], 
-                                rotation=0, ha='center', fontsize=8)
-        axes[0].legend(fontsize=10)
-        axes[0].grid(axis='y', alpha=0.3)
-        axes[0].set_ylim([0.65, 1.0])
-        axes[0].axhline(y=df['ROC_AUC'].iloc[0], color='red', linestyle='--', alpha=0.5, linewidth=1)
-        
-        for bar, val in zip(bars1, df['ROC_AUC']):
-            axes[0].text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.005,
-                        f'{val:.3f}', ha='center', va='bottom', fontsize=8, fontweight='bold')
-        
-        bars2 = axes[1].bar(x + width/2, df['Balanced_F1'], width,
-                            label='Balanced F1', color=colors, edgecolor='black', linewidth=1.2)
-        axes[1].set_xlabel('Feature Configuration', fontsize=12, fontweight='bold')
-        axes[1].set_ylabel('Balanced F1 Score', fontsize=12, fontweight='bold')
-        axes[1].set_title('Ablation Study: Balanced F1 Score', fontsize=14, fontweight='bold')
-        axes[1].set_xticks(x)
-        axes[1].set_xticklabels([c.replace(' ', '\n') for c in df['Configuration']], 
-                                rotation=0, ha='center', fontsize=8)
-        axes[1].legend(fontsize=10)
-        axes[1].grid(axis='y', alpha=0.3)
-        axes[1].set_ylim([0.4, 0.85])
-        axes[1].axhline(y=df['Balanced_F1'].iloc[0], color='red', linestyle='--', alpha=0.5, linewidth=1)
-        
-        for bar, val in zip(bars2, df['Balanced_F1']):
-            axes[1].text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.008,
-                        f'{val:.3f}', ha='center', va='bottom', fontsize=8, fontweight='bold')
-        
-        plt.tight_layout()
-        path = os.path.join(self.results_dir, 'figure4_ablation_study.png')
-        fig.savefig(path, dpi=300, bbox_inches='tight')
-        plt.close(fig)
-        print(f"  ✅ 已保存: {path}")
-        
-        table_path = os.path.join(self.results_dir, 'table2_ablation_results.csv')
-        df.to_csv(table_path, index=False)
-        print(f"  ✅ 表格已保存: {table_path}")
-        
-        print(f"\n  📊 消融实验关键发现:")
-        print(f"    • ESM-2特征最重要: 移除后ROC-AUC下降 {(df['ROC_AUC'][0]-df['ROC_AUC'][1])*100:.1f}%")
-        print(f"    • 传统特征贡献: 移除后下降 {(df['ROC_AUC'][0]-df['ROC_AUC'][4])*100:.1f}%")
-        print(f"    • PSSM特征贡献: 移除后下降 {(df['ROC_AUC'][0]-df['ROC_AUC'][2])*100:.1f}%")
-        print(f"    • HMM特征贡献: 移除后下降 {(df['ROC_AUC'][0]-df['ROC_AUC'][3])*100:.1f}%")
-        
-        return df
+        if patience_counter >= PATIENCE:
+            break
     
-    # ==================== Figure 5: 不平衡处理方法对比 ====================
+    checkpoint = torch.load(os.path.join(MODELS_DIR, f'best_model_fold{fold}.pth'))
+    model.load_state_dict(checkpoint['model_state_dict'])
+    return model
+
+
+def plot_roc_curves_five_fold(all_fpr, all_tpr, all_auc, save_path):
+    fig, ax = plt.subplots(figsize=(8, 7))
+    colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd']
     
-    def compare_imbalance_methods(self):
-        """不平衡处理方法对比实验 (Figure 5 & Table 3)"""
-        print("\n" + "-" * 50)
-        print("⚖️ 生成不平衡处理方法对比 (Figure 5 & Table 3)")
-        print("-" * 50)
-        
-        methods_data = {
-            'Method': [
-                'Baseline\n(Cross-Entropy)',
-                '+ Focal Loss\n(α=0.98, γ=2.0)',
-                '+ Balanced Sampling\n(Training)',
-                '+ Class Weights\n(w=23.75)',
-                'Full Strategy\n(Ours)'
-            ],
-            'ROC_AUC': [0.850, 0.885, 0.900, 0.908, 0.915],
-            'Balanced_F1': [0.420, 0.580, 0.680, 0.730, 0.791],
-            'Recall': [0.720, 0.800, 0.860, 0.890, 0.911],
-            'Precision': [0.290, 0.430, 0.540, 0.610, 0.700],
-            'PR_AUC': [0.080, 0.115, 0.140, 0.155, 0.168],
-            'Description': [
-                'Standard CE loss, no imbalance handling',
-                'Focus on hard examples, down-weight easy negatives',
-                'Equal sampling of positive/negative batches',
-                'Weight positive class higher in loss',
-                'Combined: Focal + Sampling + Class Weights'
-            ]
-        }
-        df = pd.DataFrame(methods_data)
-        
-        fig, axes = plt.subplots(2, 2, figsize=(14, 11))
-        
-        colors = ['#BDC3C7', '#3498DB', '#2ECC71', '#F39C12', '#E74C3C']
-        x = np.arange(len(df))
-        
-        metrics_to_plot = [
-            ('ROC_AUC', 'ROC-AUC', axes[0, 0], [0.82, 0.94]),
-            ('Balanced_F1', 'Balanced F1 Score', axes[0, 1], [0.35, 0.85]),
-            ('Recall', 'Recall (Sensitivity)', axes[1, 0], [0.65, 0.95]),
-            ('Precision', 'Precision', axes[1, 1], [0.20, 0.76])
-        ]
-        
-        for metric, title, ax, ylim in metrics_to_plot:
-            bars = ax.bar(x, df[metric], color=colors, edgecolor='black', linewidth=1.2)
-            ax.set_xlabel('Strategy', fontsize=11, fontweight='bold')
-            ax.set_ylabel(title, fontsize=11, fontweight='bold')
-            ax.set_title(f'{title} Comparison', fontsize=13, fontweight='bold')
-            ax.set_xticks(x)
-            short_labels = ['CE', 'FL', 'BS', 'CW', 'Ours']
-            ax.set_xticklabels(short_labels, fontsize=10, fontweight='bold')
-            ax.grid(axis='y', alpha=0.3)
-            ax.set_ylim(ylim)
+    for i in range(len(all_fpr)):
+        ax.plot(all_fpr[i], all_tpr[i], color=colors[i], lw=1.5,
+                label=f'Fold {i+1} (AUC = {all_auc[i]:.3f})', alpha=0.8)
+    
+    mean_fpr = np.linspace(0, 1, 100)
+    mean_tpr = np.zeros_like(mean_fpr)
+    for i in range(len(all_fpr)):
+        interp_tpr = np.interp(mean_fpr, all_fpr[i], all_tpr[i])
+        interp_tpr[0] = 0.0
+        mean_tpr += interp_tpr
+    mean_tpr /= len(all_fpr)
+    mean_auc = metrics.auc(mean_fpr, mean_tpr)
+    std_auc = np.std(all_auc)
+    
+    ax.plot(mean_fpr, mean_tpr, color='red', lw=2.5,
+            label=f'Mean ROC (AUC = {mean_auc:.2f}$\\pm${std_auc:.3f})')
+    
+    std_tpr = np.zeros_like(mean_fpr)
+    for i in range(len(all_fpr)):
+        interp_tpr = np.interp(mean_fpr, all_fpr[i], all_tpr[i])
+        interp_tpr[0] = 0.0
+        std_tpr += (interp_tpr - mean_tpr) ** 2
+    std_tpr = np.sqrt(std_tpr / len(all_fpr))
+    tpr_upper = np.minimum(mean_tpr + std_tpr, 1)
+    tpr_lower = np.maximum(mean_tpr - std_tpr, 0)
+    ax.fill_between(mean_fpr, tpr_lower, tpr_upper, color='red', alpha=0.15)
+    
+    ax.plot([0, 1], [0, 1], 'k--', lw=1.5, alpha=0.5)
+    ax.set_xlim([-0.02, 1.02])
+    ax.set_ylim([-0.02, 1.02])
+    ax.set_xlabel('False Positive Rate', fontsize=14)
+    ax.set_ylabel('True Positive Rate', fontsize=14)
+    ax.set_title('ROC Curve - Five-fold Cross Validation', fontsize=16)
+    ax.legend(loc='lower right', fontsize=10)
+    ax.grid(True, alpha=0.3)
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    plt.close()
+    print(f"ROC曲线已保存: {save_path}")
+
+
+def plot_pr_curves_five_fold(all_recall, all_precision, all_pr_auc, save_path):
+    fig, ax = plt.subplots(figsize=(8, 7))
+    colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd']
+    
+    for i in range(len(all_recall)):
+        ax.plot(all_recall[i], all_precision[i], color=colors[i], lw=1.5,
+                label=f'Fold {i+1} (AUC = {all_pr_auc[i]:.3f})', alpha=0.8)
+    
+    mean_recall = np.linspace(0, 1, 100)
+    mean_precision = np.zeros_like(mean_recall)
+    for i in range(len(all_recall)):
+        interp_prec = np.interp(mean_recall, all_recall[i][::-1], all_precision[i][::-1])
+        mean_precision += interp_prec
+    mean_precision /= len(all_recall)
+    mean_pr_auc = np.mean(all_pr_auc)
+    std_pr_auc = np.std(all_pr_auc)
+    
+    ax.plot(mean_recall, mean_precision, color='red', lw=2.5,
+            label=f'Mean PR (AUC = {mean_pr_auc:.2f}$\\pm${std_pr_auc:.3f})')
+    
+    ax.set_xlim([-0.02, 1.02])
+    ax.set_ylim([-0.02, 1.02])
+    ax.set_xlabel('Recall', fontsize=14)
+    ax.set_ylabel('Precision', fontsize=14)
+    ax.set_title('Precision-Recall Curve - Five-fold Cross Validation', fontsize=16)
+    ax.legend(loc='lower left', fontsize=10)
+    ax.grid(True, alpha=0.3)
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    plt.close()
+    print(f"PR曲线已保存: {save_path}")
+
+
+def plot_confusion_matrix(y_true, y_pred, save_path, title='Confusion Matrix'):
+    cm = confusion_matrix(y_true, y_pred)
+    fig, ax = plt.subplots(figsize=(7, 6))
+    im = ax.imshow(cm, interpolation='nearest', cmap=plt.cm.Blues)
+    ax.set_title(title, fontsize=16)
+    plt.colorbar(im, fraction=0.046, pad=0.04)
+    
+    classes = ['Non-hotspot', 'Hotspot']
+    tick_marks = np.arange(len(classes))
+    ax.set_xticks(tick_marks)
+    ax.set_xticklabels(classes, fontsize=12)
+    ax.set_yticks(tick_marks)
+    ax.set_yticklabels(classes, fontsize=12)
+    
+    thresh = cm.max() / 2
+    for i in range(cm.shape[0]):
+        for j in range(cm.shape[1]):
+            ax.text(j, i, format(cm[i, j], 'd'),
+                    ha='center', va='center', fontsize=16,
+                    color='white' if cm[i, j] > thresh else 'black')
+    
+    ax.set_ylabel('True Label', fontsize=14)
+    ax.set_xlabel('Predicted Label', fontsize=14)
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    plt.close()
+    print(f"混淆矩阵已保存: {save_path}")
+
+
+def plot_attention_weights(model, data_loader, device, save_path, top_n=20):
+    model.eval()
+    all_attn = []
+    all_labels = []
+    all_residue_ids = []
+    
+    with torch.no_grad():
+        for batch in data_loader:
+            node_features = batch['node_features'].to(device)
+            labels = batch['labels'].to(device)
+            graphs = batch['graphs'].to(device)
             
-            for bar, val in zip(bars, df[metric]):
-                ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.01*(ylim[1]-ylim[0]),
-                       f'{val:.3f}', ha='center', va='bottom', fontsize=9, fontweight='bold')
+            x = node_features.float()
+            x_se = model.se(x)
+            h = model.input_proj(x_se)
             
-            bars[-1].set_edgecolor('#E74C3C')
-            bars[-1].set_linewidth(3)
-        
-        plt.suptitle('Imbalance Handling Strategies Comparison\n(Data Imbalance: 46.49:1)',
-                     fontsize=15, fontweight='bold', y=1.02)
-        plt.tight_layout()
-        path = os.path.join(self.results_dir, 'figure5_imbalance_comparison.png')
-        fig.savefig(path, dpi=300, bbox_inches='tight')
-        plt.close(fig)
-        print(f"  ✅ 已保存: {path}")
-        
-        table_path = os.path.join(self.results_dir, 'table3_imbalance_methods.csv')
-        df[['Method', 'ROC_AUC', 'Balanced_F1', 'Recall', 'Precision', 'PR_AUC']].to_csv(
-            table_path, index=False)
-        print(f"  ✅ 表格已保存: {table_path}")
-        
-        return df
-    
-    # ==================== Figure 6: Top-K 后处理分析 ====================
-    
-    def analyze_topk_postprocessing(self):
-        """Top-K后处理效果分析 (Figure 6 & Table 4)"""
-        print("\n" + "-" * 50)
-        print("🎯 生成 Top-K 后处理分析 (Figure 6 & Table 4)")
-        print("-" * 50)
-        
-        protein_results = defaultdict(lambda: {'labels': [], 'probs': [], 'indices': []})
-        
-        for idx, (label, prob, pdb_id) in enumerate(zip(self.test_labels, self.test_probs, self.test_pdb_ids)):
-            protein_results[pdb_id]['labels'].append(label)
-            protein_results[pdb_id]['probs'].append(prob)
-            protein_results[pdb_id]['indices'].append(idx)
-        
-        top_k_values = [1, 3, 5, 7, 10, 15, 20, 30]
-        results = []
-        
-        for top_k in top_k_values:
-            total_tp = 0
-            total_fp = 0
-            total_fn = 0
-            total_pred_hotspots = 0
-            n_proteins_with_hotspots = 0
+            for i, gat_layer in enumerate(model.gat_layers):
+                attn = gat_layer(g, h)
+                h_new = attn.flatten(1)
+                h_new = model.layer_norms[i](h_new)
+                h_new = F.relu(h_new)
+                h = h + h_new
             
-            for pdb_id, data in protein_results.items():
-                prot_labels = np.array(data['labels'])
-                prot_probs = np.array(data['probs'])
-                
-                n_hotspots = prot_labels.sum()
-                if n_hotspots == 0:
-                    continue
-                
-                n_proteins_with_hotspots += 1
-                k = min(top_k, len(prot_probs))
-                top_indices = np.argsort(prot_probs)[-k:]
-                
-                preds = np.zeros(len(prot_probs), dtype=int)
-                preds[top_indices] = 1
-                
-                tp = ((preds == 1) & (prot_labels == 1)).sum()
-                fp = ((preds == 1) & (prot_labels == 0)).sum()
-                fn = ((preds == 0) & (prot_labels == 1)).sum()
-                
-                total_tp += tp
-                total_fp += fp
-                total_fn += fn
-                total_pred_hotspots += k
+            labels_flat = labels.flatten()
+            valid_mask = labels_flat >= 0
             
-            precision = total_tp / (total_tp + total_fp) if (total_tp + total_fp) > 0 else 0
-            recall = total_tp / (total_tp + total_fn) if (total_tp + total_fn) > 0 else 0
-            f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0
+            pos_mask = (labels_flat == 1) & valid_mask
+            if pos_mask.sum() > 0:
+                h_norm = torch.norm(h, dim=1)
+                all_attn.extend(h_norm[pos_mask].cpu().numpy())
+                all_labels.extend(labels_flat[pos_mask].cpu().numpy())
+    
+    if len(all_attn) == 0:
+        print("没有正样本，跳过注意力可视化")
+        return
+    
+    attn_array = np.array(all_attn)
+    
+    fig, ax = plt.subplots(figsize=(10, 6))
+    ax.hist(attn_array, bins=50, color='steelblue', edgecolor='black', alpha=0.7)
+    ax.set_xlabel('Attention Weight (Feature Norm)', fontsize=14)
+    ax.set_ylabel('Count', fontsize=14)
+    ax.set_title('Distribution of Attention Weights for Hotspot Residues', fontsize=16)
+    ax.grid(True, alpha=0.3)
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    plt.close()
+    print(f"注意力权重分布已保存: {save_path}")
+
+
+def feature_ablation_study(data_list, device):
+    print("\n" + "=" * 60)
+    print("特征消融实验 (类似DeepHotResi Table 4)")
+    print("=" * 60)
+    
+    ablation_configs = {
+        'Full Model': {'use_esm2': True, 'use_pssm': True, 'use_hmm': True, 'use_trad': True},
+        'w/o ESM-2': {'use_esm2': False, 'use_pssm': True, 'use_hmm': True, 'use_trad': True},
+        'w/o PSSM': {'use_esm2': True, 'use_pssm': False, 'use_hmm': True, 'use_trad': True},
+        'w/o HMM': {'use_esm2': True, 'use_pssm': True, 'use_hmm': False, 'use_trad': True},
+        'w/o Traditional': {'use_esm2': True, 'use_pssm': True, 'use_hmm': True, 'use_trad': False},
+    }
+    
+    feature_dims = {
+        'esm2': ESM2_DIM,
+        'pssm': PSSM_DIM,
+        'hmm': HMM_DIM,
+        'trad': TRADITIONAL_DIM,
+    }
+    
+    all_results = {}
+    
+    for config_name, config in ablation_configs.items():
+        print(f"\n--- {config_name} ---")
+        
+        input_dim = 0
+        if config['use_esm2']:
+            input_dim += feature_dims['esm2']
+        if config['use_pssm']:
+            input_dim += feature_dims['pssm']
+        if config['use_hmm']:
+            input_dim += feature_dims['hmm']
+        if config['use_trad']:
+            input_dim += feature_dims['trad']
+        
+        if input_dim == 0:
+            continue
+        
+        modified_data = []
+        for item in data_list:
+            new_item = dict(item)
+            features = item['node_features']
+            start = 0
+            selected_features = []
             
-            results.append({
-                'Top_K': top_k,
-                'Precision': round(precision, 4),
-                'Recall': round(recall, 4),
-                'F1_Score': round(f1, 4),
-                'TP': total_tp,
-                'FP': total_fp,
-                'FN': total_fn,
-                'N_Proteins': n_proteins_with_hotspots
-            })
+            if config['use_esm2']:
+                selected_features.append(features[:, start:start+ESM2_DIM])
+            start += ESM2_DIM
+            
+            if config['use_pssm']:
+                selected_features.append(features[:, start:start+PSSM_DIM])
+            start += PSSM_DIM
+            
+            if config['use_hmm']:
+                selected_features.append(features[:, start:start+HMM_DIM])
+            start += HMM_DIM
+            
+            if config['use_trad']:
+                selected_features.append(features[:, start:start+TRADITIONAL_DIM])
+            
+            if selected_features:
+                new_item['node_features'] = np.concatenate(selected_features, axis=1)
+            modified_data.append(new_item)
         
-        df = pd.DataFrame(results)
+        set_seed()
+        kf = KFold(n_splits=N_FOLDS, shuffle=True, random_state=RANDOM_SEED)
         
-        fig, axes = plt.subplots(1, 2, figsize=(15, 5.5))
+        fold_results = []
+        for fold, (train_idx, val_idx) in enumerate(kf.split(modified_data)):
+            train_data = [modified_data[i] for i in train_idx]
+            val_data = [modified_data[i] for i in val_idx]
+            
+            train_dataset = PPIHotspotDataset(train_data)
+            val_dataset = PPIHotspotDataset(val_data)
+            
+            sampler = get_weighted_sampler(train_data)
+            train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE,
+                                      sampler=sampler, collate_fn=collate_fn)
+            val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE,
+                                   shuffle=False, collate_fn=collate_fn)
+            
+            model = PPIHotspotGAT(input_dim=input_dim)
+            model = model.to(device)
+            
+            class_weights_info = calculate_class_weights(train_data)
+            model.criterion = WeightedFocalLoss(pos_weight=class_weights_info['pos_weight'])
+            
+            model = train_fold(model, train_loader, val_loader, device, fold+1)
+            
+            y_true, y_pred, y_prob = evaluate_balanced(model, val_loader, device)
+            fold_metrics = calc_metrics(y_true, y_pred, y_prob)
+            fold_results.append(fold_metrics)
         
-        axes[0].plot(df['Top_K'], df['Precision'], 'o-', color='#E74C3C',
-                     linewidth=2.5, markersize=9, label='Precision', markerfacecolor='white',
-                     markeredgewidth=2)
-        axes[0].plot(df['Top_K'], df['Recall'], 's-', color='#3498DB',
-                     linewidth=2.5, markersize=9, label='Recall', markerfacecolor='white',
-                     markeredgewidth=2)
-        axes[0].plot(df['Top_K'], df['F1_Score'], '^-', color='#27AE60',
-                     linewidth=2.5, markersize=9, label='F1 Score', markerfacecolor='white',
-                     markeredgewidth=2)
+        avg_results = {}
+        for key in ['SEN', 'SPE', 'PRE', 'F1', 'MCC', 'AUC']:
+            values = [r[key] for r in fold_results]
+            avg_results[key] = np.mean(values)
+            avg_results[f'{key}_std'] = np.std(values)
         
-        best_f1_idx = df['F1_Score'].idxmax()
-        best_k = df.loc[best_f1_idx, 'Top_K']
-        axes[0].axvline(x=best_k, color='gray', linestyle=':', linewidth=1.5, alpha=0.7)
-        axes[0].scatter([best_k], [df.loc[best_f1_idx, 'F1_Score']], 
-                        color='#27AE60', s=200, zorder=10, edgecolor='black', linewidth=2)
-        axes[0].annotate(f'Best K={best_k}\nF1={df.loc[best_f1_idx, "F1_Score"]:.3f}',
-                        xy=(best_k, df.loc[best_f1_idx, 'F1_Score']),
-                        xytext=(best_k+3, df.loc[best_f1_idx, 'F1_Score']+0.05),
-                        fontsize=10, fontweight='bold',
-                        arrowprops=dict(arrowstyle='->', color='gray'))
-        
-        axes[0].set_xlabel('K Value (Top-K Predictions per Protein)', fontsize=12, fontweight='bold')
-        axes[0].set_ylabel('Score', fontsize=12, fontweight='bold')
-        axes[0].set_title('Top-K Post-processing: Performance vs K', fontsize=13, fontweight='bold')
-        axes[0].legend(fontsize=11, loc='center right')
-        axes[0].grid(True, alpha=0.3)
-        axes[0].set_xticks(top_k_values)
-        
-        metrics_names = ['Precision', 'Recall', 'F1 Score']
-        metrics_vals = [df.loc[best_f1_idx, 'Precision'],
-                       df.loc[best_f1_idx, 'Recall'],
-                       df.loc[best_f1_idx, 'F1_Score']]
-        colors_bar = ['#E74C3C', '#3498DB', '#27AE60']
-        
-        bars = axes[1].bar(metrics_names, metrics_vals, color=colors_bar,
-                           edgecolor='black', linewidth=1.5, width=0.6)
-        axes[1].set_ylabel('Score', fontsize=12, fontweight='bold')
-        axes[1].set_title(f'Optimal Performance at K={best_k}', fontsize=13, fontweight='bold')
-        axes[1].grid(axis='y', alpha=0.3)
-        axes[1].set_ylim([0, max(metrics_vals)*1.2])
-        
-        for bar, val in zip(bars, metrics_vals):
-            axes[1].text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.01,
-                        f'{val:.3f}', ha='center', va='bottom', fontsize=12, fontweight='bold')
-        
-        plt.tight_layout()
-        path = os.path.join(self.results_dir, 'figure6_topk_analysis.png')
-        fig.savefig(path, dpi=300, bbox_inches='tight')
-        plt.close(fig)
-        print(f"  ✅ 已保存: {path}")
-        
-        table_path = os.path.join(self.results_dir, 'table4_topk_results.csv')
-        df.to_csv(table_path, index=False)
-        print(f"  ✅ 表格已保存: {table_path}")
-        print(f"\n  🎯 Top-K 分析结果:")
-        print(f"    • 最优K值: K={best_k}, F1={df.loc[best_f1_idx, 'F1_Score']:.3f}")
-        print(f"    • Precision提升: 从{df.iloc[0]['Precision']:.3f}(K=1) 到最佳值")
-        
-        return df
+        all_results[config_name] = avg_results
+        print(f"  AUC: {avg_results['AUC']:.4f} ± {avg_results['AUC_std']:.4f}")
+        print(f"  F1:  {avg_results['F1']:.4f} ± {avg_results['F1_std']:.4f}")
+        print(f"  MCC: {avg_results['MCC']:.4f} ± {avg_results['MCC_std']:.4f}")
     
-    # ==================== Figure 7: 混淆矩阵 ====================
+    results_df = pd.DataFrame(all_results).T
+    results_df = results_df[['SEN', 'SPE', 'PRE', 'F1', 'MCC', 'AUC']]
+    results_df.to_csv(os.path.join(PAPER_DIR, 'feature_ablation_results.csv'))
     
-    def plot_confusion_matrix(self, threshold=0.88):
-        """混淆矩阵 (Figure 7)"""
-        print("\n" + "-" * 50)
-        print("🎨 生成混淆矩阵 (Figure 7)")
-        print("-" * 50)
+    print("\n" + "=" * 60)
+    print("特征消融实验结果汇总")
+    print("=" * 60)
+    print(results_df.to_string(float_format='%.4f'))
+    
+    return results_df
+
+
+def run_five_fold_with_curves(data_list, device):
+    print("\n" + "=" * 60)
+    print("5折交叉验证 + 生成论文图表")
+    print("=" * 60)
+    
+    set_seed()
+    class_weights_info = calculate_class_weights(data_list)
+    
+    kf = KFold(n_splits=N_FOLDS, shuffle=True, random_state=RANDOM_SEED)
+    
+    all_fold_metrics = []
+    all_fpr, all_tpr, all_auc = [], [], []
+    all_recall, all_precision, all_pr_auc = [], [], []
+    all_y_true_bal, all_y_pred_bal, all_y_prob_bal = [], [], []
+    all_y_true_full, all_y_prob_full = [], [], []
+    
+    for fold, (train_idx, val_idx) in enumerate(kf.split(data_list)):
+        print(f"\nFold {fold+1}/{N_FOLDS}")
         
-        preds = (self.test_probs >= threshold).astype(int)
-        cm = metrics.confusion_matrix(self.test_labels, preds)
+        train_data = [data_list[i] for i in train_idx]
+        val_data = [data_list[i] for i in val_idx]
         
-        tn, fp, fn, tp = cm.ravel()
+        train_dataset = PPIHotspotDataset(train_data)
+        val_dataset = PPIHotspotDataset(val_data)
         
-        accuracy = (tp + tn) / (tp + tn + fp + fn)
-        f1 = metrics.f1_score(self.test_labels, preds)
-        recall = metrics.recall_score(self.test_labels, preds)
-        precision = metrics.precision_score(self.test_labels, preds)
-        specificity = tn / (tn + fp) if (tn + fp) > 0 else 0
-        mcc = metrics.matthews_corrcoef(self.test_labels, preds)
+        sampler = get_weighted_sampler(train_data)
+        train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE,
+                                  sampler=sampler, collate_fn=collate_fn)
+        val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE,
+                               shuffle=False, collate_fn=collate_fn)
         
-        fig, ax = plt.subplots(figsize=(9, 7))
+        model = PPIHotspotGAT()
+        model = model.to(device)
+        model.criterion = WeightedFocalLoss(pos_weight=class_weights_info['pos_weight'])
         
-        im = ax.imshow(cm, interpolation='nearest', cmap='Blues')
-        cbar = ax.figure.colorbar(im, ax=ax, shrink=0.8)
-        cbar.ax.set_ylabel('Count', rotation=-90, va="bottom", fontsize=11)
+        model = train_fold(model, train_loader, val_loader, device, fold+1)
         
-        classes = ['Non-Hotspot', 'Hotspot']
-        tick_marks = np.arange(len(classes))
-        ax.set_xticks(tick_marks)
-        ax.set_xticklabels(classes, fontsize=13, fontweight='bold')
-        ax.set_yticks(tick_marks)
-        ax.set_yticklabels(classes, fontsize=13, fontweight='bold')
+        y_true_bal, y_pred_bal, y_prob_bal = evaluate_balanced(model, val_loader, device)
+        fold_metrics = calc_metrics(y_true_bal, y_pred_bal, y_prob_bal)
+        all_fold_metrics.append(fold_metrics)
         
-        thresh = cm.max() / 2.
-        for i in range(cm.shape[0]):
-            for j in range(cm.shape[1]):
-                pct = cm[i, j] / cm.sum() * 100
-                ax.text(j, i, f'{cm[i, j]}\n({pct:.1f}%)',
-                        ha="center", va="center",
-                        color="white" if cm[i, j] > thresh else "black",
-                        fontsize=14, fontweight='bold')
+        all_y_true_bal.extend(y_true_bal)
+        all_y_pred_bal.extend(y_pred_bal)
+        all_y_prob_bal.extend(y_prob_bal)
         
-        ax.set_ylabel('True Label', fontsize=13, fontweight='bold')
-        ax.set_xlabel('Predicted Label', fontsize=13, fontweight='bold')
-        ax.set_title(f'Confusion Matrix (Threshold = {threshold})\nPPI Hotspot Prediction Results',
-                     fontsize=14, fontweight='bold', pad=15)
+        y_true_full, y_pred_full, y_prob_full = evaluate_model(model, val_loader, device)
+        all_y_true_full.extend(y_true_full)
+        all_y_prob_full.extend(y_prob_full)
         
-        stats_text = (
-            f'━━━ Performance Metrics ━━━\n'
-            f'Accuracy:  {accuracy:.4f}\n'
-            f'Precision: {precision:.4f}\n'
-            f'Recall:    {recall:.4f}\n'
-            f'F1 Score:  {f1:.4f}\n'
-            f'Specificity: {specificity:.4f}\n'
-            f'MCC:       {mcc:.4f}\n'
-            f'━━━━━━━━━━━━━━━━━━━━━━━\n'
-            f'TP={tp}  FP={fp}\n'
-            f'FN={fn}  TN={tn}'
+        fpr, tpr, _ = roc_curve(y_true_bal, y_prob_bal)
+        all_fpr.append(fpr)
+        all_tpr.append(tpr)
+        all_auc.append(fold_metrics['AUC'])
+        
+        prec, rec, _ = precision_recall_curve(y_true_bal, y_prob_bal)
+        all_recall.append(rec)
+        all_precision.append(prec)
+        all_pr_auc.append(fold_metrics['PR-AUC'])
+        
+        plot_confusion_matrix(
+            y_true_bal, y_pred_bal,
+            os.path.join(PAPER_DIR, f'confusion_matrix_fold{fold+1}.png'),
+            title=f'Confusion Matrix - Fold {fold+1}'
         )
-        props = dict(boxstyle='round,pad=0.6', facecolor='lightyellow', 
-                     edgecolor='gray', alpha=0.9)
-        ax.text(1.28, 0.5, stats_text, transform=ax.transAxes, fontsize=10,
-                verticalalignment='center', bbox=props, family='monospace',
-                linespacing=1.5)
         
-        plt.tight_layout()
-        path = os.path.join(self.results_dir, 'figure7_confusion_matrix.png')
-        fig.savefig(path, dpi=300, bbox_inches='tight')
-        plt.close(fig)
-        print(f"  ✅ 已保存: {path}")
-        
-        return {'cm': cm, 'accuracy': accuracy, 'f1': f1, 'recall': recall,
-                'precision': precision, 'mcc': mcc}
+        plot_attention_weights(
+            model, val_loader, device,
+            os.path.join(PAPER_DIR, f'attention_weights_fold{fold+1}.png')
+        )
     
-    # ==================== Figure 8: 预测概率分布 ====================
+    plot_roc_curves_five_fold(
+        all_fpr, all_tpr, all_auc,
+        os.path.join(PAPER_DIR, 'roc_curve_five_fold.png')
+    )
     
-    def plot_probability_distribution(self):
-        """预测概率分布 (Figure 8)"""
-        print("\n" + "-" * 50)
-        print("📊 生成预测概率分布 (Figure 8)")
-        print("-" * 50)
-        
-        pos_probs = self.test_probs[self.test_labels == 1]
-        neg_probs = self.test_probs[self.test_labels == 0]
-        
-        fig, axes = plt.subplots(1, 2, figsize=(15, 5.5))
-        
-        bins = np.linspace(0, 1, 51)
-        axes[0].hist(neg_probs, bins=bins, alpha=0.7, color='#3498DB',
-                     label=f'Non-Hotspot (n={len(neg_probs)})', density=True,
-                     edgecolor='white', linewidth=0.5)
-        axes[0].hist(pos_probs, bins=bins, alpha=0.7, color='#E74C3C',
-                     label=f'Hotspot (n={len(pos_probs)})', density=True,
-                     edgecolor='white', linewidth=0.5)
-        axes[0].axvline(x=0.88, color='#27AE60', linestyle='--', linewidth=2.5,
-                        label=f'Threshold = 0.88')
-        axes[0].fill_betweenx([0, axes[0].get_ylim()[1]*1.1], 0.88, 1, 
-                               alpha=0.1, color='#27AE60')
-        axes[0].set_xlabel('Predicted Probability (Hotspot)', fontsize=12, fontweight='bold')
-        axes[0].set_ylabel('Density', fontsize=12, fontweight='bold')
-        axes[0].set_title('Prediction Probability Distribution', fontsize=13, fontweight='bold')
-        axes[0].legend(fontsize=10, loc='upper center')
-        axes[0].grid(alpha=0.3)
-        axes[0].set_xlim([0, 1])
-        
-        try:
-            from scipy import stats
-            bp_data = [neg_probs, pos_probs]
-            bp = axes[1].boxplot(bp_data, labels=['Non-Hotspot', 'Hotspot'],
-                                 patch_artist=True, widths=0.5,
-                                 showmeans=True, meanline=True,
-                                 meanprops=dict(color='red', linestyle='-', linewidth=2))
-            
-            colors_box = ['#3498DB', '#E74C3C']
-            for patch, color in zip(bp['boxes'], colors_box):
-                patch.set_facecolor(color)
-                patch.set_alpha(0.7)
-            
-            for median in bp['medians']:
-                median.set_color('black')
-                median.set_linewidth(2)
-            
-            pos_median = np.median(pos_probs)
-            neg_median = np.median(neg_probs)
-            
-            stats_text = (
-                f'Statistics:\n'
-                f'─────────────────\n'
-                f'Hotspot:\n'
-                f'  Median: {pos_median:.3f}\n'
-                f'  Mean:   {np.mean(pos_probs):.3f}\n'
-                f'  Std:    {np.std(pos_probs):.3f}\n'
-                f'\nNon-Hotspot:\n'
-                f'  Median: {neg_median:.3f}\n'
-                f'  Mean:   {np.mean(neg_probs):.3f}\n'
-                f'  Std:    {np.std(neg_probs):.3f}'
-            )
-        except ImportError:
-            axes[1].violinplot([neg_probs, pos_probs], positions=[1, 2],
-                               showmeans=True, showmedians=True)
-            axes[1].set_xticks([1, 2])
-            axes[1].set_xticklabels(['Non-Hotspot', 'Hotspot'])
-            stats_text = '(scipy not available)'
-        
-        axes[1].set_ylabel('Predicted Probability', fontsize=12, fontweight='bold')
-        axes[1].set_title('Probability Distribution by Class', fontsize=13, fontweight='bold')
-        axes[1].grid(axis='y', alpha=0.3)
-        axes[1].axhline(y=0.88, color='#27AE60', linestyle='--', linewidth=2, alpha=0.7)
-        
-        try:
-            props = dict(boxstyle='round,pad=0.4', facecolor='lightyellow', alpha=0.9)
-            axes[1].text(1.45, 0.95, stats_text, transform=axes[1].transAxes, fontsize=9,
-                         verticalalignment='top', bbox=props, family='monospace')
-        except:
-            pass
-        
-        plt.tight_layout()
-        path = os.path.join(self.results_dir, 'figure8_probability_distribution.png')
-        fig.savefig(path, dpi=300, bbox_inches='tight')
-        plt.close(fig)
-        print(f"  ✅ 已保存: {path}")
-        
-        return {'pos_mean': np.mean(pos_probs), 'neg_mean': np.mean(neg_probs),
-                'pos_median': np.median(pos_probs), 'neg_median': np.median(neg_probs)}
+    plot_pr_curves_five_fold(
+        all_recall, all_precision, all_pr_auc,
+        os.path.join(PAPER_DIR, 'pr_curve_five_fold.png')
+    )
     
-    # ==================== Figure 9: 训练过程曲线 ====================
+    plot_confusion_matrix(
+        np.array(all_y_true_bal), np.array(all_y_pred_bal),
+        os.path.join(PAPER_DIR, 'confusion_matrix_overall.png'),
+        title='Confusion Matrix - Overall (Balanced)'
+    )
     
-    def parse_training_log(self):
-        """解析训练日志，提取训练曲线数据"""
-        if not os.path.exists(self.training_log_path):
-            print(f"  ⚠️ 未找到训练日志: {self.training_log_path}")
-            return None
-        
-        folds_data = {}
-        current_fold = None
-        
-        with open(self.training_log_path, 'r', encoding='utf-8') as f:
-            for line in f:
-                line = line.strip()
-                
-                fold_match = re.search(r'Fold (\d+)/5', line)
-                if fold_match:
-                    current_fold = int(fold_match.group(1))
-                    folds_data[current_fold] = {'epochs': [], 'loss': [], 'val_auc': [], 'val_f1': []}
-                    continue
-                
-                if current_fold is None:
-                    continue
-                
-                epoch_match = re.search(r'Epoch (\d+)/\d+ - Loss: ([\d.]+) - Val AUC: ([\d.]+) - Val F1: ([\d.]+)', line)
-                if epoch_match:
-                    folds_data[current_fold]['epochs'].append(int(epoch_match.group(1)))
-                    folds_data[current_fold]['loss'].append(float(epoch_match.group(2)))
-                    folds_data[current_fold]['val_auc'].append(float(epoch_match.group(3)))
-                    folds_data[current_fold]['val_f1'].append(float(epoch_match.group(4)))
-        
-        return folds_data
+    print("\n" + "=" * 60)
+    print("5折交叉验证结果汇总 (平衡评估)")
+    print("=" * 60)
     
-    def plot_training_curves(self):
-        """训练过程可视化 (Figure 9)"""
-        print("\n" + "-" * 50)
-        print("📈 生成训练过程曲线 (Figure 9)")
-        print("-" * 50)
-        
-        folds_data = self.parse_training_log()
-        
-        if folds_data is None or len(folds_data) == 0:
-            print("  ⚠️ 无法解析训练日志，使用模拟数据")
-            folds_data = {}
-            for fold in range(1, 6):
-                n_epochs = np.random.randint(20, 40)
-                epochs = list(range(1, n_epochs+1))
-                loss = 1.0 * np.exp(-0.05*np.array(epochs)) + np.random.normal(0, 0.1, n_epochs)
-                loss = np.clip(loss, 0.2, 1.2)
-                val_auc = 0.85 + 0.07*(1-np.exp(-0.1*np.array(epochs))) + np.random.normal(0, 0.01, n_epochs)
-                val_auc = np.clip(val_auc, 0.82, 0.95)
-                val_f1 = 0.55 + 0.25*(1-np.exp(-0.08*np.array(epochs))) + np.random.normal(0, 0.02, n_epochs)
-                val_f1 = np.clip(val_f1, 0.50, 0.85)
-                folds_data[fold] = {
-                    'epochs': epochs if isinstance(epochs, list) else epochs.tolist(),
-                    'loss': loss.tolist(),
-                    'val_auc': val_auc.tolist(),
-                    'val_f1': val_f1.tolist()
-                }
-        
-        fig, axes = plt.subplots(1, 3, figsize=(18, 5))
-        
-        colors = ['#E74C3C', '#3498DB', '#27AE60', '#F39C12', '#9B59B6']
-        
-        for fold, data in folds_data.items():
-            idx = fold - 1
-            axes[0].plot(data['epochs'], data['loss'], color=colors[idx], linewidth=1.8,
-                         label=f'Fold {fold}', alpha=0.8)
-            axes[1].plot(data['epochs'], data['val_auc'], color=colors[idx], linewidth=1.8,
-                         label=f'Fold {fold}', alpha=0.8)
-            axes[2].plot(data['epochs'], data['val_f1'], color=colors[idx], linewidth=1.8,
-                         label=f'Fold {fold}', alpha=0.8)
-        
-        axes[0].set_xlabel('Epoch', fontsize=12, fontweight='bold')
-        axes[0].set_ylabel('Training Loss', fontsize=12, fontweight='bold')
-        axes[0].set_title('Training Loss Curve', fontsize=13, fontweight='bold')
-        axes[0].legend(fontsize=9, ncol=2)
-        axes[0].grid(alpha=0.3)
-        axes[0].set_xlabel('Epoch', fontsize=12, fontweight='bold')
-        
-        axes[1].set_ylabel('Validation ROC-AUC', fontsize=12, fontweight='bold')
-        axes[1].set_title('Validation ROC-AUC Curve', fontsize=13, fontweight='bold')
-        axes[1].legend(fontsize=9, ncol=2)
-        axes[1].grid(alpha=0.3)
-        axes[1].set_ylim([0.82, 0.96])
-        
-        axes[2].set_xlabel('Epoch', fontsize=12, fontweight='bold')
-        axes[2].set_ylabel('Validation F1 (Balanced)', fontsize=12, fontweight='bold')
-        axes[2].set_title('Validation F1 Score Curve', fontsize=13, fontweight='bold')
-        axes[2].legend(fontsize=9, ncol=2)
-        axes[2].grid(alpha=0.3)
-        axes[2].set_ylim([0.45, 0.90])
-        
-        plt.suptitle('5-Fold Cross-Validation Training Process\n(Balanced Evaluation)',
-                     fontsize=15, fontweight='bold', y=1.02)
-        plt.tight_layout()
-        path = os.path.join(self.results_dir, 'figure9_training_curves.png')
-        fig.savefig(path, dpi=300, bbox_inches='tight')
-        plt.close(fig)
-        print(f"  ✅ 已保存: {path}")
-        
-        avg_epochs = np.mean([len(d['epochs']) for d in folds_data.values()])
-        print(f"\n  📊 训练过程统计:")
-        print(f"    • 平均训练轮数: {avg_epochs:.1f} epochs")
-        print(f"    • Early Stopping生效: 所有fold均在150轮前停止")
-        
-        return folds_data
+    summary = {}
+    for key in ['SEN', 'SPE', 'PRE', 'F1', 'MCC', 'AUC', 'PR-AUC']:
+        values = [r[key] for r in all_fold_metrics]
+        summary[key] = {'mean': np.mean(values), 'std': np.std(values)}
+        print(f"  {key}: {summary[key]['mean']:.4f} ± {summary[key]['std']:.4f}")
     
-    # ==================== Table 1: 主要结果对比表 ====================
-    
-    def generate_main_comparison_table(self):
-        """生成主要结果对比表 - 与两篇论文对比 (Table 1)"""
-        print("\n" + "-" * 50)
-        print("📋 生成主要对比表格 (Table 1)")
-        print("-" * 50)
-        
-        comparison_data = {
-            'Model': [
-                'PPI-hotspotID*',
-                'DeepHotResi†',
-                'PPI-HotspotGAT (Ours)'
-            ],
-            'Method': [
-                'Traditional ML (SVM/RF)',
-                'Deep Learning (GAT+ESM-2)',
-                'Deep Learning (GAT+ESM-2+SE)'
-            ],
-            'Task': [
-                'Protein-Protein Interface',
-                'Protein-RNA Interface',
-                'Protein-Protein Interface'
-            ],
-            'Imbalance_Handling': [
-                'None reported',
-                'Balanced Sampling',
-                'Focal Loss + Bal. Sampling + Class Wt.'
-            ],
-            'ROC_AUC': [0.78, 0.89, 0.9148],
-            'PR_AUC': [0.08, 0.18, 0.1683],
-            'F1_Balanced': ['N/A', '~0.70', 0.7905],
-            'Recall': [0.65, 0.85, 0.9113],
-            'Precision': [0.05, 0.12, 0.09],
-            'Key_Innovation': [
-                'Sequence + Structure features',
-                'Graph attention + Protein LM',
-                'Multi-feature fusion + SE attention'
-            ]
+    summary_df = pd.DataFrame([
+        {
+            'Metric': key,
+            'Mean': val['mean'],
+            'Std': val['std']
         }
-        df = pd.DataFrame(comparison_data)
-        
-        table_path = os.path.join(self.results_dir, 'table1_main_comparison.csv')
-        df.to_csv(table_path, index=False)
-        print(f"  ✅ CSV已保存: {table_path}")
-        
-        md_path = os.path.join(self.results_dir, 'table1_main_comparison.md')
-        with open(md_path, 'w', encoding='utf-8') as f:
-            f.write("# Table 1: Main Results Comparison\n\n")
-            f.write("| Model | Method | Task | ROC-AUC | PR-AUC | Balanced F1 | Recall | Precision |\n")
-            f.write("|-------|--------|------|---------|--------|-------------|--------|----------|\n")
-            for _, row in df.iterrows():
-                f.write(f"| **{row['Model']}** | {row['Method']} | {row['Task']} | "
-                       f"**{row['ROC_AUC']}** | {row['PR_AUC']} | **{row['F1_Balanced']}** | "
-                       f"{row['Recall']} | {row['Precision']} |\n")
-            f.write("\n*Notes:*\n")
-            f.write("* PPI-hotspotID*: Our traditional ML baseline (elife-96643)\n")
-            f.write("† DeepHotResi: Reference deep learning method (btaf197)\n")
-            f.write("**Bold** indicates our proposed method's results\n")
-        print(f"  ✅ Markdown已保存: {md_path}")
-        
-        print(f"\n  🏆 关键发现:")
-        print(f"    • vs PPI-hotspotID: ROC-AUC 提升 +{(0.9148-0.78)*100:.1f}%")
-        print(f"    • vs DeepHotResi: ROC-AUC 提升 +{(0.9148-0.89)*100:.1f}%")
-        print(f"    • Recall达到91.13%，显著优于两个baseline")
-        print(f"    • Balanced F1达到79.05%，证明不平衡处理策略有效")
-        
-        return df
+        for key, val in summary.items()
+    ])
+    summary_df.to_csv(os.path.join(PAPER_DIR, 'five_fold_summary.csv'), index=False)
     
-    # ==================== 运行所有实验 ====================
+    return all_fold_metrics
+
+
+def generate_comparison_table(our_metrics):
+    print("\n" + "=" * 60)
+    print("与基线方法对比表 (类似DeepHotResi Table 2/3)")
+    print("=" * 60)
     
-    def run_all_experiments(self):
-        """运行所有论文实验"""
-        print("\n" + "=" * 70)
-        print("🧪 开始运行完整论文实验套件")
-        print("=" * 70)
-        print(f"📁 输出目录: {self.results_dir}")
-        print(f"📅 训练日志: {os.path.basename(self.training_log_path)}")
+    ppihotspotid_metrics = {
+        'SEN': 0.67, 'SPE': 0.83, 'PRE': 0.76, 'F1': 0.71, 'MCC': None, 'AUC': None
+    }
+    
+    deephotresi_metrics = {
+        'SEN': 0.957, 'SPE': 0.903, 'PRE': 0.872, 'F1': 0.912, 'MCC': 0.755, 'AUC': 0.956
+    }
+    
+    our_sen = np.mean([r['SEN'] for r in our_metrics])
+    our_spe = np.mean([r['SPE'] for r in our_metrics])
+    our_pre = np.mean([r['PRE'] for r in our_metrics])
+    our_f1 = np.mean([r['F1'] for r in our_metrics])
+    our_mcc = np.mean([r['MCC'] for r in our_metrics])
+    our_auc = np.mean([r['AUC'] for r in our_metrics])
+    
+    comparison = pd.DataFrame({
+        'Method': ['PPI-HotspotID', 'DeepHotResi', 'Our Model'],
+        'SEN': [ppihotspotid_metrics['SEN'], deephotresi_metrics['SEN'], our_sen],
+        'SPE': [ppihotspotid_metrics['SPE'], deephotresi_metrics['SPE'], our_spe],
+        'PRE': [ppihotspotid_metrics['PRE'], deephotresi_metrics['PRE'], our_pre],
+        'F1': [ppihotspotid_metrics['F1'], deephotresi_metrics['F1'], our_f1],
+        'MCC': [ppihotspotid_metrics['MCC'], deephotresi_metrics['MCC'], our_mcc],
+        'AUC': [ppihotspotid_metrics['AUC'], deephotresi_metrics['AUC'], our_auc],
+    })
+    
+    comparison.to_csv(os.path.join(PAPER_DIR, 'comparison_table.csv'), index=False)
+    
+    print(comparison.to_string(index=False, float_format='%.4f'))
+    
+    print("\n" + "=" * 60)
+    print("对比表 (LaTeX格式)")
+    print("=" * 60)
+    
+    latex = comparison.to_latex(index=False, float_format='%.4f')
+    print(latex)
+    
+    with open(os.path.join(PAPER_DIR, 'comparison_table.tex'), 'w') as f:
+        f.write(latex)
+    
+    return comparison
+
+
+def main():
+    import argparse
+    parser = argparse.ArgumentParser(description='论文数据生成')
+    parser.add_argument('--skip-ablation', action='store_true', help='跳过特征消融实验')
+    parser.add_argument('--skip-curves', action='store_true', help='跳过曲线生成')
+    parser.add_argument('--force-reload', action='store_true', help='强制重新加载数据')
+    args = parser.parse_args()
+    
+    print("=" * 60)
+    print("论文数据生成脚本")
+    print("=" * 60)
+    print(f"设备: {DEVICE}")
+    print(f"输出目录: {PAPER_DIR}")
+    
+    dataset_file = os.path.join(FEATURES_DIR, 'dataset.pkl')
+    if os.path.exists(dataset_file) and not args.force_reload:
+        print("\n加载已处理的数据集...")
+        with open(dataset_file, 'rb') as f:
+            data_list = pickle.load(f)
+    else:
+        print("\n处理数据集...")
+        data_list = prepare_dataset()
+    
+    print(f"数据集大小: {len(data_list)} 个蛋白质")
+    
+    if not args.skip_curves:
+        fold_metrics = run_five_fold_with_curves(data_list, DEVICE)
+    else:
+        print("\n跳过曲线生成，使用已有模型...")
+        fold_metrics = []
+        set_seed()
+        kf = KFold(n_splits=N_FOLDS, shuffle=True, random_state=RANDOM_SEED)
+        class_weights_info = calculate_class_weights(data_list)
         
-        results_summary = {}
-        
-        if not self.load_models():
-            print("\n❌ 模型加载失败，请先完成训练")
-            return None
-        
-        if not self.predict_test_set():
-            print("\n❌ 测试集预测失败")
-            return None
-        
-        print("\n" + "=" * 70)
-        print("📊 开始生成图表和表格...")
-        print("=" * 70)
-        
-        results_summary['architecture'] = self.generate_architecture_description()
-        results_summary['roc'] = self.plot_roc_curve_comparison()
-        results_summary['pr'] = self.plot_pr_curve_comparison()
-        results_summary['ablation'] = self.generate_ablation_study()
-        results_summary['imbalance'] = self.compare_imbalance_methods()
-        results_summary['topk'] = self.analyze_topk_postprocessing()
-        results_summary['cm'] = self.plot_confusion_matrix()
-        results_summary['prob_dist'] = self.plot_probability_distribution()
-        results_summary['training'] = self.plot_training_curves()
-        results_summary['comparison'] = self.generate_main_comparison_table()
-        
-        print("\n" + "=" * 70)
-        print("✅ 所有实验完成！生成内容汇总:")
-        print("=" * 70)
-        
-        generated_files = sorted(os.listdir(self.results_dir))
-        figures = [f for f in generated_files if f.startswith('figure')]
-        tables = [f for f in generated_files if f.startswith('table')]
-        other = [f for f in generated_files if not f.startswith('figure') and not f.startswith('table')]
-        
-        print(f"\n  📈 图表 ({len(figures)}个):")
-        for f in figures:
-            print(f"    • {f}")
-        
-        print(f"\n  📋 表格 ({len(tables)}个):")
-        for f in tables:
-            print(f"    • {f}")
-        
-        if other:
-            print(f"\n  📝 其他 ({len(other)}个):")
-            for f in other:
-                print(f"    • {f}")
-        
-        summary_path = os.path.join(self.results_dir, 'experiment_summary.json')
-        with open(summary_path, 'w', encoding='utf-8') as f:
-            json.dump({
-                'model_performance': {
-                    'roc_auc': float(results_summary.get('roc', {}).get('ours', 0)),
-                    'pr_auc': float(results_summary.get('pr', {}).get('ours', 0)),
-                    'balanced_f1': 0.7905,
-                    'recall': 0.9113,
-                    'precision': 0.0885,
-                    'imbalance_ratio': 46.49
-                },
-                'generated_files': generated_files,
-                'n_figures': len(figures),
-                'n_tables': len(tables)
-            }, f, indent=2, ensure_ascii=False)
-        print(f"\n  💾 实验摘要已保存: {summary_path}")
-        
-        return results_summary
+        for fold, (train_idx, val_idx) in enumerate(kf.split(data_list)):
+            val_data = [data_list[i] for i in val_idx]
+            val_dataset = PPIHotspotDataset(val_data)
+            val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE,
+                                   shuffle=False, collate_fn=collate_fn)
+            
+            model_path = os.path.join(MODELS_DIR, f'best_model_fold{fold+1}.pth')
+            if not os.path.exists(model_path):
+                print(f"  模型文件不存在: {model_path}")
+                continue
+            
+            model = PPIHotspotGAT()
+            checkpoint = torch.load(model_path, map_location=DEVICE)
+            model.load_state_dict(checkpoint['model_state_dict'])
+            model = model.to(DEVICE)
+            
+            y_true, y_pred, y_prob = evaluate_balanced(model, val_loader, DEVICE)
+            fold_metrics.append(calc_metrics(y_true, y_pred, y_prob))
+    
+    if fold_metrics:
+        generate_comparison_table(fold_metrics)
+    
+    if not args.skip_ablation:
+        feature_ablation_study(data_list, DEVICE)
+    
+    print("\n" + "=" * 60)
+    print("论文数据生成完成!")
+    print(f"所有图表和数据已保存到: {PAPER_DIR}")
+    print("=" * 60)
 
 
 if __name__ == '__main__':
-    experiments = PaperExperiments()
-    experiments.run_all_experiments()
+    main()
