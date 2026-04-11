@@ -28,6 +28,8 @@ from sklearn.metrics import (
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
+plt.rcParams['font.family'] = 'DejaVu Sans'
+plt.rcParams['axes.unicode_minus'] = False
 from matplotlib import rcParams
 from tqdm import tqdm
 import warnings
@@ -303,7 +305,6 @@ def plot_attention_weights(model, data_loader, device, save_path, top_n=20):
     model.eval()
     all_attn = []
     all_labels = []
-    all_residue_ids = []
     
     with torch.no_grad():
         for batch in data_loader:
@@ -311,24 +312,15 @@ def plot_attention_weights(model, data_loader, device, save_path, top_n=20):
             labels = batch['labels'].to(device)
             graphs = batch['graphs'].to(device)
             
-            x = node_features.float()
-            x_se = model.se(x)
-            h = model.input_proj(x_se)
-            
-            for i, gat_layer in enumerate(model.gat_layers):
-                attn = gat_layer(g, h)
-                h_new = attn.flatten(1)
-                h_new = model.layer_norms[i](h_new)
-                h_new = F.relu(h_new)
-                h = h + h_new
+            logits = model(graphs, node_features)
+            probs = F.softmax(logits, dim=1)[:, 1]
             
             labels_flat = labels.flatten()
             valid_mask = labels_flat >= 0
             
             pos_mask = (labels_flat == 1) & valid_mask
             if pos_mask.sum() > 0:
-                h_norm = torch.norm(h, dim=1)
-                all_attn.extend(h_norm[pos_mask].cpu().numpy())
+                all_attn.extend(probs[pos_mask].cpu().numpy())
                 all_labels.extend(labels_flat[pos_mask].cpu().numpy())
     
     if len(all_attn) == 0:
@@ -339,14 +331,14 @@ def plot_attention_weights(model, data_loader, device, save_path, top_n=20):
     
     fig, ax = plt.subplots(figsize=(10, 6))
     ax.hist(attn_array, bins=50, color='steelblue', edgecolor='black', alpha=0.7)
-    ax.set_xlabel('Attention Weight (Feature Norm)', fontsize=14)
+    ax.set_xlabel('Prediction Probability', fontsize=14)
     ax.set_ylabel('Count', fontsize=14)
-    ax.set_title('Distribution of Attention Weights for Hotspot Residues', fontsize=16)
+    ax.set_title('Distribution of Prediction Probabilities for Hotspot Residues', fontsize=16)
     ax.grid(True, alpha=0.3)
     plt.tight_layout()
     plt.savefig(save_path, dpi=300, bbox_inches='tight')
     plt.close()
-    print(f"注意力权重分布已保存: {save_path}")
+    print(f"预测概率分布已保存: {save_path}")
 
 
 def feature_ablation_study(data_list, device):
