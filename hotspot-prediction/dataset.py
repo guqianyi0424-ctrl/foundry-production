@@ -133,7 +133,7 @@ def calculate_distance_matrix(coords):
 
 
 def build_graph(coords, cutoff=MAP_CUTOFF):
-    """构建蛋白质图"""
+    """构建蛋白质图 - 对齐DeepHotResi: 距离+余弦相似度边特征"""
     n_nodes = len(coords)
     dist_matrix = calculate_distance_matrix(coords)
     
@@ -144,7 +144,23 @@ def build_graph(coords, cutoff=MAP_CUTOFF):
     
     distances = dist_matrix[src, dst] / cutoff
     
-    edge_feat = distances.reshape(1, -1)
+    pos = np.array(coords)
+    pos_ref = pos - pos[0]
+    
+    from numpy.linalg import norm
+    edge_cos = []
+    for s, d in zip(src, dst):
+        v1 = pos_ref[s]
+        v2 = pos_ref[d]
+        n1 = norm(v1)
+        n2 = norm(v2)
+        if n1 > 0 and n2 > 0:
+            cos_sim = np.dot(v1, v2) / (n1 * n2)
+            edge_cos.append((cos_sim + 1) / 2)
+        else:
+            edge_cos.append(0.5)
+    
+    edge_feat = np.array([distances, np.array(edge_cos)])
     
     return edge_index, edge_feat, dist_matrix
 

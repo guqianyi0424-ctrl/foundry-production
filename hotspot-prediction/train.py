@@ -36,7 +36,8 @@ print("导入其他模块完成")
 from config import (
     MODELS_DIR, RESULTS_DIR, LOGS_DIR, FEATURES_DIR,
     BATCH_SIZE, NUM_EPOCHS, PATIENCE, N_FOLDS, RANDOM_SEED, DEVICE,
-    USE_WEIGHTED_SAMPLER, USE_CLASS_WEIGHTS, USE_SMOTE, POS_WEIGHT_RATIO
+    USE_WEIGHTED_SAMPLER, USE_CLASS_WEIGHTS, USE_SMOTE, POS_WEIGHT_RATIO,
+    NOISE_FACTOR
 )
 from dataset import (
     PPIHotspotDataset, collate_fn, prepare_dataset,
@@ -86,7 +87,7 @@ def set_seed(seed=RANDOM_SEED):
 
 
 def train_one_epoch(model, data_loader, device):
-    """训练一个epoch"""
+    """训练一个epoch - 对齐DeepHotResi训练方式"""
     model.train()
     total_loss = 0
     n_batches = 0
@@ -97,6 +98,9 @@ def train_one_epoch(model, data_loader, device):
         node_features = batch['node_features'].to(device)
         labels = batch['labels'].to(device)
         graphs = batch['graphs'].to(device)
+        
+        if NOISE_FACTOR > 0:
+            node_features = node_features + NOISE_FACTOR * torch.randn_like(node_features)
         
         logits = model(graphs, node_features)
         
@@ -552,20 +556,25 @@ class Logger:
 
 def main():
     """主函数"""
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--force-reload', action='store_true', help='强制重新生成数据集')
+    args = parser.parse_args()
+    
     timestamp = time.strftime("%Y%m%d_%H%M%S")
     log_file = os.path.join(LOGS_DIR, f'training_{timestamp}.log')
     sys.stdout = Logger(log_file)
     
     print("=" * 60)
     print("PPI热点残基预测 - 深度学习方法")
-    print("基于图注意力网络和ESM-2预训练模型")
+    print("基于图注意力网络和ESM-2预训练模型 (对齐DeepHotResi)")
     print("=" * 60)
     print(f"设备: {DEVICE}")
     print(f"时间: {timestamp}")
     
     dataset_file = os.path.join(FEATURES_DIR, 'dataset.pkl')
     
-    if os.path.exists(dataset_file):
+    if os.path.exists(dataset_file) and not args.force_reload:
         print("\n加载已处理的数据集...")
         with open(dataset_file, 'rb') as f:
             data_list = pickle.load(f)

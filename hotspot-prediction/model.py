@@ -131,7 +131,7 @@ class WeightedFocalLoss(nn.Module):
 
 
 class PPIHotspotGAT(nn.Module):
-    """PPI热点残基预测模型 - 图注意力网络版本"""
+    """PPI热点残基预测模型 - 对齐DeepHotResi架构"""
     
     def __init__(self, input_dim=INPUT_DIM, hidden_dim=HIDDEN_DIM, 
                  num_heads=NUM_HEADS, num_layers=NUM_LAYERS,
@@ -146,89 +146,30 @@ class PPIHotspotGAT(nn.Module):
         
         self.se = SELayer(input_dim, reduction=16)
         
-        self.input_bn = nn.BatchNorm1d(input_dim)
+        self.gat = GATConv(input_dim, hidden_dim, num_heads=num_heads,
+                           allow_zero_in_degree=True)
         
-        self.input_proj = nn.Sequential(
-            nn.Linear(input_dim, hidden_dim * 2),
-            nn.ReLU(),
-            nn.Dropout(dropout * 0.5),
-            nn.Linear(hidden_dim * 2, hidden_dim)
-        )
+        self.drop = nn.Dropout(dropout)
         
-        self.gat_layers = nn.ModuleList()
-        self.skip_projs = nn.ModuleList()
+        self.classifier = nn.Linear(hidden_dim * num_heads + input_dim, num_classes)
         
-        for i in range(num_layers):
-            self.gat_layers.append(
-                GATConv(hidden_dim, hidden_dim // num_heads, 
-                       num_heads=num_heads, feat_drop=dropout, 
-                       attn_drop=dropout * 0.5,
-                       allow_zero_in_degree=True,
-                       residual=True)
-            )
-        
-        self.layer_norms = nn.ModuleList([
-            nn.LayerNorm(hidden_dim) for _ in range(num_layers)
-        ])
-        
-        self.attention_pool = nn.Sequential(
-            nn.Linear(hidden_dim, hidden_dim // 2),
-            nn.Tanh(),
-            nn.Linear(hidden_dim // 2, 1)
-        )
-        
-        self.classifier = nn.Sequential(
-            nn.Linear(hidden_dim * 2 + input_dim, hidden_dim * 4),
-            nn.ReLU(),
-            nn.Dropout(dropout),
-            nn.Linear(hidden_dim * 4, hidden_dim * 2),
-            nn.ReLU(),
-            nn.Dropout(dropout),
-            nn.Linear(hidden_dim * 2, hidden_dim),
-            nn.ReLU(),
-            nn.Dropout(dropout * 0.5),
-            nn.Linear(hidden_dim, num_classes)
-        )
-        
-        if USE_LABEL_SMOOTHING:
-            self.criterion = FocalLossWithLabelSmoothing(
-                alpha=FOCAL_ALPHA, gamma=FOCAL_GAMMA, 
-                smoothing=LABEL_SMOOTHING, classes=num_classes
-            )
-        else:
-            self.criterion = FocalLoss(alpha=FOCAL_ALPHA, gamma=FOCAL_GAMMA)
-        
-        self.optimizer = torch.optim.AdamW(
-            self.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY
-        )
-        self.scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
-            self.optimizer, T_0=10, T_mult=2
+        self.criterion = FocalLoss(alpha=FOCAL_ALPHA, gamma=FOCAL_GAMMA)
+        self.optimizer = torch.optim.Adam(self.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY)
+        self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            self.optimizer, mode='max', factor=0.6, patience=10, min_lr=1e-6
         )
     
     def forward(self, g, node_features):
         x = node_features.float()
-        
-        x = self.input_bn(x)
         x_se = self.se(x)
         
-        h = self.input_proj(x_se)
+        g = dgl.add_self_loop(g)
+        h = self.gat(g, x_se)
+        h = h.view(h.shape[0], -1)
         
-        all_h = [h]
-        
-        for i, gat_layer in enumerate(self.gat_layers):
-            h_new = gat_layer(g, h).flatten(1)
-            h_new = self.layer_norms[i](h_new)
-            h_new = F.relu(h_new)
-            h = h + h_new
-            all_h.append(h)
-        
-        h_stack = torch.stack(all_h, dim=0)
-        attn_weights = F.softmax(self.attention_pool(h_stack), dim=0)
-        h_pooled = (h_stack * attn_weights).sum(dim=0)
-        
-        h_final = torch.cat([h_pooled, h, x_se], dim=1)
-        
-        logits = self.classifier(h_final)
+        h = torch.cat([h, x_se], dim=1)
+        h = self.drop(h)
+        logits = self.classifier(h)
         
         return logits
 
