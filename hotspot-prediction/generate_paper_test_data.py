@@ -45,14 +45,26 @@ os.makedirs(PAPER_DIR, exist_ok=True)
 def load_all_models():
     """加载5折交叉验证的所有模型"""
     models = []
-    for fold in range(N_FOLDS):
+    for fold in range(1, N_FOLDS + 1):
         model_path = os.path.join(MODELS_DIR, f'best_model_fold{fold}.pth')
         if not os.path.exists(model_path):
             print(f"警告: 模型文件不存在 {model_path}")
             continue
         
-        model = create_model('gat')
         checkpoint = torch.load(model_path, map_location=DEVICE)
+        
+        first_key = list(checkpoint.get('model_state_dict', checkpoint).keys())[0]
+        first_param_shape = checkpoint.get('model_state_dict', checkpoint)[first_key].shape
+        
+        if len(first_param_shape) == 2:
+            detected_input_dim = first_param_shape[1]
+        else:
+            detected_input_dim = INPUT_DIM
+        
+        print(f"Fold {fold}: 检测到输入维度 {detected_input_dim}")
+        
+        model = create_model('gat', input_dim=detected_input_dim)
+        
         if 'model_state_dict' in checkpoint:
             model.load_state_dict(checkpoint['model_state_dict'])
         else:
@@ -61,7 +73,7 @@ def load_all_models():
         model = model.to(DEVICE)
         model.eval()
         models.append(model)
-        print(f"加载模型 Fold {fold+1}: {model_path}")
+        print(f"加载模型 Fold {fold}: {model_path}")
     
     return models
 
