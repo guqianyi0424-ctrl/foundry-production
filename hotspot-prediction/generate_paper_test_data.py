@@ -165,10 +165,28 @@ def evaluate_balanced(y_true, y_prob, threshold=0.5, n_samples=100):
     return avg_metrics
 
 
+def get_balanced_data(y_true, y_prob):
+    """获取平衡采样数据"""
+    pos_idx = np.where(y_true == 1)[0]
+    neg_idx = np.where(y_true == 0)[0]
+    
+    if len(neg_idx) >= len(pos_idx):
+        sampled_neg = np.random.choice(neg_idx, size=len(pos_idx), replace=False)
+    else:
+        sampled_neg = neg_idx
+    
+    balanced_idx = np.concatenate([pos_idx, sampled_neg])
+    np.random.shuffle(balanced_idx)
+    
+    return y_true[balanced_idx], y_prob[balanced_idx]
+
+
 def plot_test_roc_curve(y_true, y_prob, save_path):
-    """绘制测试集ROC曲线"""
-    fpr, tpr, _ = roc_curve(y_true, y_prob)
-    auc = roc_auc_score(y_true, y_prob)
+    """绘制测试集ROC曲线（平衡采样）"""
+    bal_true, bal_prob = get_balanced_data(y_true, y_prob)
+    
+    fpr, tpr, _ = roc_curve(bal_true, bal_prob)
+    auc = roc_auc_score(bal_true, bal_prob)
     
     fig, ax = plt.subplots(figsize=(8, 7))
     ax.plot(fpr, tpr, color='darkorange', lw=2.5, label=f'Our Model (AUC = {auc:.3f})')
@@ -179,7 +197,7 @@ def plot_test_roc_curve(y_true, y_prob, save_path):
     ax.set_ylim([0.0, 1.05])
     ax.set_xlabel('False Positive Rate', fontsize=14)
     ax.set_ylabel('True Positive Rate', fontsize=14)
-    ax.set_title('Test Set ROC Curve', fontsize=16)
+    ax.set_title('Test Set ROC Curve (Balanced)', fontsize=16)
     ax.legend(loc="lower right", fontsize=12)
     ax.grid(True, alpha=0.3)
     
@@ -190,14 +208,16 @@ def plot_test_roc_curve(y_true, y_prob, save_path):
 
 
 def plot_test_pr_curve(y_true, y_prob, save_path):
-    """绘制测试集PR曲线"""
-    precision, recall, _ = precision_recall_curve(y_true, y_prob)
-    pr_auc = average_precision_score(y_true, y_prob)
+    """绘制测试集PR曲线（平衡采样）"""
+    bal_true, bal_prob = get_balanced_data(y_true, y_prob)
+    
+    precision, recall, _ = precision_recall_curve(bal_true, bal_prob)
+    pr_auc = average_precision_score(bal_true, bal_prob)
     
     fig, ax = plt.subplots(figsize=(8, 7))
     ax.plot(recall, precision, color='green', lw=2.5, label=f'Our Model (PR-AUC = {pr_auc:.3f})')
     
-    baseline = np.sum(y_true) / len(y_true)
+    baseline = np.sum(bal_true) / len(bal_true)
     ax.axhline(y=baseline, color='navy', lw=2, linestyle='--', alpha=0.6, label=f'Baseline ({baseline:.3f})')
     ax.fill_between(recall, precision, alpha=0.3, color='green')
     
@@ -205,7 +225,7 @@ def plot_test_pr_curve(y_true, y_prob, save_path):
     ax.set_ylim([0.0, 1.05])
     ax.set_xlabel('Recall (Sensitivity)', fontsize=14)
     ax.set_ylabel('Precision', fontsize=14)
-    ax.set_title('Test Set Precision-Recall Curve', fontsize=16)
+    ax.set_title('Test Set Precision-Recall Curve (Balanced)', fontsize=16)
     ax.legend(loc="upper right", fontsize=12)
     ax.grid(True, alpha=0.3)
     
@@ -215,9 +235,12 @@ def plot_test_pr_curve(y_true, y_prob, save_path):
     print(f"测试集PR曲线已保存: {save_path}")
 
 
-def plot_test_confusion_matrix(y_true, y_pred, save_path):
-    """绘制测试集混淆矩阵"""
-    cm = confusion_matrix(y_true, y_pred)
+def plot_test_confusion_matrix(y_true, y_prob, threshold, save_path):
+    """绘制测试集混淆矩阵（平衡采样）"""
+    bal_true, bal_prob = get_balanced_data(y_true, y_prob)
+    bal_pred = (bal_prob >= threshold).astype(int)
+    
+    cm = confusion_matrix(bal_true, bal_pred)
     
     fig, ax = plt.subplots(figsize=(8, 7))
     im = ax.imshow(cm, interpolation='nearest', cmap=plt.cm.Blues)
@@ -239,7 +262,7 @@ def plot_test_confusion_matrix(y_true, y_pred, save_path):
     
     ax.set_ylabel('True Label', fontsize=14)
     ax.set_xlabel('Predicted Label', fontsize=14)
-    ax.set_title('Test Set Confusion Matrix', fontsize=16)
+    ax.set_title('Test Set Confusion Matrix (Balanced)', fontsize=16)
     
     plt.tight_layout()
     plt.savefig(save_path, dpi=300, bbox_inches='tight')
@@ -357,7 +380,7 @@ def main():
     print("\n步骤6: 生成图表...")
     plot_test_roc_curve(y_true, y_prob, os.path.join(PAPER_DIR, 'test_roc_curve.png'))
     plot_test_pr_curve(y_true, y_prob, os.path.join(PAPER_DIR, 'test_pr_curve.png'))
-    plot_test_confusion_matrix(y_true, y_pred_optimal, os.path.join(PAPER_DIR, 'test_confusion_matrix.png'))
+    plot_test_confusion_matrix(y_true, y_prob, optimal_threshold, os.path.join(PAPER_DIR, 'test_confusion_matrix.png'))
     
     print("\n步骤7: 生成报告...")
     report = generate_test_report(metrics_balanced, metrics_full, optimal_threshold)
