@@ -152,6 +152,57 @@ def find_optimal_threshold_balanced(y_true, y_prob, n_samples=50):
     return best_threshold, best_mcc
 
 
+def find_optimal_threshold_youden(y_true, y_prob, n_samples=50):
+    """在平衡采样数据上寻找最优阈值（优化Youden's J = SEN + SPE - 1）"""
+    pos_idx = np.where(y_true == 1)[0]
+    neg_idx = np.where(y_true == 0)[0]
+    
+    best_j = -1
+    best_threshold = 0.5
+    best_metrics = None
+    
+    for threshold in np.arange(0.001, 0.9, 0.002):
+        j_list = []
+        sen_list = []
+        spe_list = []
+        f1_list = []
+        
+        for _ in range(n_samples):
+            sampled_neg = np.random.choice(neg_idx, size=min(len(pos_idx), len(neg_idx)), replace=False)
+            balanced_idx = np.concatenate([pos_idx, sampled_neg])
+            
+            bal_true = y_true[balanced_idx]
+            bal_prob = y_prob[balanced_idx]
+            bal_pred = (bal_prob >= threshold).astype(int)
+            
+            cm = confusion_matrix(bal_true, bal_pred)
+            if cm.shape == (2, 2):
+                tn, fp, fn, tp = cm[0, 0], cm[0, 1], cm[1, 0], cm[1, 1]
+                sen = tp / (tp + fn) if (tp + fn) > 0 else 0
+                spe = tn / (tn + fp) if (tn + fp) > 0 else 0
+                j = sen + spe - 1
+                f1 = 2 * tp / (2 * tp + fp + fn) if (2 * tp + fp + fn) > 0 else 0
+                
+                j_list.append(j)
+                sen_list.append(sen)
+                spe_list.append(spe)
+                f1_list.append(f1)
+        
+        if j_list:
+            avg_j = np.mean(j_list)
+            if avg_j > best_j:
+                best_j = avg_j
+                best_threshold = threshold
+                best_metrics = {
+                    'SEN': np.mean(sen_list),
+                    'SPE': np.mean(spe_list),
+                    'F1': np.mean(f1_list),
+                    'J': avg_j
+                }
+    
+    return best_threshold, best_j, best_metrics
+
+
 def calculate_metrics(y_true, y_pred, y_prob):
     """计算评估指标"""
     cm = confusion_matrix(y_true, y_pred)
@@ -397,11 +448,23 @@ def main():
     print(f"总样本数: {len(y_true)} (正样本: {(y_true==1).sum()}, 负样本: {(y_true==0).sum()})")
     
     print("\n步骤4: 在平衡数据上寻找最优阈值...")
-    optimal_threshold, best_mcc = find_optimal_threshold_balanced(y_true, y_prob, n_samples=50)
-    print(f"平衡最优阈值: {optimal_threshold:.4f} (MCC={best_mcc:.4f})")
     
+    print("  方法1: Youden's J优化 (SEN+SPE-1)...")
+    youden_threshold, best_j, youden_metrics = find_optimal_threshold_youden(y_true, y_prob, n_samples=30)
+    print(f"    Youden最优阈值: {youden_threshold:.4f} (J={best_j:.4f})")
+    if youden_metrics:
+        print(f"    预期 SEN: {youden_metrics['SEN']:.4f}, SPE: {youden_metrics['SPE']:.4f}, F1: {youden_metrics['F1']:.4f}")
+    
+    print("  方法2: MCC优化...")
+    mcc_threshold, best_mcc = find_optimal_threshold_balanced(y_true, y_prob, n_samples=30)
+    print(f"    MCC最优阈值: {mcc_threshold:.4f} (MCC={best_mcc:.4f})")
+    
+    print("  方法3: 原始F1优化...")
     orig_threshold, orig_f1 = find_optimal_threshold(y_true, y_prob)
-    print(f"原始最优阈值: {orig_threshold:.4f} (F1={orig_f1:.4f})")
+    print(f"    原始最优阈值: {orig_threshold:.4f} (F1={orig_f1:.4f})")
+    
+    optimal_threshold = youden_threshold
+    print(f"\n最终选择阈值: {optimal_threshold:.4f} (Youden's J方法)")
     
     y_pred_optimal = (y_prob >= optimal_threshold).astype(int)
     
