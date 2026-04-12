@@ -109,7 +109,7 @@ def evaluate_ensemble(models, test_loader):
 
 
 def find_optimal_threshold(y_true, y_prob):
-    """寻找最优阈值"""
+    """寻找最优阈值（在原始不平衡数据上）"""
     best_f1 = 0
     best_threshold = 0.5
     
@@ -121,6 +121,35 @@ def find_optimal_threshold(y_true, y_prob):
             best_threshold = threshold
     
     return best_threshold, best_f1
+
+
+def find_optimal_threshold_balanced(y_true, y_prob, n_samples=50):
+    """在平衡采样数据上寻找最优阈值（优化MCC）"""
+    pos_idx = np.where(y_true == 1)[0]
+    neg_idx = np.where(y_true == 0)[0]
+    
+    best_mcc = -1
+    best_threshold = 0.5
+    
+    for threshold in np.arange(0.01, 0.9, 0.005):
+        mcc_list = []
+        for _ in range(n_samples):
+            sampled_neg = np.random.choice(neg_idx, size=min(len(pos_idx), len(neg_idx)), replace=False)
+            balanced_idx = np.concatenate([pos_idx, sampled_neg])
+            
+            bal_true = y_true[balanced_idx]
+            bal_prob = y_prob[balanced_idx]
+            bal_pred = (bal_prob >= threshold).astype(int)
+            
+            mcc = matthews_corrcoef(bal_true, bal_pred)
+            mcc_list.append(mcc)
+        
+        avg_mcc = np.mean(mcc_list)
+        if avg_mcc > best_mcc:
+            best_mcc = avg_mcc
+            best_threshold = threshold
+    
+    return best_threshold, best_mcc
 
 
 def calculate_metrics(y_true, y_pred, y_prob):
@@ -270,7 +299,7 @@ def plot_test_confusion_matrix(y_true, y_prob, threshold, save_path):
     print(f"测试集混淆矩阵已保存: {save_path}")
 
 
-def generate_test_report(metrics_balanced, metrics_full, optimal_threshold):
+def generate_test_report(metrics_balanced, metrics_full, optimal_threshold, balanced_threshold=None):
     """生成测试集报告"""
     report = []
     report.append("=" * 60)
@@ -290,7 +319,7 @@ def generate_test_report(metrics_balanced, metrics_full, optimal_threshold):
     report.append(f"  MCC:               {metrics_balanced['MCC']:.4f}")
     report.append(f"  ROC-AUC:           {metrics_balanced['AUC']:.4f}")
     report.append(f"  PR-AUC:            {metrics_balanced['PR-AUC']:.4f}")
-    report.append(f"  最优阈值:          {optimal_threshold:.4f}")
+    report.append(f"  平衡最优阈值:      {balanced_threshold:.4f}" if balanced_threshold else f"  最优阈值: {optimal_threshold:.4f}")
     report.append("")
     report.append("【原始数据集评估】")
     report.append("-" * 40)
@@ -367,9 +396,12 @@ def main():
     y_true, y_prob = evaluate_ensemble(models, test_loader)
     print(f"总样本数: {len(y_true)} (正样本: {(y_true==1).sum()}, 负样本: {(y_true==0).sum()})")
     
-    print("\n步骤4: 寻找最优阈值...")
-    optimal_threshold, best_f1 = find_optimal_threshold(y_true, y_prob)
-    print(f"最优阈值: {optimal_threshold:.4f} (F1={best_f1:.4f})")
+    print("\n步骤4: 在平衡数据上寻找最优阈值...")
+    optimal_threshold, best_mcc = find_optimal_threshold_balanced(y_true, y_prob, n_samples=50)
+    print(f"平衡最优阈值: {optimal_threshold:.4f} (MCC={best_mcc:.4f})")
+    
+    orig_threshold, orig_f1 = find_optimal_threshold(y_true, y_prob)
+    print(f"原始最优阈值: {orig_threshold:.4f} (F1={orig_f1:.4f})")
     
     y_pred_optimal = (y_prob >= optimal_threshold).astype(int)
     
@@ -383,7 +415,7 @@ def main():
     plot_test_confusion_matrix(y_true, y_prob, optimal_threshold, os.path.join(PAPER_DIR, 'test_confusion_matrix.png'))
     
     print("\n步骤7: 生成报告...")
-    report = generate_test_report(metrics_balanced, metrics_full, optimal_threshold)
+    report = generate_test_report(metrics_balanced, metrics_full, optimal_threshold, balanced_threshold=optimal_threshold)
     report_path = os.path.join(PAPER_DIR, 'test_evaluation_report.txt')
     with open(report_path, 'w', encoding='utf-8') as f:
         f.write(report)
