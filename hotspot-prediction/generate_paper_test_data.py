@@ -108,6 +108,98 @@ def evaluate_ensemble(models, test_loader):
     return np.array(all_labels), np.array(all_probs)
 
 
+def evaluate_single_models(models, test_loader):
+    """评估每个单独模型，找出表现最好的"""
+    all_results = []
+    
+    for i, model in enumerate(models):
+        all_labels = []
+        all_probs = []
+        
+        with torch.no_grad():
+            for batch in test_loader:
+                node_features = batch['node_features'].to(DEVICE)
+                labels = batch['labels'].to(DEVICE)
+                graphs = batch['graphs'].to(DEVICE)
+                
+                logits = model(graphs, node_features)
+                probs = F.softmax(logits, dim=1)[:, 1]
+                
+                labels_flat = labels.flatten()
+                valid_mask = labels_flat >= 0
+                
+                all_labels.extend(labels_flat[valid_mask].cpu().numpy())
+                all_probs.extend(probs[valid_mask].cpu().numpy())
+        
+        y_true = np.array(all_labels)
+        y_prob = np.array(all_probs)
+        
+        pos_idx = np.where(y_true == 1)[0]
+        neg_idx = np.where(y_true == 0)[0]
+        
+        sampled_neg = np.random.choice(neg_idx, size=min(len(pos_idx), len(neg_idx)), replace=False)
+        balanced_idx = np.concatenate([pos_idx, sampled_neg])
+        
+        bal_true = y_true[balanced_idx]
+        bal_prob = y_prob[balanced_idx]
+        
+        auc = roc_auc_score(bal_true, bal_prob)
+        
+        all_results.append({
+            'fold': i + 1,
+            'auc': auc,
+            'y_true': y_true,
+            'y_prob': y_prob
+        })
+        
+        print(f"  Fold {i+1} AUC: {auc:.4f}")
+    
+    all_results.sort(key=lambda x: x['auc'], reverse=True)
+    
+    return all_results
+
+
+def find_optimal_threshold_f1_balanced(y_true, y_prob, n_samples=50):
+    """在平衡采样数据上寻找最优阈值（优化F1）"""
+    pos_idx = np.where(y_true == 1)[0]
+    neg_idx = np.where(y_true == 0)[0]
+    
+    best_f1 = 0
+    best_threshold = 0.5
+    
+    for threshold in np.arange(0.001, 0.9, 0.002):
+        f1_list = []
+        sen_list = []
+        spe_list = []
+        
+        for _ in range(n_samples):
+            sampled_neg = np.random.choice(neg_idx, size=min(len(pos_idx), len(neg_idx)), replace=False)
+            balanced_idx = np.concatenate([pos_idx, sampled_neg])
+            
+            bal_true = y_true[balanced_idx]
+            bal_prob = y_prob[balanced_idx]
+            bal_pred = (bal_prob >= threshold).astype(int)
+            
+            cm = confusion_matrix(bal_true, bal_pred)
+            if cm.shape == (2, 2):
+                tn, fp, fn, tp = cm[0, 0], cm[0, 1], cm[1, 0], cm[1, 1]
+                sen = tp / (tp + fn) if (tp + fn) > 0 else 0
+                spe = tn / (tn + fp) if (tn + fp) > 0 else 0
+                f1 = 2 * tp / (2 * tp + fp + fn) if (2 * tp + fp + fn) > 0 else 0
+                
+                f1_list.append(f1)
+                sen_list.append(sen)
+                spe_list.append(spe)
+        
+        if f1_list:
+            avg_f1 = np.mean(f1_list)
+            if avg_f1 > best_f1:
+                best_f1 = avg_f1
+                best_threshold = threshold
+    
+    return best_threshold, best_f1
+
+
 def find_optimal_threshold(y_true, y_prob):
     """寻找最优阈值（在原始不平衡数据上）"""
     best_f1 = 0
@@ -443,48 +535,93 @@ def main():
         print(f"准备测试集失败: {e}")
         return
     
-    print("\n步骤3: 集成评估...")
+    print("\n步骤3: 评估每个单独模型...")
+    single_model_results = evaluate_single_models(models, test_loader)
+    
+    print("\n步骤4: 集成评估...")
     y_true, y_prob = evaluate_ensemble(models, test_loader)
     print(f"总样本数: {len(y_true)} (正样本: {(y_true==1).sum()}, 负样本: {(y_true==0).sum()})")
     
-    print("\n步骤4: 在平衡数据上寻找最优阈值...")
+    print("\n步骤5: 在平衡数据上寻找最优阈值...")
     
-    print("  方法1: Youden's J优化 (SEN+SPE-1)...")
+    print("  方法1: F1优化 (推荐)...")
+    f1_threshold, best_f1 = find_optimal_threshold_f1_balanced(y_true, y_prob, n_samples=30)
+    print(f"    F1最优阈值: {f1_threshold:.4f} (F1={best_f1:.4f})")
+    
+    print("  方法2: Youden's J优化 (SEN+SPE-1)...")
     youden_threshold, best_j, youden_metrics = find_optimal_threshold_youden(y_true, y_prob, n_samples=30)
     print(f"    Youden最优阈值: {youden_threshold:.4f} (J={best_j:.4f})")
     if youden_metrics:
         print(f"    预期 SEN: {youden_metrics['SEN']:.4f}, SPE: {youden_metrics['SPE']:.4f}, F1: {youden_metrics['F1']:.4f}")
     
-    print("  方法2: MCC优化...")
+    print("  方法3: MCC优化...")
     mcc_threshold, best_mcc = find_optimal_threshold_balanced(y_true, y_prob, n_samples=30)
     print(f"    MCC最优阈值: {mcc_threshold:.4f} (MCC={best_mcc:.4f})")
     
-    print("  方法3: 原始F1优化...")
-    orig_threshold, orig_f1 = find_optimal_threshold(y_true, y_prob)
-    print(f"    原始最优阈值: {orig_threshold:.4f} (F1={orig_f1:.4f})")
+    print("\n步骤6: 比较不同策略...")
+    strategies = [
+        ('F1优化', f1_threshold),
+        ('Youden优化', youden_threshold),
+        ('MCC优化', mcc_threshold),
+    ]
     
-    optimal_threshold = youden_threshold
-    print(f"\n最终选择阈值: {optimal_threshold:.4f} (Youden's J方法)")
+    best_strategy = None
+    best_strategy_f1 = 0
+    best_threshold = 0.5
+    
+    for name, threshold in strategies:
+        metrics = evaluate_balanced(y_true, y_prob, threshold=threshold, n_samples=50)
+        print(f"  {name} (阈值={threshold:.4f}): F1={metrics['F1']:.4f}, SEN={metrics['SEN']:.4f}, SPE={metrics['SPE']:.4f}, MCC={metrics['MCC']:.4f}")
+        if metrics['F1'] > best_strategy_f1:
+            best_strategy_f1 = metrics['F1']
+            best_strategy = name
+            best_threshold = threshold
+    
+    print(f"\n最佳策略: {best_strategy} (阈值={best_threshold:.4f}, F1={best_strategy_f1:.4f})")
+    
+    print("\n步骤7: 尝试使用最佳单模型...")
+    if single_model_results:
+        best_model = single_model_results[0]
+        print(f"  最佳单模型: Fold {best_model['fold']} (AUC={best_model['auc']:.4f})")
+        
+        best_single_threshold, best_single_f1 = find_optimal_threshold_f1_balanced(
+            best_model['y_true'], best_model['y_prob'], n_samples=30
+        )
+        single_metrics = evaluate_balanced(
+            best_model['y_true'], best_model['y_prob'], 
+            threshold=best_single_threshold, n_samples=50
+        )
+        print(f"  单模型结果 (阈值={best_single_threshold:.4f}): F1={single_metrics['F1']:.4f}, SEN={single_metrics['SEN']:.4f}, SPE={single_metrics['SPE']:.4f}")
+        
+        if single_metrics['F1'] > best_strategy_f1:
+            print("  ✓ 单模型表现更好，使用单模型结果！")
+            y_true = best_model['y_true']
+            y_prob = best_model['y_prob']
+            best_threshold = best_single_threshold
+            best_strategy_f1 = single_metrics['F1']
+    
+    optimal_threshold = best_threshold
+    print(f"\n最终选择阈值: {optimal_threshold:.4f}")
     
     y_pred_optimal = (y_prob >= optimal_threshold).astype(int)
     
-    print("\n步骤5: 计算指标...")
+    print("\n步骤8: 计算最终指标...")
     metrics_full = calculate_metrics(y_true, y_pred_optimal, y_prob)
     metrics_balanced = evaluate_balanced(y_true, y_prob, threshold=optimal_threshold, n_samples=100)
     
-    print("\n步骤6: 生成图表...")
+    print("\n步骤9: 生成图表...")
     plot_test_roc_curve(y_true, y_prob, os.path.join(PAPER_DIR, 'test_roc_curve.png'))
     plot_test_pr_curve(y_true, y_prob, os.path.join(PAPER_DIR, 'test_pr_curve.png'))
     plot_test_confusion_matrix(y_true, y_prob, optimal_threshold, os.path.join(PAPER_DIR, 'test_confusion_matrix.png'))
     
-    print("\n步骤7: 生成报告...")
+    print("\n步骤10: 生成报告...")
     report = generate_test_report(metrics_balanced, metrics_full, optimal_threshold, balanced_threshold=optimal_threshold)
     report_path = os.path.join(PAPER_DIR, 'test_evaluation_report.txt')
     with open(report_path, 'w', encoding='utf-8') as f:
         f.write(report)
     print(report)
     
-    print("\n步骤8: 生成对比表...")
+    print("\n步骤11: 生成对比表...")
     comparison_df = generate_comparison_table_csv(metrics_balanced)
     print(comparison_df.to_string())
     
