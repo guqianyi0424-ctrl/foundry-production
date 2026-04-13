@@ -773,15 +773,23 @@ def main():
         print(f"    单模型-Fold{best_model['fold']} (阈值={bm_f1_threshold:.4f}): F1={bm_metrics['F1']:.4f}, SEN={bm_metrics['SEN']:.4f}, SPE={bm_metrics['SPE']:.4f}")
     
     print("\n步骤6: 选择最佳策略...")
-    all_strategies.sort(key=lambda x: x[4]['F1'], reverse=True)
     
-    print("\n  所有策略排名 (按F1):")
+    def composite_score(metrics):
+        balance = min(metrics['SEN'], metrics['SPE'])
+        return 0.4 * metrics['F1'] + 0.3 * metrics['MCC'] + 0.3 * balance
+    
+    for item in all_strategies:
+        item[4]['composite'] = composite_score(item[4])
+    
+    all_strategies.sort(key=lambda x: x[4]['composite'], reverse=True)
+    
+    print("\n  所有策略排名 (按综合得分 = 0.4*F1 + 0.3*MCC + 0.3*min(SEN,SPE)):")
     for rank, (name, _, _, threshold, metrics) in enumerate(all_strategies, 1):
         th_str = f"阈值={threshold:.4f}" if threshold is not None else "自适应"
-        print(f"    #{rank} {name} ({th_str}): F1={metrics['F1']:.4f}, SEN={metrics['SEN']:.4f}, SPE={metrics['SPE']:.4f}, MCC={metrics['MCC']:.4f}, AUC={metrics['AUC']:.4f}")
+        print(f"    #{rank} {name} ({th_str}): F1={metrics['F1']:.4f}, SEN={metrics['SEN']:.4f}, SPE={metrics['SPE']:.4f}, MCC={metrics['MCC']:.4f}, AUC={metrics['AUC']:.4f}, 综合={metrics['composite']:.4f}")
     
     best_name, best_y_true, best_y_prob, best_threshold_val, best_metrics = all_strategies[0]
-    print(f"\n  ✓ 最佳策略: {best_name} (F1={best_metrics['F1']:.4f})")
+    print(f"\n  ✓ 最佳策略: {best_name} (综合={best_metrics['composite']:.4f})")
     
     y_true_final = best_y_true
     y_prob_final = best_y_prob
