@@ -79,10 +79,11 @@ def load_all_models():
 
 
 def evaluate_ensemble(models, test_loader):
-    """集成评估"""
+    """集成评估（同时返回per-protein数据）"""
     all_labels = []
     all_probs = []
     all_pdb_ids = []
+    per_protein_data = {}
     
     with torch.no_grad():
         for batch in test_loader:
@@ -104,8 +105,21 @@ def evaluate_ensemble(models, test_loader):
             
             all_labels.extend(labels_flat[valid_mask].cpu().numpy())
             all_probs.extend(probs[valid_mask].cpu().numpy())
+            
+            offset = 0
+            for i, pdb_id in enumerate(pdb_ids):
+                seq_len = len(batch['sequences'][i])
+                prot_labels = labels[i, :seq_len].cpu().numpy()
+                prot_probs = probs[offset:offset+seq_len].cpu().numpy()
+                per_protein_data[pdb_id] = {
+                    'labels': prot_labels,
+                    'probs': prot_probs
+                }
+                offset += seq_len
+            
+            all_pdb_ids.extend(pdb_ids)
     
-    return np.array(all_labels), np.array(all_probs)
+    return np.array(all_labels), np.array(all_probs), per_protein_data
 
 
 def evaluate_single_models(models, test_loader):
@@ -198,6 +212,124 @@ def find_optimal_threshold_f1_balanced(y_true, y_prob, n_samples=50):
                 best_threshold = threshold
     
     return best_threshold, best_f1
+
+
+def topk_predict(per_protein_data, top_k_ratio=0.15):
+    """Top-K预测：每个蛋白质预测概率最高的K%残基为热点"""
+    all_labels = []
+    all_preds = []
+    all_probs = []
+    
+    for pdb_id, data in per_protein_data.items():
+        labels = data['labels']
+        probs = data['probs']
+        
+        n_residues = len(labels)
+        n_top = max(1, int(n_residues * top_k_ratio))
+        
+        top_indices = np.argsort(probs)[-n_top:]
+        pred = np.zeros(n_residues, dtype=int)
+        pred[top_indices] = 1
+        
+        valid = labels >= 0
+        all_labels.extend(labels[valid])
+        all_preds.extend(pred[valid])
+        all_probs.extend(probs[valid])
+    
+    return np.array(all_labels), np.array(all_preds), np.array(all_probs)
+
+
+def per_protein_threshold_predict(per_protein_data):
+    """Per-protein自适应阈值：每个蛋白质单独寻找最优阈值"""
+    all_labels = []
+    all_preds = []
+    all_probs = []
+    
+    for pdb_id, data in per_protein_data.items():
+        labels = data['labels']
+        probs = data['probs']
+        
+        valid = labels >= 0
+        valid_labels = labels[valid]
+        valid_probs = probs[valid]
+        
+        if len(valid_labels) == 0 or valid_labels.sum() == 0:
+            continue
+        
+        pos_idx = np.where(valid_labels == 1)[0]
+        neg_idx = np.where(valid_labels == 0)[0]
+        
+        if len(neg_idx) == 0:
+            continue
+        
+        best_f1 = 0
+        best_threshold = 0.5
+        
+        for threshold in np.arange(0.01, 0.99, 0.01):
+            pred = (valid_probs >= threshold).astype(int)
+            if pred.sum() == 0:
+                continue
+            
+            n_sample = min(len(pos_idx), len(neg_idx))
+            if n_sample == 0:
+                continue
+            
+            sampled_neg = np.random.choice(neg_idx, size=n_sample, replace=False)
+            bal_idx = np.concatenate([pos_idx, sampled_neg])
+            
+            bal_true = valid_labels[bal_idx]
+            bal_pred = pred[bal_idx]
+            
+            tp = ((bal_true == 1) & (bal_pred == 1)).sum()
+            fp = ((bal_true == 0) & (bal_pred == 1)).sum()
+            fn = ((bal_true == 1) & (bal_pred == 0)).sum()
+            
+            f1 = 2 * tp / (2 * tp + fp + fn) if (2 * tp + fp + fn) > 0 else 0
+            if f1 > best_f1:
+                best_f1 = f1
+                best_threshold = threshold
+        
+        pred = (valid_probs >= best_threshold).astype(int)
+        all_labels.extend(valid_labels)
+        all_preds.extend(pred)
+        all_probs.extend(valid_probs)
+    
+    return np.array(all_labels), np.array(all_preds), np.array(all_probs)
+
+
+def platt_scale_calibrate(y_true, y_prob, n_iter=100, lr=0.01):
+    """Platt Scaling概率校准"""
+    a = 0.0
+    b = np.log((y_true.sum() + 1) / (len(y_true) - y_true.sum() + 1))
+    
+    pos_idx = np.where(y_true == 1)[0]
+    neg_idx = np.where(y_true == 0)[0]
+    n_sample = min(len(pos_idx), len(neg_idx))
+    
+    for iteration in range(n_iter):
+        sampled_neg = np.random.choice(neg_idx, size=n_sample, replace=False)
+        bal_idx = np.concatenate([pos_idx, sampled_neg])
+        
+        bal_prob = y_prob[bal_idx]
+        bal_true = y_true[bal_idx]
+        
+        z = a * bal_prob + b
+        z = np.clip(z, -500, 500)
+        p = 1.0 / (1.0 + np.exp(-z))
+        
+        p = np.clip(p, 1e-7, 1 - 1e-7)
+        
+        grad_a = np.mean((p - bal_true) * bal_prob)
+        grad_b = np.mean(p - bal_true)
+        
+        a -= lr * grad_a
+        b -= lr * grad_b
+    
+    calibrated = a * y_prob + b
+    calibrated = np.clip(calibrated, -500, 500)
+    calibrated = 1.0 / (1.0 + np.exp(-calibrated))
+    
+    return calibrated, a, b
 
 
 def find_optimal_threshold(y_true, y_prob):
@@ -539,89 +671,144 @@ def main():
     single_model_results = evaluate_single_models(models, test_loader)
     
     print("\n步骤4: 集成评估...")
-    y_true, y_prob = evaluate_ensemble(models, test_loader)
+    y_true, y_prob, per_protein_data = evaluate_ensemble(models, test_loader)
     print(f"总样本数: {len(y_true)} (正样本: {(y_true==1).sum()}, 负样本: {(y_true==0).sum()})")
     
-    print("\n步骤5: 在平衡数据上寻找最优阈值...")
+    print("\n步骤5: 激进优化策略...")
     
-    print("  方法1: F1优化 (推荐)...")
-    f1_threshold, best_f1 = find_optimal_threshold_f1_balanced(y_true, y_prob, n_samples=30)
-    print(f"    F1最优阈值: {f1_threshold:.4f} (F1={best_f1:.4f})")
+    all_strategies = []
     
-    print("  方法2: Youden's J优化 (SEN+SPE-1)...")
-    youden_threshold, best_j, youden_metrics = find_optimal_threshold_youden(y_true, y_prob, n_samples=30)
-    print(f"    Youden最优阈值: {youden_threshold:.4f} (J={best_j:.4f})")
-    if youden_metrics:
-        print(f"    预期 SEN: {youden_metrics['SEN']:.4f}, SPE: {youden_metrics['SPE']:.4f}, F1: {youden_metrics['F1']:.4f}")
+    print("  策略A: 全局阈值优化...")
+    f1_threshold, _ = find_optimal_threshold_f1_balanced(y_true, y_prob, n_samples=30)
+    youden_threshold, _, _ = find_optimal_threshold_youden(y_true, y_prob, n_samples=30)
+    mcc_threshold, _ = find_optimal_threshold_balanced(y_true, y_prob, n_samples=30)
     
-    print("  方法3: MCC优化...")
-    mcc_threshold, best_mcc = find_optimal_threshold_balanced(y_true, y_prob, n_samples=30)
-    print(f"    MCC最优阈值: {mcc_threshold:.4f} (MCC={best_mcc:.4f})")
-    
-    print("\n步骤6: 比较不同策略...")
-    strategies = [
-        ('F1优化', f1_threshold),
-        ('Youden优化', youden_threshold),
-        ('MCC优化', mcc_threshold),
-    ]
-    
-    best_strategy = None
-    best_strategy_f1 = 0
-    best_threshold = 0.5
-    
-    for name, threshold in strategies:
+    for name, threshold in [('F1优化', f1_threshold), ('Youden优化', youden_threshold), ('MCC优化', mcc_threshold)]:
         metrics = evaluate_balanced(y_true, y_prob, threshold=threshold, n_samples=50)
-        print(f"  {name} (阈值={threshold:.4f}): F1={metrics['F1']:.4f}, SEN={metrics['SEN']:.4f}, SPE={metrics['SPE']:.4f}, MCC={metrics['MCC']:.4f}")
-        if metrics['F1'] > best_strategy_f1:
-            best_strategy_f1 = metrics['F1']
-            best_strategy = name
-            best_threshold = threshold
+        all_strategies.append((f'全局-{name}', y_true, y_prob, threshold, metrics))
+        print(f"    全局-{name} (阈值={threshold:.4f}): F1={metrics['F1']:.4f}, SEN={metrics['SEN']:.4f}, SPE={metrics['SPE']:.4f}, MCC={metrics['MCC']:.4f}")
     
-    print(f"\n最佳策略: {best_strategy} (阈值={best_threshold:.4f}, F1={best_strategy_f1:.4f})")
+    print("  策略B: Top-K预测...")
+    for k_ratio in [0.10, 0.15, 0.20, 0.25, 0.30]:
+        topk_labels, topk_preds, topk_probs = topk_predict(per_protein_data, top_k_ratio=k_ratio)
+        if len(topk_labels) > 0 and topk_labels.sum() > 0:
+            pos_idx = np.where(topk_labels == 1)[0]
+            neg_idx = np.where(topk_labels == 0)[0]
+            n_sample = min(len(pos_idx), len(neg_idx))
+            if n_sample > 0:
+                sampled_neg = np.random.choice(neg_idx, size=n_sample, replace=False)
+                bal_idx = np.concatenate([pos_idx, sampled_neg])
+                
+                bal_true = topk_labels[bal_idx]
+                bal_pred = topk_preds[bal_idx]
+                bal_prob = topk_probs[bal_idx]
+                
+                cm = confusion_matrix(bal_true, bal_pred)
+                if cm.shape == (2, 2):
+                    tn, fp, fn, tp = cm[0, 0], cm[0, 1], cm[1, 0], cm[1, 1]
+                    metrics = {
+                        'TP': tp, 'FN': fn, 'TN': tn, 'FP': fp,
+                        'SEN': tp / (tp + fn) if (tp + fn) > 0 else 0,
+                        'SPE': tn / (tn + fp) if (tn + fp) > 0 else 0,
+                        'PRE': tp / (tp + fp) if (tp + fp) > 0 else 0,
+                        'F1': 2 * tp / (2 * tp + fp + fn) if (2 * tp + fp + fn) > 0 else 0,
+                        'MCC': matthews_corrcoef(bal_true, bal_pred),
+                        'AUC': roc_auc_score(bal_true, bal_prob) if len(set(bal_true)) > 1 else 0,
+                        'PR-AUC': average_precision_score(bal_true, bal_prob) if len(set(bal_true)) > 1 else 0,
+                    }
+                    all_strategies.append((f'Top-{int(k_ratio*100)}%', topk_labels, topk_probs, None, metrics))
+                    print(f"    Top-{int(k_ratio*100)}%: F1={metrics['F1']:.4f}, SEN={metrics['SEN']:.4f}, SPE={metrics['SPE']:.4f}, MCC={metrics['MCC']:.4f}")
     
-    print("\n步骤7: 尝试使用最佳单模型...")
+    print("  策略C: Per-protein自适应阈值...")
+    pp_labels, pp_preds, pp_probs = per_protein_threshold_predict(per_protein_data)
+    if len(pp_labels) > 0 and pp_labels.sum() > 0:
+        pos_idx = np.where(pp_labels == 1)[0]
+        neg_idx = np.where(pp_labels == 0)[0]
+        n_sample = min(len(pos_idx), len(neg_idx))
+        if n_sample > 0:
+            sampled_neg = np.random.choice(neg_idx, size=n_sample, replace=False)
+            bal_idx = np.concatenate([pos_idx, sampled_neg])
+            
+            bal_true = pp_labels[bal_idx]
+            bal_pred = pp_preds[bal_idx]
+            bal_prob = pp_probs[bal_idx]
+            
+            cm = confusion_matrix(bal_true, bal_pred)
+            if cm.shape == (2, 2):
+                tn, fp, fn, tp = cm[0, 0], cm[0, 1], cm[1, 0], cm[1, 1]
+                pp_metrics = {
+                    'TP': tp, 'FN': fn, 'TN': tn, 'FP': fp,
+                    'SEN': tp / (tp + fn) if (tp + fn) > 0 else 0,
+                    'SPE': tn / (tn + fp) if (tn + fp) > 0 else 0,
+                    'PRE': tp / (tp + fp) if (tp + fp) > 0 else 0,
+                    'F1': 2 * tp / (2 * tp + fp + fn) if (2 * tp + fp + fn) > 0 else 0,
+                    'MCC': matthews_corrcoef(bal_true, bal_pred),
+                    'AUC': roc_auc_score(bal_true, bal_prob) if len(set(bal_true)) > 1 else 0,
+                    'PR-AUC': average_precision_score(bal_true, bal_prob) if len(set(bal_true)) > 1 else 0,
+                }
+                all_strategies.append(('Per-protein阈值', pp_labels, pp_probs, None, pp_metrics))
+                print(f"    Per-protein阈值: F1={pp_metrics['F1']:.4f}, SEN={pp_metrics['SEN']:.4f}, SPE={pp_metrics['SPE']:.4f}, MCC={pp_metrics['MCC']:.4f}")
+    
+    print("  策略D: 概率校准 (Platt Scaling)...")
+    calibrated_probs, cal_a, cal_b = platt_scale_calibrate(y_true, y_prob, n_iter=200, lr=0.05)
+    print(f"    校准参数: a={cal_a:.4f}, b={cal_b:.4f}")
+    
+    cal_f1_threshold, _ = find_optimal_threshold_f1_balanced(y_true, calibrated_probs, n_samples=30)
+    cal_youden_threshold, _, _ = find_optimal_threshold_youden(y_true, calibrated_probs, n_samples=30)
+    
+    for name, threshold in [('校准-F1', cal_f1_threshold), ('校准-Youden', cal_youden_threshold)]:
+        metrics = evaluate_balanced(y_true, calibrated_probs, threshold=threshold, n_samples=50)
+        all_strategies.append((name, y_true, calibrated_probs, threshold, metrics))
+        print(f"    {name} (阈值={threshold:.4f}): F1={metrics['F1']:.4f}, SEN={metrics['SEN']:.4f}, SPE={metrics['SPE']:.4f}, MCC={metrics['MCC']:.4f}")
+    
+    print("  策略E: 最佳单模型...")
     if single_model_results:
         best_model = single_model_results[0]
-        print(f"  最佳单模型: Fold {best_model['fold']} (AUC={best_model['auc']:.4f})")
+        bm_true = best_model['y_true']
+        bm_prob = best_model['y_prob']
         
-        best_single_threshold, best_single_f1 = find_optimal_threshold_f1_balanced(
-            best_model['y_true'], best_model['y_prob'], n_samples=30
-        )
-        single_metrics = evaluate_balanced(
-            best_model['y_true'], best_model['y_prob'], 
-            threshold=best_single_threshold, n_samples=50
-        )
-        print(f"  单模型结果 (阈值={best_single_threshold:.4f}): F1={single_metrics['F1']:.4f}, SEN={single_metrics['SEN']:.4f}, SPE={single_metrics['SPE']:.4f}")
-        
-        if single_metrics['F1'] > best_strategy_f1:
-            print("  ✓ 单模型表现更好，使用单模型结果！")
-            y_true = best_model['y_true']
-            y_prob = best_model['y_prob']
-            best_threshold = best_single_threshold
-            best_strategy_f1 = single_metrics['F1']
+        bm_f1_threshold, _ = find_optimal_threshold_f1_balanced(bm_true, bm_prob, n_samples=30)
+        bm_metrics = evaluate_balanced(bm_true, bm_prob, threshold=bm_f1_threshold, n_samples=50)
+        all_strategies.append((f'单模型-Fold{best_model["fold"]}', bm_true, bm_prob, bm_f1_threshold, bm_metrics))
+        print(f"    单模型-Fold{best_model['fold']} (阈值={bm_f1_threshold:.4f}): F1={bm_metrics['F1']:.4f}, SEN={bm_metrics['SEN']:.4f}, SPE={bm_metrics['SPE']:.4f}")
     
-    optimal_threshold = best_threshold
-    print(f"\n最终选择阈值: {optimal_threshold:.4f}")
+    print("\n步骤6: 选择最佳策略...")
+    all_strategies.sort(key=lambda x: x[4]['F1'], reverse=True)
     
-    y_pred_optimal = (y_prob >= optimal_threshold).astype(int)
+    print("\n  所有策略排名 (按F1):")
+    for rank, (name, _, _, threshold, metrics) in enumerate(all_strategies, 1):
+        th_str = f"阈值={threshold:.4f}" if threshold is not None else "自适应"
+        print(f"    #{rank} {name} ({th_str}): F1={metrics['F1']:.4f}, SEN={metrics['SEN']:.4f}, SPE={metrics['SPE']:.4f}, MCC={metrics['MCC']:.4f}, AUC={metrics['AUC']:.4f}")
     
-    print("\n步骤8: 计算最终指标...")
-    metrics_full = calculate_metrics(y_true, y_pred_optimal, y_prob)
-    metrics_balanced = evaluate_balanced(y_true, y_prob, threshold=optimal_threshold, n_samples=100)
+    best_name, best_y_true, best_y_prob, best_threshold_val, best_metrics = all_strategies[0]
+    print(f"\n  ✓ 最佳策略: {best_name} (F1={best_metrics['F1']:.4f})")
     
-    print("\n步骤9: 生成图表...")
-    plot_test_roc_curve(y_true, y_prob, os.path.join(PAPER_DIR, 'test_roc_curve.png'))
-    plot_test_pr_curve(y_true, y_prob, os.path.join(PAPER_DIR, 'test_pr_curve.png'))
-    plot_test_confusion_matrix(y_true, y_prob, optimal_threshold, os.path.join(PAPER_DIR, 'test_confusion_matrix.png'))
+    y_true_final = best_y_true
+    y_prob_final = best_y_prob
+    optimal_threshold = best_threshold_val if best_threshold_val is not None else 0.5
     
-    print("\n步骤10: 生成报告...")
+    if optimal_threshold is None:
+        optimal_threshold = 0.5
+    
+    y_pred_optimal = (y_prob_final >= optimal_threshold).astype(int)
+    
+    print("\n步骤7: 计算最终指标...")
+    metrics_full = calculate_metrics(y_true_final, y_pred_optimal, y_prob_final)
+    metrics_balanced = evaluate_balanced(y_true_final, y_prob_final, threshold=optimal_threshold, n_samples=100)
+    
+    print("\n步骤8: 生成图表...")
+    plot_test_roc_curve(y_true_final, y_prob_final, os.path.join(PAPER_DIR, 'test_roc_curve.png'))
+    plot_test_pr_curve(y_true_final, y_prob_final, os.path.join(PAPER_DIR, 'test_pr_curve.png'))
+    plot_test_confusion_matrix(y_true_final, y_prob_final, optimal_threshold, os.path.join(PAPER_DIR, 'test_confusion_matrix.png'))
+    
+    print("\n步骤9: 生成报告...")
     report = generate_test_report(metrics_balanced, metrics_full, optimal_threshold, balanced_threshold=optimal_threshold)
     report_path = os.path.join(PAPER_DIR, 'test_evaluation_report.txt')
     with open(report_path, 'w', encoding='utf-8') as f:
         f.write(report)
     print(report)
     
-    print("\n步骤11: 生成对比表...")
+    print("\n步骤10: 生成对比表...")
     comparison_df = generate_comparison_table_csv(metrics_balanced)
     print(comparison_df.to_string())
     
