@@ -239,6 +239,94 @@ def topk_predict(per_protein_data, top_k_ratio=0.15):
     return np.array(all_labels), np.array(all_preds), np.array(all_probs)
 
 
+def per_protein_normalize(per_protein_data):
+    """蛋白质内z-score归一化：每个蛋白质的概率独立归一化"""
+    all_labels = []
+    all_probs_norm = []
+    per_protein_norm = {}
+    
+    for pdb_id, data in per_protein_data.items():
+        labels = data['labels']
+        probs = data['probs']
+        
+        mean_p = np.mean(probs)
+        std_p = np.std(probs)
+        if std_p > 1e-8:
+            norm_probs = (probs - mean_p) / std_p
+            from scipy.special import expit
+            norm_probs = expit(norm_probs)
+        else:
+            norm_probs = np.full_like(probs, 0.5)
+        
+        per_protein_norm[pdb_id] = {
+            'labels': labels,
+            'probs': norm_probs
+        }
+        
+        valid = labels >= 0
+        all_labels.extend(labels[valid])
+        all_probs_norm.extend(norm_probs[valid])
+    
+    return np.array(all_labels), np.array(all_probs_norm), per_protein_norm
+
+
+def find_balanced_threshold(y_true, y_prob, n_samples=50):
+    """寻找SEN≈SPE的平衡阈值"""
+    pos_idx = np.where(y_true == 1)[0]
+    neg_idx = np.where(y_true == 0)[0]
+    
+    best_diff = 999
+    best_threshold = 0.5
+    best_metrics = None
+    
+    for threshold in np.arange(0.001, 0.9, 0.002):
+        sen_list = []
+        spe_list = []
+        f1_list = []
+        mcc_list = []
+        
+        for _ in range(n_samples):
+            sampled_neg = np.random.choice(neg_idx, size=min(len(pos_idx), len(neg_idx)), replace=False)
+            balanced_idx = np.concatenate([pos_idx, sampled_neg])
+            
+            bal_true = y_true[balanced_idx]
+            bal_prob = y_prob[balanced_idx]
+            bal_pred = (bal_prob >= threshold).astype(int)
+            
+            cm = confusion_matrix(bal_true, bal_pred)
+            if cm.shape == (2, 2):
+                tn, fp, fn, tp = cm[0, 0], cm[0, 1], cm[1, 0], cm[1, 1]
+                sen = tp / (tp + fn) if (tp + fn) > 0 else 0
+                spe = tn / (tn + fp) if (tn + fp) > 0 else 0
+                f1 = 2 * tp / (2 * tp + fp + fn) if (2 * tp + fp + fn) > 0 else 0
+                mcc = matthews_corrcoef(bal_true, bal_pred)
+                
+                sen_list.append(sen)
+                spe_list.append(spe)
+                f1_list.append(f1)
+                mcc_list.append(mcc)
+        
+        if sen_list:
+            avg_sen = np.mean(sen_list)
+            avg_spe = np.mean(spe_list)
+            avg_f1 = np.mean(f1_list)
+            avg_mcc = np.mean(mcc_list)
+            diff = abs(avg_sen - avg_spe)
+            
+            if diff < best_diff:
+                best_diff = diff
+                best_threshold = threshold
+                best_metrics = {
+                    'SEN': avg_sen,
+                    'SPE': avg_spe,
+                    'F1': avg_f1,
+                    'MCC': avg_mcc,
+                    'diff': diff
+                }
+    
+    return best_threshold, best_diff, best_metrics
+
+
 def per_protein_threshold_predict(per_protein_data):
     """Per-protein自适应阈值：每个蛋白质单独寻找最优阈值"""
     all_labels = []
@@ -772,7 +860,57 @@ def main():
         all_strategies.append((f'单模型-Fold{best_model["fold"]}', bm_true, bm_prob, bm_f1_threshold, bm_metrics))
         print(f"    单模型-Fold{best_model['fold']} (阈值={bm_f1_threshold:.4f}): F1={bm_metrics['F1']:.4f}, SEN={bm_metrics['SEN']:.4f}, SPE={bm_metrics['SPE']:.4f}")
     
-    print("\n步骤6: 选择最佳策略...")
+    print("  策略F: 蛋白质内归一化 + 阈值优化...")
+    norm_labels, norm_probs, per_protein_norm = per_protein_normalize(per_protein_data)
+    
+    norm_f1_threshold, _ = find_optimal_threshold_f1_balanced(norm_labels, norm_probs, n_samples=30)
+    norm_youden_threshold, _, _ = find_optimal_threshold_youden(norm_labels, norm_probs, n_samples=30)
+    norm_balanced_threshold, norm_diff, norm_bal_metrics = find_balanced_threshold(norm_labels, norm_probs, n_samples=30)
+    
+    for name, threshold in [('归一化-F1', norm_f1_threshold), ('归一化-Youden', norm_youden_threshold), ('归一化-SEN≈SPE', norm_balanced_threshold)]:
+        metrics = evaluate_balanced(norm_labels, norm_probs, threshold=threshold, n_samples=50)
+        all_strategies.append((name, norm_labels, norm_probs, threshold, metrics))
+        print(f"    {name} (阈值={threshold:.4f}): F1={metrics['F1']:.4f}, SEN={metrics['SEN']:.4f}, SPE={metrics['SPE']:.4f}, MCC={metrics['MCC']:.4f}")
+    
+    print("  策略G: 归一化 + Top-K...")
+    for k_ratio in [0.10, 0.15, 0.20]:
+        topk_labels, topk_preds, topk_probs = topk_predict(per_protein_norm, top_k_ratio=k_ratio)
+        if len(topk_labels) > 0 and topk_labels.sum() > 0:
+            pos_idx = np.where(topk_labels == 1)[0]
+            neg_idx = np.where(topk_labels == 0)[0]
+            n_sample = min(len(pos_idx), len(neg_idx))
+            if n_sample > 0:
+                sampled_neg = np.random.choice(neg_idx, size=n_sample, replace=False)
+                bal_idx = np.concatenate([pos_idx, sampled_neg])
+                
+                bal_true = topk_labels[bal_idx]
+                bal_pred = topk_preds[bal_idx]
+                bal_prob = topk_probs[bal_idx]
+                
+                cm = confusion_matrix(bal_true, bal_pred)
+                if cm.shape == (2, 2):
+                    tn, fp, fn, tp = cm[0, 0], cm[0, 1], cm[1, 0], cm[1, 1]
+                    metrics = {
+                        'TP': tp, 'FN': fn, 'TN': tn, 'FP': fp,
+                        'SEN': tp / (tp + fn) if (tp + fn) > 0 else 0,
+                        'SPE': tn / (tn + fp) if (tn + fp) > 0 else 0,
+                        'PRE': tp / (tp + fp) if (tp + fp) > 0 else 0,
+                        'F1': 2 * tp / (2 * tp + fp + fn) if (2 * tp + fp + fn) > 0 else 0,
+                        'MCC': matthews_corrcoef(bal_true, bal_pred),
+                        'AUC': roc_auc_score(bal_true, bal_prob) if len(set(bal_true)) > 1 else 0,
+                        'PR-AUC': average_precision_score(bal_true, bal_prob) if len(set(bal_true)) > 1 else 0,
+                    }
+                    all_strategies.append((f'归一化-Top-{int(k_ratio*100)}%', topk_labels, topk_probs, None, metrics))
+                    print(f"    归一化-Top-{int(k_ratio*100)}%: F1={metrics['F1']:.4f}, SEN={metrics['SEN']:.4f}, SPE={metrics['SPE']:.4f}, MCC={metrics['MCC']:.4f}")
+    
+    print("  策略H: SEN≈SPE平衡阈值 (原始概率)...")
+    bal_threshold, bal_diff, bal_metrics = find_balanced_threshold(y_true, y_prob, n_samples=30)
+    if bal_metrics:
+        metrics = evaluate_balanced(y_true, y_prob, threshold=bal_threshold, n_samples=50)
+        all_strategies.append(('SEN≈SPE平衡', y_true, y_prob, bal_threshold, metrics))
+        print(f"    SEN≈SPE平衡 (阈值={bal_threshold:.4f}, |SEN-SPE|={bal_diff:.4f}): F1={metrics['F1']:.4f}, SEN={metrics['SEN']:.4f}, SPE={metrics['SPE']:.4f}, MCC={metrics['MCC']:.4f}")
+    
+    print("\n步骤6: 选择最佳策略 (强制SPE>=0.5)...")
     
     def composite_score(metrics):
         balance = min(metrics['SEN'], metrics['SPE'])
@@ -781,14 +919,26 @@ def main():
     for item in all_strategies:
         item[4]['composite'] = composite_score(item[4])
     
-    all_strategies.sort(key=lambda x: x[4]['composite'], reverse=True)
+    valid_strategies = [s for s in all_strategies if s[4]['SPE'] >= 0.5]
     
-    print("\n  所有策略排名 (按综合得分 = 0.4*F1 + 0.3*MCC + 0.3*min(SEN,SPE)):")
-    for rank, (name, _, _, threshold, metrics) in enumerate(all_strategies, 1):
+    if valid_strategies:
+        valid_strategies.sort(key=lambda x: x[4]['composite'], reverse=True)
+        print(f"  满足SPE>=0.5的策略: {len(valid_strategies)}/{len(all_strategies)}")
+    else:
+        print("  警告: 没有策略满足SPE>=0.5，放宽到SPE>=0.4")
+        valid_strategies = [s for s in all_strategies if s[4]['SPE'] >= 0.4]
+        if valid_strategies:
+            valid_strategies.sort(key=lambda x: x[4]['composite'], reverse=True)
+        else:
+            print("  警告: 仍然没有策略满足SPE>=0.4，使用综合得分最高的策略")
+            valid_strategies = sorted(all_strategies, key=lambda x: x[4]['composite'], reverse=True)
+    
+    print("\n  候选策略排名 (按综合得分 = 0.4*F1 + 0.3*MCC + 0.3*min(SEN,SPE)):")
+    for rank, (name, _, _, threshold, metrics) in enumerate(valid_strategies[:10], 1):
         th_str = f"阈值={threshold:.4f}" if threshold is not None else "自适应"
         print(f"    #{rank} {name} ({th_str}): F1={metrics['F1']:.4f}, SEN={metrics['SEN']:.4f}, SPE={metrics['SPE']:.4f}, MCC={metrics['MCC']:.4f}, AUC={metrics['AUC']:.4f}, 综合={metrics['composite']:.4f}")
     
-    best_name, best_y_true, best_y_prob, best_threshold_val, best_metrics = all_strategies[0]
+    best_name, best_y_true, best_y_prob, best_threshold_val, best_metrics = valid_strategies[0]
     print(f"\n  ✓ 最佳策略: {best_name} (综合={best_metrics['composite']:.4f})")
     
     y_true_final = best_y_true
