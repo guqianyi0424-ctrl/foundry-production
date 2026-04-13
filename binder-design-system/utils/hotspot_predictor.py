@@ -1,6 +1,7 @@
 """
 热点残基预测工具
 集成 ppihotspotid (ML) 和 hotspot-prediction (DL) 两个模型
+DL模型: 5折集成推理 (5-fold ensemble)
 支持 Top-K 选择策略
 """
 import os
@@ -26,7 +27,7 @@ class HotspotPredictor:
 
         self._ml_predictor = None
         self._ml_loaded = False
-        self._dl_model = None
+        self._dl_models = {}
         self._dl_loaded = False
         self._esm_model = None
         self._esm_loaded = False
@@ -38,18 +39,6 @@ class HotspotPredictor:
         pdb_string: str = None,
         top_k: int = None
     ) -> Dict[str, Any]:
-        """
-        预测热点残基
-
-        Args:
-            atom_array: Biotite AtomArray对象
-            method: 'ml', 'dl', 或 'both'
-            pdb_string: PDB格式字符串
-            top_k: 选取Top-K热点残基
-
-        Returns:
-            预测结果字典
-        """
         if top_k is not None:
             self.top_k = top_k
 
@@ -82,7 +71,6 @@ class HotspotPredictor:
             return self._select_top_k(fallback, residues, "rule")
 
     def _predict_ml(self, residues: pd.DataFrame) -> Dict[str, Any]:
-        """使用ppihotspotid ML模型预测"""
         predictor = self._load_ml_predictor()
 
         if predictor is not None:
@@ -117,10 +105,9 @@ class HotspotPredictor:
         return {"scores": scores, "method": "ml", "model_loaded": False}
 
     def _predict_dl(self, residues: pd.DataFrame, atom_array) -> Dict[str, Any]:
-        """使用hotspot-prediction DL模型预测"""
-        dl_model = self._load_dl_model()
+        dl_models = self._load_dl_models()
 
-        if dl_model is not None:
+        if dl_models:
             try:
                 import torch
                 import dgl
@@ -132,13 +119,17 @@ class HotspotPredictor:
                     node_features = self._build_node_features(residues, esm_features)
                     g = self._build_graph(atom_array, residues)
 
+                    all_probs = []
                     with torch.no_grad():
                         node_features_tensor = torch.tensor(node_features, dtype=torch.float32)
-                        logits = dl_model(g, node_features_tensor)
-                        probs = torch.softmax(logits, dim=1)
-                        scores = probs[:, 1].numpy()
+                        for fold_name, model in dl_models.items():
+                            logits = model(g, node_features_tensor)
+                            probs = torch.softmax(logits, dim=1)
+                            all_probs.append(probs[:, 1].numpy())
 
-                    print(f"[DL] hotspot-prediction预测完成 (GAT+ESM-2)")
+                    scores = np.mean(all_probs, axis=0)
+                    n_models = len(dl_models)
+                    print(f"[DL] hotspot-prediction预测完成 ({n_models}折集成, GAT+ESM-2)")
                     return {"scores": scores, "method": "dl", "model_loaded": True}
                 else:
                     print("[DL] ESM特征不可用，使用规则预测")
@@ -157,7 +148,6 @@ class HotspotPredictor:
         results_dl: Dict,
         residues: pd.DataFrame
     ) -> Dict[str, Any]:
-        """合并ML和DL的预测结果，选取Top-K"""
         ml_scores = results_ml["scores"]
         dl_scores = results_dl["scores"]
 
@@ -224,7 +214,6 @@ class HotspotPredictor:
         residues: pd.DataFrame,
         method: str
     ) -> Dict[str, Any]:
-        """从单一方法结果中选取Top-K"""
         scores = result["scores"]
 
         all_scores_dict = {}
@@ -269,12 +258,10 @@ class HotspotPredictor:
         }
 
     def _rule_based_predict(self, residues: pd.DataFrame) -> Dict[str, Any]:
-        """规则预测（备用方案）"""
         scores = self._compute_rule_scores(residues, "both")
         return {"scores": scores, "method": "rule", "model_loaded": False}
 
     def _compute_rule_scores(self, residues: pd.DataFrame, method: str) -> np.ndarray:
-        """基于规则的评分"""
         n = len(residues)
         scores = np.zeros(n)
 
@@ -327,7 +314,6 @@ class HotspotPredictor:
         return scores
 
     def _load_ml_predictor(self):
-        """加载ML模型 (ppihotspotid AutoGluon)"""
         if self._ml_loaded:
             return self._ml_predictor
 
@@ -354,10 +340,9 @@ class HotspotPredictor:
         self._ml_loaded = True
         return self._ml_predictor
 
-    def _load_dl_model(self):
-        """加载DL模型 (hotspot-prediction GAT)"""
+    def _load_dl_models(self) -> Dict[str, Any]:
         if self._dl_loaded:
-            return self._dl_model
+            return self._dl_models
 
         try:
             import torch
@@ -366,41 +351,50 @@ class HotspotPredictor:
             from model import PPIHotspotGAT
             from config import INPUT_DIM, HIDDEN_DIM, NUM_HEADS, NUM_LAYERS, DROPOUT
 
-            model_path = self.hotspot_dl_path / "models" / "best_model_fold5.pth"
+            models_dir = self.hotspot_dl_path / "models"
 
-            if model_path.exists():
-                self._dl_model = PPIHotspotGAT(
-                    input_dim=INPUT_DIM,
-                    hidden_dim=HIDDEN_DIM,
-                    num_heads=NUM_HEADS,
-                    num_layers=NUM_LAYERS,
-                    dropout=DROPOUT
-                )
+            for fold_idx in range(1, 6):
+                model_file = models_dir / f"best_model_fold{fold_idx}.pth"
+                if model_file.exists():
+                    try:
+                        model = PPIHotspotGAT(
+                            input_dim=INPUT_DIM,
+                            hidden_dim=HIDDEN_DIM,
+                            num_heads=NUM_HEADS,
+                            num_layers=NUM_LAYERS,
+                            dropout=DROPOUT
+                        )
 
-                state_dict = torch.load(str(model_path), map_location='cpu')
-                if 'model_state_dict' in state_dict:
-                    self._dl_model.load_state_dict(state_dict['model_state_dict'])
+                        state_dict = torch.load(str(model_file), map_location='cpu')
+                        if 'model_state_dict' in state_dict:
+                            model.load_state_dict(state_dict['model_state_dict'])
+                        else:
+                            model.load_state_dict(state_dict)
+                        model.eval()
+                        self._dl_models[f"fold{fold_idx}"] = model
+                        print(f"[DL] Fold {fold_idx} 模型加载成功")
+                    except Exception as e:
+                        print(f"[DL] Fold {fold_idx} 加载失败: {e}")
                 else:
-                    self._dl_model.load_state_dict(state_dict)
-                self._dl_model.eval()
-                print(f"[DL] GAT模型加载成功")
-            else:
-                print(f"[DL] 模型路径不存在: {model_path}")
-                self._dl_model = None
+                    print(f"[DL] Fold {fold_idx} 权重不存在: {model_file}")
+
+            if not self._dl_models:
+                print("[DL] 没有可用的DL模型权重")
+                self._dl_models = {}
+
         except ImportError as e:
             print(f"[DL] 依赖未安装: {e}")
-            self._dl_model = None
+            self._dl_models = {}
         except Exception as e:
             print(f"[DL] 模型加载失败: {e}")
             import traceback
             traceback.print_exc()
-            self._dl_model = None
+            self._dl_models = {}
 
         self._dl_loaded = True
-        return self._dl_model
+        return self._dl_models
 
     def _load_esm_model(self):
-        """加载ESM-2模型"""
         if self._esm_loaded:
             return self._esm_model
 
@@ -428,7 +422,6 @@ class HotspotPredictor:
         return self._esm_model
 
     def _get_esm_features(self, sequence: str) -> Optional[np.ndarray]:
-        """获取ESM-2特征"""
         import torch
 
         esm = self._load_esm_model()
@@ -450,7 +443,6 @@ class HotspotPredictor:
             return None
 
     def _get_sequence_from_residues(self, residues_df: pd.DataFrame) -> str:
-        """从残基数据框获取序列"""
         aa_map = {
             'ALA': 'A', 'CYS': 'C', 'ASP': 'D', 'GLU': 'E',
             'PHE': 'F', 'GLY': 'G', 'HIS': 'H', 'ILE': 'I',
@@ -471,44 +463,20 @@ class HotspotPredictor:
         residues_df: pd.DataFrame,
         esm_features: np.ndarray
     ) -> np.ndarray:
-        """构建节点特征"""
         n_residues = len(residues_df)
 
-        traditional_features = np.zeros((n_residues, 27))
-        for idx, row in residues_df.iterrows():
-            sasa = row.get('sasa', 50) / 100.0
-            energy = row.get('energy', 0) / 5.0
-            conservation = row.get('conservation', 0.5)
-            dist = row.get('dist_to_center', 15) / 30.0
-
-            traditional_features[idx, 0] = sasa
-            traditional_features[idx, 1] = energy
-            traditional_features[idx, 2] = conservation
-            traditional_features[idx, 3] = dist
-            traditional_features[idx, 4] = row.get('num_atoms', 5) / 20.0
-
-            res_name = row.get('res_name', '')
-            if res_name in ['TRP', 'TYR', 'PHE']:
-                traditional_features[idx, 5] = 1.0
-            if res_name in ['LEU', 'ILE', 'VAL', 'MET', 'ALA']:
-                traditional_features[idx, 6] = 1.0
-            if res_name in ['ARG', 'LYS', 'ASP', 'GLU']:
-                traditional_features[idx, 7] = 1.0
-
-        pssm_features = np.random.randn(n_residues, 20) * 0.1
-        hmm_features = np.random.randn(n_residues, 30) * 0.1
+        pssm_features = np.zeros((n_residues, 20), dtype=np.float32)
+        hmm_features = np.zeros((n_residues, 30), dtype=np.float32)
 
         node_features = np.concatenate([
             esm_features,
             pssm_features,
             hmm_features,
-            traditional_features
         ], axis=1)
 
-        return node_features
+        return node_features.astype(np.float32)
 
     def _build_graph(self, atom_array, residues_df: pd.DataFrame):
-        """构建DGL图"""
         import dgl
         import torch
 
@@ -546,7 +514,6 @@ class HotspotPredictor:
         return g
 
     def _extract_residue_features(self, atom_array) -> pd.DataFrame:
-        """从AtomArray中提取残基特征"""
         try:
             import biotite.structure as struc
 
@@ -606,14 +573,12 @@ class HotspotPredictor:
             return pd.DataFrame()
 
     def _estimate_sasa(self, res_atoms, dist_to_center: float) -> float:
-        """估算溶剂可及表面积"""
         num_atoms = len(res_atoms)
         base_sasa = num_atoms * 10.0
         surface_factor = min(dist_to_center / 20.0, 1.0)
         return base_sasa * (0.3 + 0.7 * surface_factor)
 
     def _estimate_energy(self, res_name: str, dist_to_center: float) -> float:
-        """估算能量"""
         hydrophobic = {'ALA', 'VAL', 'LEU', 'ILE', 'MET', 'PHE', 'TRP', 'PRO'}
         charged = {'ARG', 'LYS', 'ASP', 'GLU'}
         polar = {'SER', 'THR', 'ASN', 'GLN', 'HIS', 'CYS', 'TYR'}
@@ -630,7 +595,6 @@ class HotspotPredictor:
         return base + (dist_to_center / 30.0) * 2.0
 
     def _estimate_conservation(self, res_name: str, dist_to_center: float) -> float:
-        """估算保守性"""
         high_cons = {'CYS', 'TRP', 'HIS', 'PRO'}
         med_cons = {'ARG', 'LYS', 'ASP', 'GLU', 'PHE', 'TYR', 'ASN', 'GLN'}
         low_cons = {'ALA', 'GLY', 'SER', 'THR', 'VAL', 'LEU', 'ILE', 'MET'}
@@ -644,5 +608,4 @@ class HotspotPredictor:
         else:
             base = 0.4
 
-        surface_factor = min(dist_to_center / 20.0, 1.0)
-        return base * (0.6 + 0.4 * surface_factor)
+        return base * (0.6 + 0.4 * surface_factor) if False else base

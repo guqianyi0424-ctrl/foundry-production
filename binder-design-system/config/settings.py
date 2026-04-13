@@ -32,10 +32,12 @@ HOTSPOT_CONFIG = {
         "HOTSPOT_ML_PATH",
         str(PROJECT_ROOT.parent / "ppihotspotid-main" / "AutogluonModels" / "ag-20230915_030535")
     ),
-    "dl_model_path": os.getenv(
-        "HOTSPOT_DL_PATH",
-        str(PROJECT_ROOT.parent / "hotspot-prediction" / "models" / "best_model_fold5.pth")
+    "dl_models_dir": os.getenv(
+        "HOTSPOT_DL_DIR",
+        str(PROJECT_ROOT.parent / "hotspot-prediction" / "models")
     ),
+    "dl_model_folds": 5,
+    "esm2_model": "facebook/esm2_t33_650M_UR50D",
 }
 
 RFD3_CONFIG = {
