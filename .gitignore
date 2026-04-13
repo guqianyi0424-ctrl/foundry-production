@@ -53,15 +53,15 @@ env/
 !package.json
 
 # Model weights (large files)
-*.pth
 *.pt
 *.ckpt
-*.pkl
 *.h5
 *.hdf5
 *.onnx
 *.bin
 
+# Exception: allow hotspot-prediction model weights (5-fold GAT)
+!hotspot-prediction/models/*.pth
 # Exception: allow ppihotspotid model weights
 !ppihotspotid-main/**/*.pkl
 
