@@ -24,7 +24,7 @@ mkdir -p outputs data models
 PORT=${STREAMLIT_PORT:-8501}
 
 echo "启动应用: http://0.0.0.0:$PORT"
-streamlit run app/binder_app.py \
+streamlit run app/main.py \
     --server.port $PORT \
     --server.address 0.0.0.0 \
     --server.headless true \

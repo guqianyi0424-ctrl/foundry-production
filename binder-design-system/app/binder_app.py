@@ -13,7 +13,6 @@ from datetime import datetime
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import streamlit as st
-import streamlit.components.v1 as components
 import numpy as np
 import pandas as pd
 

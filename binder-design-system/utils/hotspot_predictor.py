@@ -82,7 +82,13 @@ class HotspotPredictor:
                     'gas_e': residues['energy']
                 })
 
-                predictions = predictor.predict(pred_data)
+                try:
+                    predictions = predictor.predict(pred_data)
+                except (AttributeError, TypeError) as e:
+                    print(f"[ML] AutoGluon版本不兼容导致预测失败: {e}")
+                    print(f"[ML] 降级为规则预测")
+                    scores = self._compute_rule_scores(residues, "ml")
+                    return {"scores": scores, "method": "ml", "model_loaded": False}
 
                 try:
                     proba = predictor.predict_proba(pred_data)
@@ -92,6 +98,9 @@ class HotspotPredictor:
                         scores = proba[1].values
                     else:
                         scores = (predictions == 'P').astype(float)
+                except (AttributeError, TypeError) as e:
+                    print(f"[ML] predict_proba失败(版本不兼容): {e}")
+                    scores = (predictions == 'P').astype(float)
                 except Exception:
                     scores = (predictions == 'P').astype(float)
 
@@ -321,12 +330,28 @@ class HotspotPredictor:
             from autogluon.tabular import TabularPredictor
 
             if self.ml_model_path.exists():
-                self._ml_predictor = TabularPredictor.load(
-                    str(self.ml_model_path),
-                    require_version_match=False,
-                    require_py_version_match=False
-                )
-                print(f"[ML] AutoGluon模型加载成功")
+                try:
+                    self._ml_predictor = TabularPredictor.load(
+                        str(self.ml_model_path),
+                        require_version_match=False,
+                        require_py_version_match=False
+                    )
+                    print(f"[ML] AutoGluon模型加载成功")
+                except (AttributeError, TypeError) as e:
+                    print(f"[ML] AutoGluon版本不兼容，尝试兼容加载: {e}")
+                    try:
+                        import warnings
+                        with warnings.catch_warnings():
+                            warnings.simplefilter("ignore")
+                            self._ml_predictor = TabularPredictor.load(
+                                str(self.ml_model_path),
+                                require_version_match=False,
+                                require_py_version_match=False
+                            )
+                        print(f"[ML] AutoGluon模型兼容加载成功")
+                    except Exception as e2:
+                        print(f"[ML] AutoGluon模型加载失败: {e2}")
+                        self._ml_predictor = None
             else:
                 print(f"[ML] 模型路径不存在: {self.ml_model_path}")
                 self._ml_predictor = None
