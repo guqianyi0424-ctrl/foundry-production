@@ -87,4 +87,4 @@ AA_PROPERTIES = {
     'Y': {'hydrophobicity': -1.3, 'charge': 0, 'mw': 181, 'volume': 193, 'polarity': 1},
 }
 
-DEVICE = torch.device('cpu')
+DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
