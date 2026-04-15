@@ -322,12 +322,42 @@ class HotspotPredictor:
 
         return scores
 
+    def _patch_autogluon_compat(self):
+        try:
+            from autogluon.tabular import TabularPredictor
+            from autogluon.features.generators import AsTypeFeatureGenerator
+
+            if not hasattr(AsTypeFeatureGenerator, 'passthrough'):
+                AsTypeFeatureGenerator.passthrough = False
+                print("[ML] 已修补AsTypeFeatureGenerator.passthrough兼容性")
+
+            try:
+                from autogluon.features.generators import BulkFeatureGenerator
+                if not hasattr(BulkFeatureGenerator, 'passthrough'):
+                    BulkFeatureGenerator.passthrough = False
+            except ImportError:
+                pass
+
+            try:
+                from autogluon.features.generators import IdentityFeatureGenerator
+                if not hasattr(IdentityFeatureGenerator, 'passthrough'):
+                    IdentityFeatureGenerator.passthrough = False
+            except ImportError:
+                pass
+
+        except ImportError:
+            pass
+        except Exception:
+            pass
+
     def _load_ml_predictor(self):
         if self._ml_loaded:
             return self._ml_predictor
 
         try:
             from autogluon.tabular import TabularPredictor
+
+            self._patch_autogluon_compat()
 
             if self.ml_model_path.exists():
                 try:
@@ -339,6 +369,7 @@ class HotspotPredictor:
                     print(f"[ML] AutoGluon模型加载成功")
                 except (AttributeError, TypeError) as e:
                     print(f"[ML] AutoGluon版本不兼容，尝试兼容加载: {e}")
+                    self._patch_autogluon_compat()
                     try:
                         import warnings
                         with warnings.catch_warnings():
@@ -371,6 +402,24 @@ class HotspotPredictor:
 
         try:
             import torch
+            torch.set_num_threads(min(4, os.cpu_count() or 4))
+
+            try:
+                import dgl
+            except OSError as e:
+                print(f"[DL] DGL CUDA库缺失，尝试CPU模式: {e}")
+                os.environ['DGLBACKEND'] = 'pytorch'
+                os.environ['DGL_DOWNLOAD'] = '1'
+                try:
+                    import importlib
+                    if 'dgl' in sys.modules:
+                        del sys.modules['dgl']
+                    import dgl
+                except Exception as e2:
+                    print(f"[DL] DGL CPU模式也失败: {e2}")
+                    self._dl_models = {}
+                    self._dl_loaded = True
+                    return self._dl_models
 
             sys.path.insert(0, str(self.hotspot_dl_path))
             from model import PPIHotspotGAT
@@ -390,7 +439,7 @@ class HotspotPredictor:
                             dropout=DROPOUT
                         )
 
-                        state_dict = torch.load(str(model_file), map_location='cpu')
+                        state_dict = torch.load(str(model_file), map_location='cpu', weights_only=True)
                         if 'model_state_dict' in state_dict:
                             model.load_state_dict(state_dict['model_state_dict'])
                         else:
@@ -409,6 +458,10 @@ class HotspotPredictor:
 
         except ImportError as e:
             print(f"[DL] 依赖未安装: {e}")
+            self._dl_models = {}
+        except OSError as e:
+            print(f"[DL] CUDA库缺失: {e}")
+            print(f"[DL] 请安装CUDA toolkit或设置LD_LIBRARY_PATH")
             self._dl_models = {}
         except Exception as e:
             print(f"[DL] 模型加载失败: {e}")

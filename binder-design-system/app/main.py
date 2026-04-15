@@ -151,7 +151,7 @@ def render_sidebar():
 
             top_k = st.slider("Top-K 热点残基", 1, 10, TOP_K, help="选取置信度最高的K个热点残基")
 
-            if st.button("🎯 预测热点残基", type="primary", use_container_width=True):
+            if st.button("🎯 预测热点残基", type="primary", width="stretch"):
                 if st.session_state.atom_array is not None:
                     with st.spinner("正在预测热点残基..."):
                         predict_hotspots(method, top_k)
@@ -170,7 +170,7 @@ def render_sidebar():
 
         col1, col2 = st.columns(2)
         with col1:
-            if st.button("🚀 运行全流程", type="primary", use_container_width=True):
+            if st.button("🚀 运行全流程", type="primary", width="stretch"):
                 if st.session_state.atom_array is None:
                     st.error("请先上传目标蛋白结构文件")
                 elif not st.session_state.selected_hotspots:
@@ -178,7 +178,7 @@ def render_sidebar():
                 else:
                     run_full_pipeline(binder_length, num_designs, num_sequences, rmsd_threshold)
         with col2:
-            if st.button("🔄 重置", use_container_width=True):
+            if st.button("🔄 重置", width="stretch"):
                 for key in list(st.session_state.keys()):
                     del st.session_state[key]
                 init_session()
@@ -549,7 +549,7 @@ def render_sequence_and_hotspot():
                     if col.button(
                         one_letter,
                         key=f"seq_{chain_id}_{idx}",
-                        use_container_width=True,
+                        width="stretch",
                         type=button_type
                     ):
                         if res_label in hotspot_labels:
@@ -618,7 +618,7 @@ def render_hotspot_section():
                     "DL得分": f"{h.get('dl_score', 0):.4f}",
                     "综合得分": f"{h.get('combined_score', 0):.4f}"
                 })
-            st.dataframe(pd.DataFrame(df_data), use_container_width=True)
+            st.dataframe(pd.DataFrame(df_data), width="stretch")
 
         st.info(f"💡 已选取 Top-{len(hotspots)} 热点残基，可在侧边栏点击「🚀 运行全流程」开始设计")
     else:
@@ -672,7 +672,7 @@ def render_pipeline_results():
                 "MPNN得分": f"{m.get('score', 0):.2f}",
                 "模拟": "是" if m.get("mock") else "否"
             })
-        st.dataframe(pd.DataFrame(df_data), use_container_width=True)
+        st.dataframe(pd.DataFrame(df_data), width="stretch")
         st.caption(f"共设计 {len(mpnn_results)} 条序列")
     else:
         st.info("MPNN序列设计未运行")
@@ -712,7 +712,7 @@ def render_pipeline_results():
                 "pLDDT": f"{r.get('avg_plddt', 0):.1f}" if r.get('avg_plddt') else "N/A",
                 "状态": status,
             })
-        st.dataframe(pd.DataFrame(df_data), use_container_width=True)
+        st.dataframe(pd.DataFrame(df_data), width="stretch")
 
         if passed:
             with st.expander("📥 导出结果"):
