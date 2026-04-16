@@ -324,31 +324,27 @@ class HotspotPredictor:
 
     def _patch_autogluon_compat(self):
         try:
-            from autogluon.tabular import TabularPredictor
-            from autogluon.features.generators import AsTypeFeatureGenerator
+            import autogluon.features.generators as fg_module
+            import inspect
 
-            if not hasattr(AsTypeFeatureGenerator, 'passthrough'):
-                AsTypeFeatureGenerator.passthrough = False
-                print("[ML] 已修补AsTypeFeatureGenerator.passthrough兼容性")
+            patched = []
+            for name in dir(fg_module):
+                obj = getattr(fg_module, name)
+                if (inspect.isclass(obj)
+                        and hasattr(obj, '__module__')
+                        and 'autogluon' in getattr(obj, '__module__', '')
+                        and 'FeatureGenerator' in name):
+                    if not hasattr(obj, 'passthrough'):
+                        obj.passthrough = False
+                        patched.append(name)
 
-            try:
-                from autogluon.features.generators import BulkFeatureGenerator
-                if not hasattr(BulkFeatureGenerator, 'passthrough'):
-                    BulkFeatureGenerator.passthrough = False
-            except ImportError:
-                pass
-
-            try:
-                from autogluon.features.generators import IdentityFeatureGenerator
-                if not hasattr(IdentityFeatureGenerator, 'passthrough'):
-                    IdentityFeatureGenerator.passthrough = False
-            except ImportError:
-                pass
+            if patched:
+                print(f"[ML] 已修补FeatureGenerator兼容性: {', '.join(patched)}")
 
         except ImportError:
             pass
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[ML] FeatureGenerator修补失败: {e}")
 
     def _load_ml_predictor(self):
         if self._ml_loaded:
@@ -400,26 +396,14 @@ class HotspotPredictor:
         if self._dl_loaded:
             return self._dl_models
 
+        os.environ.setdefault('DGLBACKEND', 'pytorch')
+        os.environ.setdefault('DGL_DOWNLOAD', '1')
+
         try:
             import torch
             torch.set_num_threads(min(4, os.cpu_count() or 4))
 
-            try:
-                import dgl
-            except OSError as e:
-                print(f"[DL] DGL CUDA库缺失，尝试CPU模式: {e}")
-                os.environ['DGLBACKEND'] = 'pytorch'
-                os.environ['DGL_DOWNLOAD'] = '1'
-                try:
-                    import importlib
-                    if 'dgl' in sys.modules:
-                        del sys.modules['dgl']
-                    import dgl
-                except Exception as e2:
-                    print(f"[DL] DGL CPU模式也失败: {e2}")
-                    self._dl_models = {}
-                    self._dl_loaded = True
-                    return self._dl_models
+            import dgl
 
             sys.path.insert(0, str(self.hotspot_dl_path))
             from model import PPIHotspotGAT
@@ -439,7 +423,10 @@ class HotspotPredictor:
                             dropout=DROPOUT
                         )
 
-                        state_dict = torch.load(str(model_file), map_location='cpu', weights_only=True)
+                        try:
+                            state_dict = torch.load(str(model_file), map_location='cpu', weights_only=True)
+                        except TypeError:
+                            state_dict = torch.load(str(model_file), map_location='cpu')
                         if 'model_state_dict' in state_dict:
                             model.load_state_dict(state_dict['model_state_dict'])
                         else:
@@ -460,9 +447,14 @@ class HotspotPredictor:
             print(f"[DL] 依赖未安装: {e}")
             self._dl_models = {}
         except OSError as e:
-            print(f"[DL] CUDA库缺失: {e}")
-            print(f"[DL] 请安装CUDA toolkit或设置LD_LIBRARY_PATH")
-            self._dl_models = {}
+            err_msg = str(e)
+            if 'libcusparseLt' in err_msg or 'cuda' in err_msg.lower():
+                print(f"[DL] CUDA库缺失({e.__class__.__name__})，尝试安装CPU版DGL...")
+                self._dl_models = {}
+                self._try_install_dgl_cpu()
+            else:
+                print(f"[DL] 系统库缺失: {e}")
+                self._dl_models = {}
         except Exception as e:
             print(f"[DL] 模型加载失败: {e}")
             import traceback
@@ -471,6 +463,20 @@ class HotspotPredictor:
 
         self._dl_loaded = True
         return self._dl_models
+
+    def _try_install_dgl_cpu(self):
+        try:
+            import subprocess
+            print("[DL] 正在安装DGL CPU版本...")
+            subprocess.check_call([
+                sys.executable, '-m', 'pip', 'install',
+                'dgl', '-f', 'https://data.dgl.ai/wheels/repo.html',
+                '--quiet'
+            ])
+            print("[DL] DGL CPU版本安装成功，请重启应用")
+        except Exception as e:
+            print(f"[DL] DGL CPU版本安装失败: {e}")
+            print(f"[DL] 请手动运行: pip install dgl -f https://data.dgl.ai/wheels/repo.html")
 
     def _load_esm_model(self):
         if self._esm_loaded:

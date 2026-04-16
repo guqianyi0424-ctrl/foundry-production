@@ -19,6 +19,15 @@ if [ $? -ne 0 ]; then
     pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple 2>/dev/null || pip install -r requirements.txt
 fi
 
+echo "检查DGL CUDA兼容性..."
+python -c "import dgl" 2>/dev/null
+if [ $? -ne 0 ]; then
+    echo "DGL CUDA库缺失，安装CPU版本..."
+    pip uninstall dgl -y 2>/dev/null || true
+    pip install dgl -f https://data.dgl.ai/wheels/repo.html -i https://pypi.tuna.tsinghua.edu.cn/simple 2>/dev/null || \
+    pip install dgl -i https://pypi.tuna.tsinghua.edu.cn/simple 2>/dev/null || true
+fi
+
 mkdir -p outputs data models
 
 PORT=${STREAMLIT_PORT:-8501}
