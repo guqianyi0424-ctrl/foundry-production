@@ -1,7 +1,7 @@
 """
 蛋白质Binder设计系统 - 主应用
 集成: 热点残基预测(ML+DL) + RFD3 + MPNN + RF3 全流程
-Top-K=3 | 单字母氨基酸 | RMSD评估筛选
+Top-K=3 | 单字母氨基酸 | RMSD评估筛选 | 序列-3D联动高亮
 """
 import sys
 import os
@@ -30,7 +30,7 @@ st.set_page_config(
     page_title="蛋白质Binder设计系统",
     page_icon="🧬",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="collapsed"
 )
 
 AA_3TO1 = {
@@ -45,18 +45,39 @@ AA_1TO3 = {v: k for k, v in AA_3TO1.items()}
 
 CSS = """
 <style>
+.seq-container { font-family: 'Courier New', monospace; line-height: 1.8; user-select: none; }
+.seq-row { display: flex; align-items: baseline; position: relative; margin-bottom: 2px; }
+.seq-residue { display: inline-flex; flex-direction: column; align-items: center;
+    width: 28px; height: 32px; cursor: pointer; border-radius: 4px; margin: 0 1px;
+    transition: all 0.15s ease; position: relative; }
+.seq-letter { font-size: 16px; font-weight: bold; color: #333; line-height: 20px; }
+.seq-num { font-size: 9px; color: #999; line-height: 12px; }
+.seq-residue:hover { background: #e3f2fd !important; transform: scale(1.15); z-index: 5; box-shadow: 0 2px 8px rgba(0,0,0,0.15); }
+.seq-hotspot { background: #ff5722 !important; color: white !important; }
+.seq-hotspot .seq-letter { color: white !important; }
+.seq-hotspot .seq-num { color: #ffcdd2 !important; }
+.seq-selected { background: #1976d2 !important; color: white !important; }
+.seq-selected .seq-letter { color: white !important; }
+.seq-selected .seq-num { color: #bbdefb !important; }
+.seq-number-top { position: absolute; top: -14px; left: 50%; transform: translateX(-50%);
+    font-size: 10px; color: #888; font-family: monospace; }
+.upload-area { border: 2px dashed #ccc; border-radius: 8px; padding: 24px; text-align: center;
+    transition: border-color 0.3s; cursor: pointer; background: #fafafa; }
+.upload-area:hover { border-color: #1976d2; background: #e3f2fd; }
+.viewer-wrapper { border: 1px solid #e0e0e0; border-radius: 8px; overflow: hidden; position: relative; }
+.hotspot-tag { display: inline-block; padding: 2px 10px; border-radius: 12px; font-size: 13px;
+    margin: 2px 4px 2px 0; cursor: pointer; transition: transform 0.15s; }
+.hotspot-tag:hover { transform: scale(1.08); }
+.tag-high { background: #ffebee; color: #c62828; border: 1px solid #ef9a9a; }
+.tag-mid { background: #fff8e1; color: #f57f17; border: 1px solid #ffe082; }
+.tag-low { background: #e8f5e9; color: #2e7d32; border: 1px solid #a5d6a7; }
 .step-active { background: #e3f2fd; border-left: 4px solid #1976d2; padding: 8px 12px; margin: 4px 0; border-radius: 4px; font-weight: 600; }
 .step-done { background: #e8f5e9; border-left: 4px solid #388e3c; padding: 8px 12px; margin: 4px 0; border-radius: 4px; }
 .step-pending { background: #f5f5f5; border-left: 4px solid #bdbdbd; padding: 8px 12px; margin: 4px 0; border-radius: 4px; color: #757575; }
 .metric-card { background: #fafafa; border: 1px solid #e0e0e0; border-radius: 8px; padding: 12px; text-align: center; }
-.hotspot-high { background: #ffcdd2 !important; }
-.hotspot-mid { background: #fff9c4 !important; }
-.hotspot-low { background: #c8e6c9 !important; }
 .pipeline-result { border: 1px solid #e0e0e0; border-radius: 8px; padding: 16px; margin: 8px 0; }
 .passed { border-left: 4px solid #4CAF50; }
 .failed { border-left: 4px solid #f44336; }
-.seq-btn { min-width: 36px; font-family: monospace; font-weight: bold; }
-.seq-btn-selected { background: #ff5722 !important; color: white !important; border-color: #ff5722 !important; }
 </style>
 """
 st.markdown(CSS, unsafe_allow_html=True)
@@ -80,6 +101,7 @@ def init_session():
         "hotspot_results_ml": None,
         "hotspot_results_dl": None,
         "selected_hotspots": [],
+        "clicked_residues": [],
         "rfd3_results": None,
         "mpnn_results": None,
         "rf3_results": None,
@@ -87,6 +109,7 @@ def init_session():
         "pdb_content": None,
         "structure_parser": None,
         "pipeline_running": False,
+        "task_type": "蛋白",
     }
     for key, val in defaults.items():
         if key not in st.session_state:
@@ -121,81 +144,55 @@ def render_step_bar():
             st.markdown(f'<div class="{css_class}">{icon} {label}</div>', unsafe_allow_html=True)
 
 
-def render_sidebar():
-    with st.sidebar:
-        st.header("📁 文件上传")
-        uploaded_file = st.file_uploader(
-            "上传目标蛋白结构文件",
-            type=["pdb", "cif"],
-            help="支持PDB和CIF格式"
-        )
+def build_sequence_html(chain_id, residues, hotspot_labels, clicked_labels):
+    rows_html = []
+    chars_per_row = 40
+    n_res = len(residues)
 
-        if uploaded_file:
-            st.success(f"已上传: {uploaded_file.name}")
+    for start in range(0, n_res, chars_per_row):
+        end = min(start + chars_per_row, n_res)
+        row_residues = residues[start:end]
 
-        st.markdown("---")
-        st.header("🔥 热点残基预测")
+        residue_divs = ""
+        for idx_offset, res in enumerate(row_residues):
+            global_idx = start + idx_offset
+            res_name = res.get("res_name", "?")
+            one_letter = AA_3TO1.get(res_name, "X")
+            res_id = str(res.get("res_id", global_idx + 1))
+            label = f"{chain_id}{res_id}"
 
-        enable_hotspot = st.checkbox("启用热点残基预测", value=True)
+            is_hotspot = label in hotspot_labels
+            is_clicked = label in clicked_labels
 
-        if enable_hotspot:
-            method = st.radio(
-                "预测方法",
-                options=[
-                    "两个模型都运行 (Top-3)",
-                    "ppihotspotid (ML)",
-                    "hotspot-prediction (DL)"
-                ],
-                index=0
-            )
+            extra_classes = []
+            if is_hotspot:
+                extra_classes.append("seq-hotspot")
+            if is_clicked and not is_hotspot:
+                extra_classes.append("seq-selected")
 
-            top_k = st.slider("Top-K 热点残基", 1, 10, TOP_K, help="选取置信度最高的K个热点残基")
+            class_str = " ".join(extra_classes) if extra_classes else ""
 
-            if st.button("🎯 预测热点残基", type="primary", width="stretch"):
-                if st.session_state.atom_array is not None:
-                    with st.spinner("正在预测热点残基..."):
-                        predict_hotspots(method, top_k)
-                else:
-                    st.warning("请先上传蛋白质文件")
+            residue_divs += f"""
+            <div class="seq-residue {class_str}" data-chain="{chain_id}" data-resid="{res_id}" data-label="{label}"
+                 onclick="window.parent.postMessage({{type:'residue_click', chain:'{chain_id}', resid:{res_id}, label:'{label}'}}, '*')">
+                <div class="seq-letter">{one_letter}</div>
+                <div class="seq-num">{res_id}</div>
+            </div>"""
 
-        st.markdown("---")
-        st.header("⚙️ Binder设计参数")
+        show_top_num = (start % (chars_per_row * 3) == 0) or (start == 0)
+        num_marker = ""
+        if show_top_num or end == n_res:
+            first_res_id = residues[start].get("res_id", start + 1)
+            marker_pos = min(5, len(row_residues) - 1)
+            num_marker = f'<span class="seq-number-top">{first_res_id}</span>'
 
-        binder_length = st.slider("Binder长度 (aa)", 40, 150, 80, step=5)
-        num_designs = st.number_input("RFD3生成数量", 1, 10, TOP_K)
-        num_sequences = st.number_input("MPNN每设计序列数", 1, 8, TOP_K)
-        rmsd_threshold = st.slider("RMSD阈值 (Å)", 0.5, 5.0, 2.0, 0.1)
+        rows_html.append(f"""
+        <div class="seq-row">
+            {num_marker}
+            {residue_divs}
+        </div>""")
 
-        st.markdown("---")
-
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("🚀 运行全流程", type="primary", width="stretch"):
-                if st.session_state.atom_array is None:
-                    st.error("请先上传目标蛋白结构文件")
-                elif not st.session_state.selected_hotspots:
-                    st.warning("请先预测或选择热点残基")
-                else:
-                    run_full_pipeline(binder_length, num_designs, num_sequences, rmsd_threshold)
-        with col2:
-            if st.button("🔄 重置", width="stretch"):
-                for key in list(st.session_state.keys()):
-                    del st.session_state[key]
-                init_session()
-                st.rerun()
-
-        st.markdown("---")
-        st.header("🔧 系统状态")
-
-        rfd3 = RFD3Runner()
-        mpnn = MPNNRunner()
-        rf3 = RF3Runner()
-
-        st.write(f"RFD3: {'✅ 可用' if rfd3.is_available() else '⚠️ 模拟模式'}")
-        st.write(f"MPNN: {'✅ 可用' if mpnn.is_available() else '⚠️ 模拟模式'}")
-        st.write(f"RF3: {'✅ 可用' if rf3.is_available() else '⚠️ 模拟模式'}")
-
-    return uploaded_file, binder_length, num_designs, num_sequences, rmsd_threshold
+    return "\n".join(rows_html)
 
 
 def predict_hotspots(method, top_k):
@@ -302,7 +299,6 @@ def merge_hotspot_results(results_ml, results_dl, top_k):
         })
 
     combined.sort(key=lambda x: x["combined_score"], reverse=True)
-
     return combined[:top_k]
 
 
@@ -399,111 +395,69 @@ def run_full_pipeline(binder_length, num_designs, num_sequences, rmsd_threshold)
     progress.empty()
 
 
-def render_main_area(uploaded_file):
-    if uploaded_file is not None:
-        try:
-            with st.spinner("解析结构文件..."):
-                if st.session_state.atom_array is None or st.session_state.pdb_content is None:
-                    parser = StructureParser()
-                    atom_array = parser.parse_uploaded_file(uploaded_file)
-                    st.session_state.atom_array = atom_array
-                    st.session_state.structure_parser = parser
-                    st.session_state.structure_summary = parser.get_structure_summary(atom_array)
-                    st.session_state.pdb_content = parser.to_pdb_string(atom_array)
+def render_main_page():
+    task_type = st.selectbox("*任务类型:", options=["蛋白"], index=0, label_visibility="collapsed")
 
-            summary = st.session_state.structure_summary
+    col_upload_left, col_upload_right = st.columns([3, 6])
+    with col_upload_left:
+        st.markdown("*目标结构* ⓘ")
+        tab_up, tab_input = st.tabs(["📁 上传文件", "✏️ 输入"])
+        with tab_up:
+            uploaded_file = st.file_uploader(
+                "",
+                type=["pdb", "cif"],
+                label_visibility="collapsed",
+                help="支持pdb/cif格式文件，文件不得超过200MB"
+            )
+            if uploaded_file:
+                st.caption(f"📎 {uploaded_file.name}")
+        with tab_input:
+            pdb_text = st.text_area("", height=120, placeholder="粘贴PDB/CIF内容...", label_visibility="collapsed")
 
-            col1, col2, col3, col4 = st.columns(4)
-            with col1:
-                st.metric("原子数", summary["num_atoms"])
-            with col2:
-                st.metric("残基数", summary["num_residues"])
-            with col3:
-                st.metric("链数", summary["num_chains"])
-            with col4:
-                st.metric("序列长度", summary["sequence_length"])
+    with col_upload_right:
+        btn_col1, btn_col2, btn_col3, btn_col4 = st.columns(4)
+        with btn_col1:
+            crop_btn = st.button("✂️ 裁剪靶点", use_container_width=True)
+        with btn_col2:
+            spec_btn = st.button("🎯 指定热点", use_container_width=True)
+        with btn_col3:
+            reset_btn = st.button("🔄 重置", use_container_width=True)
+        with btn_col4:
+            empty_col = st.empty()
 
-            st.markdown("---")
-            render_step_bar()
-            st.markdown("---")
+    process_uploaded_file(uploaded_file, pdb_text)
 
-            tab1, tab2, tab3, tab4 = st.tabs(["🧪 序列 & 热点", "🧬 设计结果", "🎯 3D可视化", "📊 评估报告"])
-
-            with tab1:
-                render_sequence_and_hotspot()
-
-            with tab2:
-                render_pipeline_results()
-
-            with tab3:
-                render_3d_view()
-
-            with tab4:
-                render_evaluation_report()
-
-        except Exception as e:
-            st.error(f"解析文件时出错: {str(e)}")
-            st.exception(e)
+    if st.session_state.atom_array is not None:
+        render_structure_view()
+        render_hotspot_section()
+        render_pipeline_panel()
     else:
         render_welcome()
 
 
-def render_welcome():
-    st.title("🧬 蛋白质Binder设计系统")
-    st.markdown("---")
+def process_uploaded_file(uploaded_file, pdb_text=None):
+    source = uploaded_file if uploaded_file else None
+    if source is None and pdb_text and len(pdb_text.strip()) > 50:
+        import io
+        source = io.StringIO(pdb_text)
+        source.name = "pasted.pdb"
 
-    col1, col2 = st.columns([2, 1])
-    with col1:
-        st.markdown("""
-        ### 🚀 快速开始
-
-        1. **上传目标蛋白结构** - 在左侧边栏上传PDB/CIF文件
-        2. **预测热点残基** - 使用ML和DL两个模型预测，自动选取Top-3
-        3. **运行全流程** - RFD3生成主链 → MPNN设计序列 → RF3验证结构
-        4. **查看结果** - 3D可视化、RMSD分析、导出设计
-
-        ### 📋 工作流程
-
-        ```
-        目标蛋白 → 热点预测(ML+DL) → RFD3(Top-3) → MPNN(Top-3) → RF3验证 → RMSD<2Å筛选
-        ```
-
-        ### 🔧 集成模型
-
-        | 模型 | 功能 | 说明 |
-        |------|------|------|
-        | ppihotspotid (ML) | 热点残基预测 | AutoGluon机器学习 |
-        | hotspot-prediction (DL) | 热点残基预测 | GAT+ESM-2深度学习 |
-        | RFDiffusion3 | Binder主链生成 | 扩散模型 |
-        | ProteinMPNN | 序列设计 | 图神经网络 |
-        | RoseTTAFold3 | 结构预测验证 | 三轨网络 |
-        """)
-
-    with col2:
-        st.markdown("""
-        ### ⚙️ 系统要求
-
-        - Python 3.10+
-        - Streamlit 1.30+
-        - Biotite 0.38+
-        - GPU (可选, 用于DL模型)
-
-        ### 💡 提示
-
-        - 未安装RFD3/MPNN/RF3时自动使用模拟模式
-        - Top-K=3 默认选取3个最优结果
-        - RMSD < 2.0 Å 为通过标准
-        """)
+    if source is not None:
+        try:
+            if st.session_state.atom_array is None or st.session_state.pdb_content is None:
+                with st.spinner("解析结构文件..."):
+                    parser = StructureParser()
+                    atom_array = parser.parse_uploaded_file(source)
+                    st.session_state.atom_array = atom_array
+                    st.session_state.structure_parser = parser
+                    st.session_state.structure_summary = parser.get_structure_summary(atom_array)
+                    st.session_state.pdb_content = parser.to_pdb_string(atom_array)
+        except Exception as e:
+            st.error(f"解析文件时出错: {str(e)}")
 
 
-def render_sequence_and_hotspot():
-    st.subheader("🧪 氨基酸序列 & 热点残基")
-
+def render_structure_view():
     atom_array = st.session_state.atom_array
-    if atom_array is None:
-        st.info("请先上传蛋白质文件")
-        return
-
     parser = st.session_state.structure_parser
     residues = parser.get_residue_info(atom_array)
 
@@ -518,244 +472,37 @@ def render_sequence_and_hotspot():
     for h in st.session_state.selected_hotspots:
         hotspot_labels.add(h["label"])
 
-    for chain_id, chain_residues in chain_info.items():
-        st.markdown(f"**Chain {chain_id}**")
+    clicked_labels = set(st.session_state.clicked_residues)
 
-        seq_one_letter = ""
-        for res in chain_residues:
-            seq_one_letter += AA_3TO1.get(res["res_name"], "X")
+    seq_col, view_col = st.columns([1, 1.3])
 
-        st.code(seq_one_letter, language="plaintext")
+    with seq_col:
+        st.markdown("#### 氨基酸序列")
+        for chain_id in sorted(chain_info.keys()):
+            chain_residues = chain_info[chain_id]
+            seq_html = f"""<div style='border:1px solid #e0e0e0;border-radius:8px;padding:12px;background:#fff;max-height:520px;overflow-y:auto;'>
+            <div style='font-weight:bold;color:#1976d2;margin-bottom:8px;'>{chain_id}protein</div>
+            <div class='seq-container'>"""
+            seq_html += build_sequence_html(chain_id, chain_residues, hotspot_labels, clicked_labels)
+            seq_html += "</div></div>"
+            st.markdown(seq_html, unsafe_allow_html=True)
 
-        cols_per_row = 20
-        n_rows = (len(chain_residues) + cols_per_row - 1) // cols_per_row
+        file_name = "未命名"
+        summary = st.session_state.structure_summary
+        if hasattr(st.session_state, '_uploaded_filename'):
+            file_name = st.session_state._uploaded_filename
 
-        for row_idx in range(n_rows):
-            start_idx = row_idx * cols_per_row
-            end_idx = min(start_idx + cols_per_row, len(chain_residues))
+        st.markdown(f"""
+        <div style='margin-top:8px;padding:8px;border:1px solid #e0e0e0;border-radius:6px;display:flex;align-items:center;gap:8px;'>
+        <span>🔗</span><span>{file_name}</span>
+        </div>""", unsafe_allow_html=True)
 
-            row_cols = st.columns(cols_per_row)
-
-            for i, col in enumerate(row_cols):
-                idx = start_idx + i
-                if idx < len(chain_residues):
-                    res = chain_residues[idx]
-                    res_label = f"{res['res_name']}{res['res_id']}"
-                    one_letter = AA_3TO1.get(res["res_name"], "?")
-                    is_hotspot = res_label in hotspot_labels
-
-                    button_type = "primary" if is_hotspot else "secondary"
-
-                    if col.button(
-                        one_letter,
-                        key=f"seq_{chain_id}_{idx}",
-                        width="stretch",
-                        type=button_type
-                    ):
-                        if res_label in hotspot_labels:
-                            hotspot_labels.discard(res_label)
-                        else:
-                            hotspot_labels.add(res_label)
-                        st.session_state.selected_hotspots = [
-                            h for h in st.session_state.selected_hotspots
-                            if h["label"] in hotspot_labels
-                        ]
-                        if res_label not in [h["label"] for h in st.session_state.selected_hotspots]:
-                            st.session_state.selected_hotspots.append({
-                                "label": res_label,
-                                "chain": chain_id,
-                                "residue_id": str(res["res_id"]),
-                                "residue_name": res["res_name"],
-                                "ml_score": 0,
-                                "dl_score": 0,
-                                "combined_score": 0
-                            })
-                        st.rerun()
-
-        st.markdown("")
-
-    st.markdown("---")
-    render_hotspot_section()
+    with view_col:
+        st.markdown("#### 3D 结构可视化")
+        render_interactive_viewer(chain_info, hotspot_labels)
 
 
-def render_hotspot_section():
-    st.subheader("🔥 热点残基预测结果")
-
-    hotspots = st.session_state.selected_hotspots
-
-    if hotspots:
-        col_info1, col_info2 = st.columns([3, 1])
-        with col_info2:
-            st.metric("检测到的热点残基", len(hotspots))
-
-        cols = st.columns(min(len(hotspots), 5))
-        for i, h in enumerate(hotspots[:5]):
-            with cols[i % len(cols)]:
-                score = h.get("combined_score", 0)
-                res_name = h.get("residue_name", "")
-                one_letter = AA_3TO1.get(res_name, "?")
-                css = "hotspot-high" if score > 0.7 else "hotspot-mid" if score > 0.4 else "hotspot-low"
-                st.markdown(f"""
-                <div class="metric-card {css}">
-                    <div style="font-size:22px;font-weight:bold;">{one_letter}</div>
-                    <div style="font-size:12px;">{h['label']} | Chain {h.get('chain','A')}</div>
-                    <div style="font-size:14px;">综合: {score:.3f}</div>
-                    <div style="font-size:11px;color:#666;">ML: {h.get('ml_score',0):.3f} | DL: {h.get('dl_score',0):.3f}</div>
-                </div>
-                """, unsafe_allow_html=True)
-
-        with st.expander("📊 详细预测结果"):
-            df_data = []
-            for h in hotspots:
-                res_name = h.get("residue_name", "")
-                one_letter = AA_3TO1.get(res_name, "?")
-                df_data.append({
-                    "残基": f"{one_letter} ({h['label']})",
-                    "链": h.get("chain", "A"),
-                    "三字母": res_name,
-                    "单字母": one_letter,
-                    "ML得分": f"{h.get('ml_score', 0):.4f}",
-                    "DL得分": f"{h.get('dl_score', 0):.4f}",
-                    "综合得分": f"{h.get('combined_score', 0):.4f}"
-                })
-            st.dataframe(pd.DataFrame(df_data), width="stretch")
-
-        st.info(f"💡 已选取 Top-{len(hotspots)} 热点残基，可在侧边栏点击「🚀 运行全流程」开始设计")
-    else:
-        st.info("👈 请在侧边栏点击「🎯 预测热点残基」开始预测，或点击上方序列中的残基手动选择")
-
-
-def render_pipeline_results():
-    st.subheader("🧬 Binder设计结果")
-
-    if not st.session_state.rfd3_results:
-        st.info("请先运行全流程（侧边栏 → 🚀 运行全流程）")
-        return
-
-    rfd3_results = st.session_state.rfd3_results
-    mpnn_results = st.session_state.mpnn_results
-    rf3_results = st.session_state.rf3_results
-
-    is_mock = rfd3_results.get("mock", False)
-    if is_mock:
-        st.warning("⚠️ RFD3/MPNN/RF3未安装，使用模拟数据展示流程")
-
-    st.markdown("#### Step 2: RFD3 Binder主链生成")
-    if rfd3_results.get("success"):
-        designs = rfd3_results["designs"]
-        cols = st.columns(min(len(designs), 4))
-        for i, design in enumerate(designs[:4]):
-            with cols[i]:
-                plddt = design.get("plddt", 0)
-                rank = design.get("rank", i + 1)
-                st.markdown(f"""
-                <div class="metric-card">
-                    <div style="font-size:16px;font-weight:bold;">Design {design['index']+1}</div>
-                    <div style="font-size:12px;">Rank #{rank}</div>
-                    <div style="font-size:13px;">pLDDT: {plddt:.1f}</div>
-                </div>
-                """, unsafe_allow_html=True)
-        st.caption(f"共生成 {len(designs)} 个Binder主链结构，选取 Top-{TOP_K}")
-    else:
-        st.error(f"RFD3生成失败: {rfd3_results.get('error', 'Unknown')}")
-
-    st.markdown("---")
-    st.markdown("#### Step 3: MPNN序列设计")
-    if mpnn_results:
-        df_data = []
-        for i, m in enumerate(mpnn_results):
-            seq = m["sequence"]
-            df_data.append({
-                "设计": f"Design {m['design_idx']+1}",
-                "序列 (单字母)": seq[:50] + "..." if len(seq) > 50 else seq,
-                "序列长度": len(seq),
-                "MPNN得分": f"{m.get('score', 0):.2f}",
-                "模拟": "是" if m.get("mock") else "否"
-            })
-        st.dataframe(pd.DataFrame(df_data), width="stretch")
-        st.caption(f"共设计 {len(mpnn_results)} 条序列")
-    else:
-        st.info("MPNN序列设计未运行")
-
-    st.markdown("---")
-    st.markdown("#### Step 4: RF3验证 & RMSD筛选")
-    if rf3_results:
-        passed = [r for r in rf3_results if r["passed"]]
-        failed = [r for r in rf3_results if not r["passed"] and r["rmsd"] >= 0]
-
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric("总验证数", len(rf3_results))
-        with col2:
-            st.metric("通过 (RMSD<阈值)", len(passed))
-        with col3:
-            st.metric("未通过", len(failed))
-
-        if passed:
-            st.success(f"🎉 {len(passed)} 个设计通过验证！")
-
-            best = min(passed, key=lambda x: x["rmsd"])
-            best_seq = best["sequence"]
-            st.markdown(f"**🏆 最佳设计**: Design {best['design_idx']+1}")
-            st.markdown(f"- RMSD = {best['rmsd']:.3f} Å")
-            st.markdown(f"- pLDDT = {best.get('avg_plddt', 'N/A')}")
-            st.markdown(f"- 序列 (单字母): `{best_seq}`")
-
-        df_data = []
-        for r in rf3_results:
-            seq = r["sequence"]
-            status = "✅ 通过" if r["passed"] else "❌ 未通过"
-            df_data.append({
-                "设计": f"Design {r['design_idx']+1}",
-                "序列 (单字母)": seq[:30] + "..." if len(seq) > 30 else seq,
-                "RMSD (Å)": f"{r['rmsd']:.3f}" if r['rmsd'] >= 0 else "N/A",
-                "pLDDT": f"{r.get('avg_plddt', 0):.1f}" if r.get('avg_plddt') else "N/A",
-                "状态": status,
-            })
-        st.dataframe(pd.DataFrame(df_data), width="stretch")
-
-        if passed:
-            with st.expander("📥 导出结果"):
-                export_results(rf3_results, passed)
-        else:
-            st.warning("没有设计通过RMSD验证，建议调整参数后重试")
-    else:
-        st.info("RF3验证未运行")
-
-
-def export_results(rf3_results, passed):
-    if not passed:
-        st.info("没有通过验证的设计")
-        return
-
-    best = min(passed, key=lambda x: x["rmsd"])
-
-    st.markdown("**最佳设计序列 (单字母)**")
-    st.code(best["sequence"], language="plaintext")
-
-    st.markdown("**三字母序列**")
-    three_letter = " ".join([AA_1TO3.get(aa, "UNK") for aa in best["sequence"]])
-    st.code(three_letter, language="plaintext")
-
-    st.markdown("**所有通过验证的设计**")
-    for i, r in enumerate(passed):
-        seq = r["sequence"]
-        st.markdown(f"- Design {r['design_idx']+1}: RMSD={r['rmsd']:.3f} Å, pLDDT={r.get('avg_plddt', 'N/A')}, 序列=`{seq[:40]}...`")
-
-    if best.get("rf3_pdb") and os.path.exists(best["rf3_pdb"]):
-        with open(best["rf3_pdb"], "r") as f:
-            pdb_content = f.read()
-        st.download_button(
-            "📥 下载最佳设计PDB",
-            data=pdb_content,
-            file_name=f"binder_design_best_rmsd{best['rmsd']:.2f}.pdb",
-            mime="chemical/x-pdb"
-        )
-
-
-def render_3d_view():
-    st.subheader("🎯 3D结构可视化")
-
+def render_interactive_viewer(chain_info, hotspot_labels):
     pdb_content = st.session_state.pdb_content
     if not pdb_content:
         st.info("请先上传蛋白质文件")
@@ -769,134 +516,476 @@ def render_3d_view():
             "score": h.get("combined_score", 0)
         })
 
-    rfd3_pdb = None
-    rf3_pdb = None
-    rmsd_data = None
-
-    if st.session_state.rf3_results:
-        passed = [r for r in st.session_state.rf3_results if r["passed"]]
-        if not passed:
-            valid = [r for r in st.session_state.rf3_results if r["rmsd"] >= 0]
-            if valid:
-                passed = [min(valid, key=lambda x: x["rmsd"])]
-
-        if passed:
-            best = min(passed, key=lambda x: x["rmsd"])
-            if best.get("rf3_pdb") and os.path.exists(best["rf3_pdb"]):
-                try:
-                    with open(best["rf3_pdb"], "r") as f:
-                        rf3_pdb = f.read()
-                except Exception:
-                    rf3_pdb = None
-            if best.get("backbone_pdb") and os.path.exists(best.get("backbone_pdb", "")):
-                try:
-                    with open(best["backbone_pdb"], "r") as f:
-                        rfd3_pdb = f.read()
-                except Exception:
-                    rfd3_pdb = None
-            rmsd_data = best.get("per_res_rmsd")
-
-    molstar_html = render_molstar(
+    molstar_html = render_molstar_with_interaction(
         pdb_content=pdb_content,
         hotspot_residues=hotspot_residues,
-        rfd3_pdb=rfd3_pdb,
-        rf3_pdb=rf3_pdb,
-        rmsd_data=rmsd_data,
-        height=650
+        chain_info=chain_info,
+        height=580
     )
-    render_html(molstar_html, height=670)
+    render_html(molstar_html, height=600)
 
+
+def render_molstar_with_interaction(pdb_content, hotspot_residues, chain_info, height=580):
+    import base64
+    import json
+
+    pdb_b64 = base64.b64encode(pdb_content.encode()).decode()
+
+    hotspot_js = "const hotspotResidues = [];"
     if hotspot_residues:
-        st.caption("🟢 Target | 🟠 RFD3 Binder | 🔵 RF3 Prediction | 🔴 Hotspot")
+        entries = []
+        for h in hotspot_residues:
+            chain = h.get("chain", "A")
+            res_id = h.get("residue_id", 0)
+            score = h.get("score", 0)
+            try:
+                res_id_int = int(str(res_id).strip())
+            except (ValueError, TypeError):
+                res_id_int = 0
+            entries.append(f'{{chain: "{chain}", resId: {res_id_int}, score: {float(score):.3f}}}')
+        hotspot_js = f"const hotspotResidues = [{', '.join(entries)}];"
+
+    all_chains_json = json.dumps(list(chain_info.keys()))
+
+    html = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="utf-8">
+        <style>
+            * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+            body {{ background: #fff; }}
+            #viewer {{ width: 100%; height: {height}px; position: relative; }}
+            #statusBar {{
+                position: absolute; bottom: 0; left: 0; right: 0;
+                background: rgba(0,0,0,0.85); color: #fff;
+                padding: 6px 12px; font-size: 13px; font-family: monospace;
+                display: flex; gap: 16px; align-items: center; z-index: 10;
+            }}
+            .legend {{ display: inline-block; width: 12px; height: 12px; border-radius: 2px; margin-right: 4px; }}
+            .toolbar-btn {{
+                position: absolute; right: 8px; top: 8px; z-index: 20;
+                background: white; border: 1px solid #ddd; border-radius: 6px;
+                padding: 4px; display: flex; flex-direction: column; gap: 2px;
+                box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            }}
+            .toolbar-btn button {{
+                width: 32px; height: 32px; border: none; background: transparent;
+                cursor: pointer; border-radius: 4px; font-size: 16px; display: flex;
+                align-items: center; justify-content: center; color: #555;
+            }}
+            .toolbar-btn button:hover {{ background: #e3f2fd; color: #1976d2; }}
+        </style>
+        <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/molstar@4.4.0/build/viewer/molstar.css">
+    </head>
+    <body>
+        <div id="viewer">
+            <div class="toolbar-btn">
+                <button onclick="resetCamera()" title="重置视角">🎯</button>
+                <button onclick="toggleSpin()" title="旋转">🔄</button>
+                <button onclick="toggleStyle()" title="切换样式">⚙️</button>
+                <button onclick="toggleLabel()" title="标签">🏷️</button>
+                <button onclick="zoomToFit()" title="适应窗口">⬜</button>
+                <button onclick="screenshot()" title="截图">📷</button>
+            </div>
+            <div id="statusBar">
+                <span class="status-item"><span class="legend" style="background:#4CAF50"></span>Target</span>
+                <span id="resInfo" style="margin-left:auto;"></span>
+            </div>
+        </div>
+        <script src="https://cdn.jsdelivr.net/npm/molstar@4.4.0/build/viewer/molstar.js"></script>
+        <script>
+            {hotspot_js}
+            const allChains = {all_chains_json};
+            let pluginInstance = null;
+            let targetStructures = [];
+            let isSpinning = false;
+            let spinAnimId = null;
+
+            function highlightResidue(chainId, resId) {{
+                if (!pluginInstance || targetStructures.length === 0) return;
+                const plugin = pluginInstance;
+                const targetStruct = targetStructures[0];
+                const comp = plugin.managers.structure.component;
+
+                comp.clearRepresentations(targetStruct);
+
+                const defaultRepr = await comp.addRepresentation(targetStruct, 'cartoon', {{
+                    color: {{ name: 'uniform', params: {{ value: '#4CAF50' }} }},
+                    alpha: 0.85
+                }});
+
+                const script = molstar.Script(
+                    "sel.atom: " +
+                    "(chain.authAsymId = " + JSON.stringify(chainId) + " or chain.labelAsymId = " + JSON.stringify(chainId) + ") and " +
+                    "(residue.authSeqNumber = " + parseInt(resId) + " or residue.labelSeqNumber = " + parseInt(resId) + ")"
+                );
+
+                const selData = await plugin.managers.structure.selection.fromScript(targetStruct, script);
+                if (selData) {{
+                    await comp.addRepresentation(targetStruct, 'ball-and-stick', {{
+                        color: {{ name: 'uniform', params: {{ value: '#FF0000' }} }},
+                        sizeFactor: 0.35,
+                        sizeAspectRatio: 1.0
+                    }}, selData);
+                }}
+
+                document.getElementById("resInfo").textContent =
+                    chainId + "/" + resId + " 已高亮";
+            }}
+
+            window.addEventListener('message', function(event) {{
+                if (event.data && event.data.type === 'residue_click') {{
+                    highlightResidue(event.data.chain, event.data.resid);
+                }}
+            }});
+
+            molstar.Viewer.create("viewer", {{
+                layoutIsExpanded: false,
+                layoutShowControls: false,
+                layoutShowRemoteState: false,
+                layoutShowSequence: false,
+                layoutShowLog: false,
+                layoutShowLeftPanel: false,
+            }}).then(async viewer => {{
+                pluginInstance = viewer;
+                const plugin = viewer;
+
+                try {{
+                    const targetData = atob("{pdb_b64}");
+                    const targetTraj = await plugin.builders.structure.readTrajectory({{
+                        model: {{ type: 'pdb', data: targetData }}
+                    }});
+                    const targetPreset = await plugin.builders.structure.hierarchy.applyPreset(
+                        {{ structure: targetTraj }},
+                        'default'
+                    );
+
+                    targetStructures.push(targetTraj.structures[0]);
+
+                    const targetRepr = targetPreset.structure.representations[0];
+                    if (targetRepr) {{
+                        await plugin.managers.structure.component.updateRepresentationsOptions(
+                            targetRepr,
+                            {{ color: {{ name: 'uniform', params: {{ value: '#4CAF50' }} }}, alpha: 0.85 }}
+                        );
+                    }}
+
+                    if (hotspotResidues.length > 0) {{
+                        try {{
+                            const structures = plugin.managers.structure.hierarchy.current.structures;
+                            if (structures.length > 0) {{
+                                const targetStruct = structures[0];
+                                const comp = plugin.managers.structure.component;
+
+                                for (const h of hotspotResidues) {{
+                                    try {{
+                                        const script = molstar.Script(
+                                            "sel.atom: " +
+                                            "(chain.authAsymId = " + JSON.stringify(h.chain) + " or chain.labelAsymId = " + JSON.stringify(h.chain) + ") and " +
+                                            "(residue.authSeqNumber = " + h.resId + " or residue.labelSeqNumber = " + h.resId + ")"
+                                        );
+                                        const selData = await plugin.managers.structure.selection.fromScript(targetStruct, script);
+                                        if (selData) {{
+                                            await comp.addRepresentation(targetStruct, 'ball-and-stick', {{
+                                                color: {{ name: 'uniform', params: {{ value: '#FF0000' }} }},
+                                                sizeFactor: 0.3
+                                            }}, selData);
+                                        }}
+                                    }} catch(e2) {{ console.warn("Hotspot error:", e2); }}
+                                }}
+                            }}
+                        }} catch(e) {{ console.warn("Hotspot section error:", e); }}
+                    }}
+
+                    plugin.managers.camera.resetSnapshot();
+
+                }} catch(e) {{
+                    console.error("Mol* error:", e);
+                    document.getElementById("resInfo").textContent = "Error: " + e.message;
+                }}
+            }});
+
+            function resetCamera() {{
+                if (pluginInstance) pluginInstance.managers.camera.resetSnapshot();
+            }}
+            function toggleSpin() {{
+                isSpinning = !isSpinning;
+                if (isSpinning && pluginInstance) {{
+                    spinAnimId = requestAnimationFrame(function spin() {{
+                        if (!isSpinning) return;
+                        pluginInstance.managers.camera.spin({{ speed: 1 }});
+                        spinAnimId = requestAnimationFrame(spin);
+                    }});
+                }} else if (spinAnimId) {{
+                    cancelAnimationFrame(spinAnimId);
+                }}
+            }}
+            function toggleStyle() {{
+                if (!pluginInstance) return;
+                const structs = pluginInstance.managers.structure.hierarchy.current.structures;
+                if (structs.length > 0) {{
+                    const s = structs[0];
+                    const reprs = pluginInstance.managers.structure.component.getRepresentations(s);
+                    reprs.forEach(r => {{
+                        const cur = r.params?.type?.name || '';
+                        if (cur === 'cartoon') pluginInstance.managers.structure.component.updateRepresentationsOptions(r, {{ type: {{ name: 'spacefill' }} }});
+                        else if (cur === 'spacefill') pluginInstance.managers.structure.component.updateRepresentationsOptions(r, {{ type: {{ name: 'cartoon' }} }});
+                    }});
+                }}
+            }}
+            function toggleLabel() {{}}
+            function zoomToFit() {{
+                if (pluginInstance) pluginInstance.managers.camera.resetSnapshot();
+            }}
+            function screenshot() {{
+                if (pluginInstance) pluginInstance.managers.snapshot.saveToFile('image/png');
+            }}
+        </script>
+    </body>
+    </html>
+    """
+    return html
 
 
-def render_evaluation_report():
-    st.subheader("📊 评估报告")
-
-    rf3_results = st.session_state.rf3_results
-    if not rf3_results:
-        st.info("请先运行全流程以生成评估报告")
-        return
-
-    passed = [r for r in rf3_results if r["passed"]]
-    all_valid = [r for r in rf3_results if r["rmsd"] >= 0]
-
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        st.metric("总设计数", len(rf3_results))
-    with col2:
-        st.metric("通过验证", len(passed))
-    with col3:
-        if all_valid:
-            avg_rmsd = sum(r["rmsd"] for r in all_valid) / len(all_valid)
-            st.metric("平均RMSD", f"{avg_rmsd:.3f} Å")
-        else:
-            st.metric("平均RMSD", "N/A")
-    with col4:
-        if passed:
-            best_rmsd = min(r["rmsd"] for r in passed)
-            st.metric("最佳RMSD", f"{best_rmsd:.3f} Å")
-        else:
-            st.metric("最佳RMSD", "N/A")
+def render_hotspot_section():
+    hotspots = st.session_state.selected_hotspots
 
     st.markdown("---")
+    hotspot_col_label, hotspot_col_input = st.columns([1, 5])
+    with hotspot_col_label:
+        st.markdown("**热点** ⓘ")
+    with hotspot_col_input:
 
-    if passed:
-        best = min(passed, key=lambda x: x["rmsd"])
+        if hotspots:
+            tags_html = ""
+            for h in hotspots:
+                score = h.get("combined_score", 0)
+                res_name = h.get("residue_name", "")
+                one_letter = AA_3TO1.get(res_name, "?")
+                if score > 0.7:
+                    tag_cls = "tag-high"
+                elif score > 0.4:
+                    tag_cls = "tag-mid"
+                else:
+                    tag_cls = "tag-low"
 
-        if best.get("per_res_rmsd"):
-            st.markdown("#### 最佳设计 - 每残基RMSD分布")
-            rmsd_html = render_rmsd_chart(best["per_res_rmsd"])
-            render_html(rmsd_html, height=320)
+                tags_html += f"""
+                <span class="hotspot-tag {tag_cls}"
+                      onclick="window.parent.postMessage({{type:'residue_click', chain:'{h.get('chain','A')}', resid:'{h['residue_id']}'}}, '*')">
+                    {one_letter}{h['label']} ({score:.3f})
+                </span>"""
 
-        if best.get("plddt") and isinstance(best["plddt"], list):
-            st.markdown("#### 最佳设计 - pLDDT置信度")
-            plddt_html = render_plddt_chart(best["plddt"])
-            render_html(plddt_html, height=280)
+            st.markdown(tags_html, unsafe_allow_html=True)
+        else:
+            placeholder = st.text_input(
+                "",
+                placeholder="输入残基编号：A/1 表示 A 链上的残基 1（例如：A/1、A/2、A/3）",
+                label_visibility="collapsed",
+                key="hotspot_manual_input"
+            )
 
+    if hotspots:
+        with st.expander("📊 详细预测结果", expanded=False):
+            df_data = []
+            for h in hotspots:
+                res_name = h.get("residue_name", "")
+                one_letter = AA_3TO1.get(res_name, "?")
+                df_data.append({
+                    "残基": f"{one_letter} ({h['label']})",
+                    "链": h.get("chain", "A"),
+                    "三字母": res_name,
+                    "单字母": one_letter,
+                    "ML得分": f"{h.get('ml_score', 0):.4f}",
+                    "DL得分": f"{h.get('dl_score', 0):.4f}",
+                    "综合得分": f"{h.get('combined_score', 0):.4f}"
+                })
+            st.dataframe(pd.DataFrame(df_data), use_container_width=True)
+
+        st.info(f"💡 已选取 Top-{len(hotspots)} 热点残基，点击上方按钮开始设计流程")
+
+
+def render_pipeline_panel():
+    with st.container():
         st.markdown("---")
-        st.markdown("#### 最佳设计详情")
+        render_step_bar()
 
-        seq = best["sequence"]
-        st.markdown(f"**单字母序列**: `{seq}`")
+        c_predict, c_run, c_reset = st.columns([2, 2, 1])
+        with c_predict:
+            method = st.selectbox(
+                "预测方法",
+                options=[
+                    "两个模型都运行 (Top-3)",
+                    "ppihotspotid (ML)",
+                    "hotspot-prediction (DL)"
+                ],
+                index=0,
+                label_visibility="collapsed"
+            )
 
-        colored_seq = ""
-        for aa in seq:
-            three = AA_1TO3.get(aa, "UNK")
-            if three in ['PHE', 'TYR', 'TRP']:
-                colored_seq += f"<span style='color:#e53935;font-weight:bold'>{aa}</span>"
-            elif three in ['LEU', 'ILE', 'VAL', 'MET', 'ALA', 'PRO']:
-                colored_seq += f"<span style='color:#1565c0;font-weight:bold'>{aa}</span>"
-            elif three in ['ARG', 'LYS', 'ASP', 'GLU']:
-                colored_seq += f"<span style='color:#2e7d32;font-weight:bold'>{aa}</span>"
-            else:
-                colored_seq += f"<span style='color:#616161'>{aa}</span>"
+        with c_run:
+            binder_len = st.slider("Binder长度", 40, 150, 80, step=5, label_visibility="collapsed")
 
-        st.markdown(f"**着色序列**: {colored_seq}  ", unsafe_allow_html=True)
-        st.caption("🔴 芳香族 | 🔵 疏水 | 🟢 带电 | ⚫ 极性")
+        with c_reset:
+            if st.button("🎯 预测热点", type="primary", use_container_width=True):
+                if st.session_state.atom_array is not None:
+                    predict_hotspots(method, TOP_K)
+                else:
+                    st.warning("请先上传蛋白质文件")
 
-        st.markdown(f"""
-        | 指标 | 值 |
-        |------|------|
-        | Design | {best['design_idx']+1} |
-        | RMSD | {best['rmsd']:.3f} Å |
-        | pLDDT | {best.get('avg_plddt', 'N/A')} |
-        | MPNN Score | {best.get('mpnn_score', 'N/A')} |
-        | 序列长度 | {len(seq)} aa |
-        | 验证状态 | {'✅ 通过' if best['passed'] else '❌ 未通过'} |
+        btn_run, btn_full, btn_rst = st.columns(3)
+        with btn_run:
+            if st.button("🚀 运行全流程", type="primary", use_container_width=True):
+                if st.session_state.atom_array is None:
+                    st.error("请先上传目标蛋白结构文件")
+                elif not st.session_state.selected_hotspots:
+                    st.warning("请先预测或选择热点残基")
+                else:
+                    run_full_pipeline(binder_len, TOP_K, TOP_K, 2.0)
+        with btn_full:
+            if st.button("🔄 重置全部", use_container_width=True):
+                for key in list(st.session_state.keys()):
+                    del st.session_state[key]
+                init_session()
+                st.rerun()
+        with btn_rst:
+            st.empty()
+
+    if st.session_state.rfd3_results:
+        render_pipeline_results()
+
+
+def render_pipeline_results():
+    st.markdown("### 🧬 设计结果")
+    rfd3_results = st.session_state.rfd3_results
+    mpnn_results = st.session_state.mpnn_results
+    rf3_results = st.session_state.rf3_results
+
+    is_mock = rfd3_results.get("mock", False)
+    if is_mock:
+        st.warning("⚠️ RFD3/MPNN/RF3未安装，使用模拟数据展示流程")
+
+    tab_rfd3, tab_mpnn, tab_rf3 = st.tabs(["RFD3 主链", "MPNN 序列", "RF3 验证"])
+
+    with tab_rfd3:
+        if rfd3_results.get("success"):
+            designs = rfd3_results["designs"]
+            cols = st.columns(min(len(designs), 4))
+            for i, design in enumerate(designs[:4]):
+                with cols[i]:
+                    plddt = design.get("plddt", 0)
+                    rank = design.get("rank", i + 1)
+                    st.markdown(f"""
+                    <div class="metric-card">
+                        <div style="font-size:16px;font-weight:bold;">Design {design['index']+1}</div>
+                        <div style="font-size:12px;">Rank #{rank}</div>
+                        <div style="font-size:13px;">pLDDT: {plddt:.1f}</div>
+                    </div>
+                    """, unsafe_allow_html=True)
+            st.caption(f"共生成 {len(designs)} 个Binder主链结构，选取 Top-{TOP_K}")
+        else:
+            st.error(f"RFD3生成失败: {rfd3_results.get('error', 'Unknown')}")
+
+    with tab_mpnn:
+        if mpnn_results:
+            df_data = []
+            for m in mpnn_results:
+                seq = m["sequence"]
+                df_data.append({
+                    "设计": f"Design {m['design_idx']+1}",
+                    "序列": seq[:60] + "..." if len(seq) > 60 else seq,
+                    "长度": len(seq),
+                    "得分": f"{m.get('score', 0):.2f}",
+                })
+            st.dataframe(pd.DataFrame(df_data), use_container_width=True)
+        else:
+            st.info("MPNN序列设计未运行")
+
+    with tab_rf3:
+        if rf3_results:
+            passed = [r for r in rf3_results if r["passed"]]
+            failed = [r for r in rf3_results if not r["passed"] and r["rmsd"] >= 0]
+
+            mc1, mc2, mc3 = st.columns(3)
+            with mc1:
+                st.metric("总验证数", len(rf3_results))
+            with mc2:
+                st.metric("通过 (RMSD<阈值)", len(passed))
+            with mc3:
+                st.metric("未通过", len(failed))
+
+            if passed:
+                best = min(passed, key=lambda x: x["rmsd"])
+                st.success(f"🏆 最佳: Design {best['design_idx']+1}, RMSD={best['rmsd']:.3f}Å, pLDDT={best.get('avg_plddt','N/A')}")
+
+            df_data = []
+            for r in rf3_results:
+                seq = r["sequence"]
+                status = "✅ 通过" if r["passed"] else "❌ 未通过"
+                df_data.append({
+                    "设计": f"Design {r['design_idx']+1}",
+                    "序列": seq[:30] + "..." if len(seq) > 30 else seq,
+                    "RMSD(Å)": f"{r['rmsd']:.3f}" if r['rmsd'] >= 0 else "N/A",
+                    "pLDDT": f"{r.get('avg_plddt', 0):.1f}" if r.get('avg_plddt') else "N/A",
+                    "状态": status,
+                })
+            st.dataframe(pd.DataFrame(df_data), use_container_width=True)
+        else:
+            st.info("RF3验证未运行")
+
+
+def render_welcome():
+    st.title("🧬 蛋白质Binder设计系统")
+    st.markdown("---")
+
+    col1, col2 = st.columns([2, 1])
+    with col1:
+        st.markdown("""
+        ### 🚀 快速开始
+
+        1. **上传目标蛋白结构** - 上方选择 PDB/CIF 文件
+        2. **查看序列与3D** - 左侧单字母序列 + 右侧3D结构
+        3. **预测热点残基** - ML+DL双模型自动选取Top-3
+        4. **运行全流程** - RFD3 → MPNN → RF3 自动化设计
+
+        ### 📋 工作流程
+
+        ```
+        目标蛋白 → 热点预测(ML+DL) → RFD3(Top-3) → MPNN(Top-3) → RF3验证 → RMSD<2Å筛选
+        ```
+
+        ### 🔧 集成模型
+
+        | 模型 | 功能 | 说明 |
+        |------|------|------|
+        | ppihotspotid (ML) | 热点残基预测 | XGBoost机器学习 |
+        | hotspot-prediction (DL) | 热点残基预测 | GAT+ESM-2深度学习 |
+        | RFDiffusion3 | Binder主链生成 | 扩散模型 |
+        | ProteinMPNN | 序列设计 | 图神经网络 |
+        | RoseTTAFold3 | 结构预测验证 | 三轨网络 |
         """)
 
-    else:
-        st.warning("没有设计通过RMSD验证")
-        if all_valid:
-            best = min(all_valid, key=lambda x: x["rmsd"])
-            st.info(f"最接近的设计: Design {best['design_idx']+1}, RMSD = {best['rmsd']:.3f} Å")
-            st.info("建议: 降低RMSD阈值或增加生成数量后重试")
+    with col2:
+        st.markdown("""
+        ### ⚙️ 系统要求
+
+        - Python 3.10+
+        - Streamlit 1.30+
+        - Biotite 0.38+
+        - XGBoost ≥ 1.7.0
+        - GPU (可选, 用于DL模型)
+
+        ### 💡 使用提示
+
+        - 点击左侧序列中的**任意残基** → 右侧3D视图**高亮显示**
+        - **橙色标记**为已识别的热点残基
+        - 未安装RFD3/MPNN/RF3时自动使用模拟模式
+        - Top-K=3 默认选取3个最优结果
+        """)
 
 
 def main():
-    uploaded_file, binder_length, num_designs, num_sequences, rmsd_threshold = render_sidebar()
-    render_main_area(uploaded_file)
+    render_main_page()
 
 
 if __name__ == "__main__":
