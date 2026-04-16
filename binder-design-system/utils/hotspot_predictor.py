@@ -100,9 +100,10 @@ class HotspotPredictor:
                     features[i, self._ML_OHE_DIM + 2] = row['energy']
 
                 all_probs = []
-                dmatrix = xgb.DMatrix(features)
+                feature_names = [f"f{i}" for i in range(self._ML_NUM_FEATURES)]
+                dmatrix = xgb.DMatrix(features, feature_names=feature_names)
                 for fold_name, model in xgb_models.items():
-                    proba = model.predict(dmatrix)
+                    proba = model.predict(dmatrix, validate_features=False)
                     all_probs.append(proba)
 
                 scores = np.mean(all_probs, axis=0)
@@ -378,6 +379,7 @@ class HotspotPredictor:
 
         os.environ.setdefault('DGLBACKEND', 'pytorch')
         os.environ.setdefault('DGL_DOWNLOAD', '1')
+        os.environ['CUDA_VISIBLE_DEVICES'] = ''
 
         try:
             import torch
@@ -388,9 +390,15 @@ class HotspotPredictor:
             except OSError as e:
                 err_msg = str(e)
                 if 'libcusparseLt' in err_msg or 'cuda' in err_msg.lower() or 'cusparse' in err_msg.lower():
-                    print(f"[DL] CUDA库缺失，尝试CPU模式加载DGL...")
+                    print(f"[DL] CUDA库缺失，尝试安装CPU版DGL...")
                     self._try_dgl_cpu_fallback()
-                    import dgl
+                    try:
+                        import dgl
+                    except OSError as e2:
+                        print(f"[DL] CPU版DGL仍无法加载: {e2}")
+                        self._dl_models = {}
+                        self._dl_loaded = True
+                        return self._dl_models
                 else:
                     raise
 
@@ -460,15 +468,40 @@ class HotspotPredictor:
             subprocess.check_call([
                 sys.executable, '-m', 'pip', 'uninstall', 'dgl', '-y', '--quiet'
             ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            subprocess.check_call([
-                sys.executable, '-m', 'pip', 'install', 'dgl',
-                '-f', 'https://data.dgl.ai/wheels/repo.html',
-                '--quiet'
-            ])
-            print("[DL] DGL CPU版本安装成功")
+
+            installed = False
+            cpu_install_cmds = [
+                [sys.executable, '-m', 'pip', 'install', 'dgl',
+                 '--no-index', '-f', 'https://data.dgl.ai/wheels/repo.html', '--quiet'],
+                [sys.executable, '-m', 'pip', 'install', 'dgl',
+                 '-f', 'https://data.dgl.ai/wheels/repo.html', '--quiet'],
+                [sys.executable, '-m', 'pip', 'install', 'dgl', '--quiet'],
+            ]
+            for cmd in cpu_install_cmds:
+                try:
+                    subprocess.check_call(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    test = subprocess.run(
+                        [sys.executable, '-c', 'import dgl; print(dgl.__version__)'],
+                        capture_output=True, text=True, timeout=15,
+                        env={**os.environ, 'CUDA_VISIBLE_DEVICES': '', 'DGL_DOWNLOAD': '1'}
+                    )
+                    if test.returncode == 0:
+                        installed = True
+                        print(f"[DL] DGL CPU版本安装成功: {test.stdout.strip()}")
+                        break
+                    else:
+                        subprocess.check_call(
+                            [sys.executable, '-m', 'pip', 'uninstall', 'dgl', '-y', '--quiet'],
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                        )
+                except Exception:
+                    continue
+
+            if not installed:
+                print("[DL] DGL CPU版本安装失败")
+                print("[DL] 请手动运行: pip uninstall dgl -y && pip install dgl --no-index -f https://data.dgl.ai/wheels/repo.html")
         except Exception as e:
             print(f"[DL] DGL CPU版本安装失败: {e}")
-            print(f"[DL] 请手动运行: pip uninstall dgl -y && pip install dgl -f https://data.dgl.ai/wheels/repo.html")
 
     def _try_install_dgl_cpu(self):
         self._try_dgl_cpu_fallback()
