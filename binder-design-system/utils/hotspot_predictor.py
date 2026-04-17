@@ -14,6 +14,34 @@ from typing import Dict, List, Optional, Any
 import pandas as pd
 
 
+def _patch_autogluon_compat():
+    _compat_defaults = {
+        'passthrough': False,
+        'passthrough_stage': 'first',
+        'passthrough_types': None,
+    }
+    try:
+        from autogluon.features.generators.abstract import AbstractFeatureGenerator
+
+        if not getattr(AbstractFeatureGenerator, '_compat_patched', False):
+            original_getattr = getattr(AbstractFeatureGenerator, '__getattr__', None)
+
+            def _compat_getattr(self, name):
+                if name in _compat_defaults:
+                    return _compat_defaults[name]
+                if original_getattr is not None:
+                    return original_getattr(self, name)
+                raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
+
+            AbstractFeatureGenerator.__getattr__ = _compat_getattr
+            AbstractFeatureGenerator._compat_patched = True
+            print("[ML] AutoGluon兼容性补丁已应用 (passthrough等属性)")
+    except ImportError:
+        pass
+    except Exception as e:
+        print(f"[ML] AutoGluon兼容性补丁失败: {e}")
+
+
 class HotspotPredictor:
     """热点残基预测器 - 集成ML和DL两个模型"""
 
@@ -334,6 +362,8 @@ class HotspotPredictor:
         if self._ml_loaded:
             return self._ml_predictor
 
+        _patch_autogluon_compat()
+
         try:
             from autogluon.tabular import TabularPredictor
 
@@ -358,6 +388,7 @@ class HotspotPredictor:
             print("[ML] autogluon未安装，尝试安装...")
             self._try_install_autogluon()
             try:
+                _patch_autogluon_compat()
                 from autogluon.tabular import TabularPredictor
                 self._ml_predictor = TabularPredictor.load(
                     str(self.ml_model_path),
@@ -405,6 +436,26 @@ class HotspotPredictor:
             except Exception as e2:
                 print(f"[ML] autogluon安装失败: {e2}")
 
+    def _detect_cuda_version(self):
+        try:
+            import torch
+            if torch.cuda.is_available():
+                cuda_version = torch.version.cuda
+                if cuda_version:
+                    major = int(cuda_version.split('.')[0])
+                    if major >= 12:
+                        return 'cu121'
+                    elif major == 11:
+                        minor = int(cuda_version.split('.')[1])
+                        if minor >= 8:
+                            return 'cu118'
+                        else:
+                            return 'cu117'
+                    return f'cu{major}{cuda_version.split(".")[1]}'
+        except Exception:
+            pass
+        return None
+
     def _load_dl_models(self) -> Dict[str, Any]:
         if self._dl_loaded:
             return self._dl_models
@@ -425,21 +476,29 @@ class HotspotPredictor:
                 import dgl
                 if has_cuda:
                     try:
-                        dgl_d = dgl.device('cuda:0')
+                        _ = dgl.device('cuda:0')
                         print(f"[DL] DGL CUDA可用")
                     except Exception:
-                        print(f"[DL] DGL CUDA不可用，使用CPU")
+                        print(f"[DL] DGL CUDA不可用，切换到CPU模式")
+                        os.environ['CUDA_VISIBLE_DEVICES'] = ''
+                        device = torch.device('cpu')
                 print(f"[DL] DGL版本: {dgl.__version__}")
             except OSError as e:
                 err_msg = str(e)
                 if 'libcusparseLt' in err_msg or 'cuda' in err_msg.lower() or 'cusparse' in err_msg.lower():
-                    print(f"[DL] CUDA库缺失，尝试安装CPU版DGL...")
-                    self._try_dgl_cpu_fallback()
+                    print(f"[DL] CUDA库缺失，尝试安装匹配版DGL...")
+                    cuda_ver = self._detect_cuda_version()
+                    self._try_dgl_install(cuda_ver)
                     try:
                         import dgl
-                        print(f"[DL] DGL CPU版本加载成功: {dgl.__version__}")
+                        print(f"[DL] DGL安装成功: {dgl.__version__}")
                     except OSError as e2:
-                        print(f"[DL] CPU版DGL仍无法加载: {e2}")
+                        print(f"[DL] DGL仍无法加载: {e2}")
+                        self._dl_models = {}
+                        self._dl_loaded = True
+                        return self._dl_models
+                    except ImportError:
+                        print(f"[DL] DGL安装失败")
                         self._dl_models = {}
                         self._dl_loaded = True
                         return self._dl_models
@@ -494,9 +553,10 @@ class HotspotPredictor:
         except OSError as e:
             err_msg = str(e)
             if 'libcusparseLt' in err_msg or 'cuda' in err_msg.lower():
-                print(f"[DL] CUDA库缺失，尝试安装CPU版DGL...")
+                print(f"[DL] CUDA库缺失，尝试安装匹配版DGL...")
                 self._dl_models = {}
-                self._try_dgl_cpu_fallback()
+                cuda_ver = self._detect_cuda_version()
+                self._try_dgl_install(cuda_ver)
             else:
                 print(f"[DL] 系统库缺失: {e}")
                 self._dl_models = {}
@@ -509,26 +569,51 @@ class HotspotPredictor:
         self._dl_loaded = True
         return self._dl_models
 
-    def _try_dgl_cpu_fallback(self):
+    def _try_dgl_install(self, cuda_version=None):
         try:
             import subprocess
-            print("[DL] 卸载CUDA版DGL，安装CPU版本...")
-            subprocess.check_call([
-                sys.executable, '-m', 'pip', 'uninstall', 'dgl', '-y', '--quiet'
-            ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+            subprocess.check_call(
+                [sys.executable, '-m', 'pip', 'uninstall', 'dgl', '-y', '--quiet'],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+            )
+
+            install_attempts = []
+
+            if cuda_version:
+                cuda_wheel_url = f'https://data.dgl.ai/wheels/{cuda_version}/repo.html'
+                install_attempts.append(
+                    (f"DGL {cuda_version} (DGL仓库)",
+                     [sys.executable, '-m', 'pip', 'install', 'dgl',
+                      '-f', cuda_wheel_url, '--quiet'])
+                )
+                install_attempts.append(
+                    (f"DGL {cuda_version} (DGL仓库+PyPI)",
+                     [sys.executable, '-m', 'pip', 'install', f'dgl+{cuda_version}',
+                      '-f', cuda_wheel_url, '--quiet'])
+                )
+
+            install_attempts.append(
+                ("DGL CPU (DGL仓库)",
+                 [sys.executable, '-m', 'pip', 'install', 'dgl',
+                  '--no-index', '-f', 'https://data.dgl.ai/wheels/repo.html', '--quiet'])
+            )
+            install_attempts.append(
+                ("DGL CPU (DGL仓库+PyPI)",
+                 [sys.executable, '-m', 'pip', 'install', 'dgl',
+                  '-f', 'https://data.dgl.ai/wheels/repo.html', '--quiet'])
+            )
+            install_attempts.append(
+                ("DGL (PyPI)",
+                 [sys.executable, '-m', 'pip', 'install', 'dgl', '--quiet'])
+            )
 
             installed = False
-            cpu_install_cmds = [
-                [sys.executable, '-m', 'pip', 'install', 'dgl',
-                 '--no-index', '-f', 'https://data.dgl.ai/wheels/repo.html', '--quiet'],
-                [sys.executable, '-m', 'pip', 'install', 'dgl',
-                 '-f', 'https://data.dgl.ai/wheels/repo.html', '--quiet'],
-                [sys.executable, '-m', 'pip', 'install', 'dgl', '--quiet'],
-            ]
-            for cmd in cpu_install_cmds:
+            for attempt_name, cmd in install_attempts:
+                print(f"[DL] 尝试安装: {attempt_name}...")
                 try:
-                    subprocess.check_call(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                    test_env = {**os.environ, 'CUDA_VISIBLE_DEVICES': '', 'DGL_DOWNLOAD': '1'}
+                    subprocess.check_call(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=120)
+                    test_env = {**os.environ, 'DGL_DOWNLOAD': '1'}
                     test = subprocess.run(
                         [sys.executable, '-c', 'import dgl; print(dgl.__version__)'],
                         capture_output=True, text=True, timeout=15,
@@ -536,21 +621,28 @@ class HotspotPredictor:
                     )
                     if test.returncode == 0:
                         installed = True
-                        print(f"[DL] DGL CPU版本安装成功: {test.stdout.strip()}")
+                        print(f"[DL] ✅ {attempt_name}安装成功: {test.stdout.strip()}")
                         break
                     else:
+                        err_output = test.stderr.strip() if test.stderr else ""
+                        print(f"[DL] {attempt_name}安装后无法导入: {err_output[:100]}")
                         subprocess.check_call(
                             [sys.executable, '-m', 'pip', 'uninstall', 'dgl', '-y', '--quiet'],
                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
                         )
-                except Exception:
-                    continue
+                except subprocess.TimeoutExpired:
+                    print(f"[DL] {attempt_name}安装超时")
+                except Exception as e:
+                    print(f"[DL] {attempt_name}安装失败: {e}")
 
             if not installed:
-                print("[DL] DGL CPU版本安装失败")
-                print("[DL] 请手动运行: pip uninstall dgl -y && pip install dgl --no-index -f https://data.dgl.ai/wheels/repo.html")
+                print("[DL] ❌ DGL所有安装方式均失败")
+                print("[DL] 请手动运行以下命令安装:")
+                if cuda_version:
+                    print(f"[DL]   pip install dgl -f https://data.dgl.ai/wheels/{cuda_version}/repo.html")
+                print("[DL]   pip install dgl --no-index -f https://data.dgl.ai/wheels/repo.html")
         except Exception as e:
-            print(f"[DL] DGL CPU版本安装失败: {e}")
+            print(f"[DL] DGL安装过程异常: {e}")
 
     def _load_esm_model(self):
         if self._esm_loaded:
