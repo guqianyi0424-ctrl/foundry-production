@@ -413,28 +413,18 @@ class HotspotPredictor:
     def _try_install_autogluon(self):
         try:
             import subprocess
-            print("[ML] 安装 autogluon.tabular[all]==0.8.2 ...")
+            print("[ML] 安装 autogluon.tabular[all]==0.8.2 (--no-deps)...")
             subprocess.check_call([
                 sys.executable, '-m', 'pip', 'install',
                 'autogluon.tabular[all]==0.8.2',
+                '--no-deps',
                 '--quiet',
-                '-i', 'https://pypi.tuna.tsinghua.edu.cn/simple',
             ], timeout=300)
             print("[ML] autogluon安装完成")
         except subprocess.TimeoutExpired:
             print("[ML] autogluon安装超时")
         except Exception as e:
             print(f"[ML] autogluon安装失败: {e}")
-            try:
-                import subprocess
-                print("[ML] 尝试安装最新版autogluon...")
-                subprocess.check_call([
-                    sys.executable, '-m', 'pip', 'install',
-                    'autogluon',
-                    '--quiet',
-                ], timeout=300)
-            except Exception as e2:
-                print(f"[ML] autogluon安装失败: {e2}")
 
     def _detect_cuda_version(self):
         try:
