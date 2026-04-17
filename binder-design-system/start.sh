@@ -14,11 +14,8 @@ if command -v conda &>/dev/null; then
     echo "检测到Conda，使用环境: $CONDA_ENV_NAME"
 
     if ! conda env list | grep -q "^$CONDA_ENV_NAME "; then
-        echo "Conda环境不存在，从environment.yml创建..."
-        conda env create -f environment.yml -n "$CONDA_ENV_NAME" 2>/dev/null || {
-            echo "environment.yml创建失败，尝试手动安装..."
-            conda create -n "$CONDA_ENV_NAME" python=3.10 -y 2>/dev/null
-        }
+        echo "Conda环境不存在，创建Python 3.10环境..."
+        conda create -n "$CONDA_ENV_NAME" python=3.10 -y 2>/dev/null
     fi
 
     eval "$(conda shell.bash hook 2>/dev/null)"
@@ -36,27 +33,31 @@ else
     fi
 fi
 
-if ! pip list 2>/dev/null | grep -q streamlit; then
-    echo "安装基础依赖..."
-    pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple 2>/dev/null || pip install -r requirements.txt
-fi
+echo "[1/4] 安装基础依赖..."
+pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple 2>/dev/null || pip install -r requirements.txt
 
-echo "检查AutoGluon..."
+echo "[2/4] 安装AutoGluon 0.8.2 (跳过依赖检查避免torch版本冲突)..."
 if ! python -c "import autogluon.tabular; print('AutoGluon版本:', autogluon.tabular.__version__)" 2>/dev/null; then
-    echo "AutoGluon未安装，安装0.8.2版本..."
-    pip install "autogluon.tabular[all]==0.8.2" -i https://pypi.tuna.tsinghua.edu.cn/simple 2>/dev/null || \
-    pip install "autogluon.tabular[all]==0.8.2" 2>/dev/null || \
-    pip install autogluon 2>/dev/null || true
+    echo "AutoGluon未安装，使用--no-deps安装0.8.2..."
+    pip install "autogluon.tabular[all]==0.8.2" --no-deps -i https://pypi.tuna.tsinghua.edu.cn/simple 2>/dev/null || \
+    pip install "autogluon.tabular[all]==0.8.2" --no-deps 2>/dev/null
+
     if python -c "import autogluon.tabular" 2>/dev/null; then
         echo "✅ AutoGluon安装成功"
     else
-        echo "⚠️ AutoGluon安装失败，ML模型将不可用"
+        echo "⚠️ AutoGluon安装失败，尝试不带[all]..."
+        pip install "autogluon.tabular==0.8.2" --no-deps 2>/dev/null
+        if python -c "import autogluon.tabular" 2>/dev/null; then
+            echo "✅ AutoGluon安装成功(不含all额外依赖)"
+        else
+            echo "⚠️ AutoGluon安装失败，ML模型将不可用"
+        fi
     fi
 else
     echo "AutoGluon已可用"
 fi
 
-echo "检查DGL兼容性..."
+echo "[3/4] 检查DGL兼容性..."
 export DGL_DOWNLOAD=1
 export DGLBACKEND=pytorch
 
@@ -130,11 +131,18 @@ else
     echo "DGL已可用"
 fi
 
+echo "[4/4] 创建目录并启动..."
 mkdir -p outputs data models
 
 PORT=${STREAMLIT_PORT:-8501}
 
-echo "启动应用: http://0.0.0.0:$PORT"
+echo ""
+echo "=========================================="
+echo "  系统已启动!"
+echo "  访问地址: http://0.0.0.0:$PORT"
+echo "=========================================="
+echo ""
+
 streamlit run app/main.py \
     --server.port $PORT \
     --server.address 0.0.0.0 \
