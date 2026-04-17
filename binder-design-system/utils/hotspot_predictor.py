@@ -411,6 +411,15 @@ class HotspotPredictor:
         return self._ml_predictor
 
     def _try_install_autogluon(self):
+        py_ver = sys.version_info
+        if py_ver >= (3, 11):
+            print(f"[ML] ❌ Python {py_ver.major}.{py_ver.minor} >= 3.11, AutoGluon 0.8.2 需要 Python 3.8-3.10")
+            print("[ML] 请使用 conda 创建 Python 3.10 环境:")
+            print("[ML]   conda create -n binder-design python=3.10 -y")
+            print("[ML]   conda activate binder-design")
+            print("[ML]   pip install 'autogluon.tabular[all]==0.8.2' --no-deps")
+            return
+
         try:
             import subprocess
             print("[ML] 安装 autogluon.tabular[all]==0.8.2 (--no-deps)...")
@@ -538,7 +547,21 @@ class HotspotPredictor:
                 self._dl_models = {}
 
         except ImportError as e:
+            err_msg = str(e)
             print(f"[DL] 依赖未安装: {e}")
+            if 'torchdata' in err_msg or 'datapipes' in err_msg:
+                print("[DL] 尝试安装torchdata...")
+                try:
+                    import subprocess
+                    subprocess.check_call([
+                        sys.executable, '-m', 'pip', 'install',
+                        'torchdata==0.7.1', '--quiet',
+                    ], timeout=120)
+                    print("[DL] torchdata安装完成，重新加载DL模型...")
+                    self._dl_loaded = False
+                    return self._load_dl_models()
+                except Exception as te:
+                    print(f"[DL] torchdata安装失败: {te}")
             self._dl_models = {}
         except OSError as e:
             err_msg = str(e)

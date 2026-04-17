@@ -1,5 +1,4 @@
 #!/bin/bash
-set -e
 
 echo "=========================================="
 echo "蛋白质Binder设计系统 - 快速启动"
@@ -10,41 +9,43 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
 CONDA_ENV_NAME="binder-design"
+CONDA_PYTHON="$HOME/miniconda3/envs/$CONDA_ENV_NAME/bin/python"
+CONDA_PIP="$HOME/miniconda3/envs/$CONDA_ENV_NAME/bin/pip"
 
-PYTHON_VERSION=$(python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>/dev/null || echo "0.0")
-echo "系统Python版本: $PYTHON_VERSION"
-
-NEED_CONDA=false
-if python -c "import sys; exit(0 if sys.version_info < (3, 11) else 1)" 2>/dev/null; then
-    :
-else
-    echo "⚠️ 系统Python ${PYTHON_VERSION} >= 3.11, AutoGluon 0.8.2 需要 Python < 3.11"
-    NEED_CONDA=true
+if ! command -v conda &>/dev/null; then
+    if [ -f "$HOME/miniconda3/bin/conda" ]; then
+        export PATH="$HOME/miniconda3/bin:$PATH"
+    else
+        echo "安装Miniconda..."
+        wget -q https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O /tmp/miniconda.sh
+        bash /tmp/miniconda.sh -b -p "$HOME/miniconda3" 2>/dev/null
+        rm -f /tmp/miniconda.sh
+        export PATH="$HOME/miniconda3/bin:$PATH"
+        conda init bash 2>/dev/null
+        echo "✅ Miniconda安装完成"
+    fi
 fi
 
-if [ "$NEED_CONDA" = true ]; then
-    if ! command -v conda &>/dev/null; then
-        echo "❌ 需要Conda但未安装! AutoGluon 0.8.2需要Python 3.8-3.10"
-        echo "请先安装Miniconda:"
-        echo "  wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh"
-        echo "  bash Miniconda3-latest-Linux-x86_64.sh -b"
-        echo "  eval \"\$(~/miniconda3/bin/conda shell.bash hook)\""
-        exit 1
-    fi
+eval "$(conda shell.bash hook 2>/dev/null)"
 
-    echo "使用Conda创建Python 3.10环境: $CONDA_ENV_NAME"
-
-    if ! conda env list 2>/dev/null | grep -q "^$CONDA_ENV_NAME "; then
-        echo "创建新环境..."
-        conda create -n "$CONDA_ENV_NAME" python=3.10 -y
-    fi
-
-    eval "$(conda shell.bash hook 2>/dev/null)"
-    conda activate "$CONDA_ENV_NAME"
-
-    NEW_VER=$(python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
-    echo "✅ Conda环境已激活: $CONDA_ENV_NAME (Python $NEW_VER)"
+if ! conda env list 2>/dev/null | grep -q "^$CONDA_ENV_NAME "; then
+    echo "创建Python 3.10环境: $CONDA_ENV_NAME"
+    conda create -n "$CONDA_ENV_NAME" python=3.10 -y 2>/dev/null
 fi
+
+conda activate "$CONDA_ENV_NAME" 2>/dev/null
+
+PY_VER=$(python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
+if [ "$PY_VER" != "3.10" ]; then
+    echo "❌ Python版本错误: $PY_VER (需要3.10)"
+    echo "删除旧环境并重新创建..."
+    conda deactivate 2>/dev/null
+    conda env remove -n "$CONDA_ENV_NAME" -y 2>/dev/null
+    conda create -n "$CONDA_ENV_NAME" python=3.10 -y 2>/dev/null
+    conda activate "$CONDA_ENV_NAME" 2>/dev/null
+    PY_VER=$(python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
+fi
+echo "✅ Python版本: $PY_VER"
 
 echo ""
 echo "[1/4] 安装基础依赖..."
@@ -53,11 +54,10 @@ pip install -r requirements.txt
 
 echo ""
 echo "[2/4] 安装AutoGluon 0.8.2..."
-if python -c "import autogluon.tabular; print('AutoGluon版本:', autogluon.tabular.__version__)" 2>/dev/null; then
+if python -c "import autogluon.tabular" 2>/dev/null; then
     echo "AutoGluon已可用"
 else
-    echo "使用--no-deps安装 (绕过torch<1.14约束)..."
-    pip install "autogluon.tabular[all]==0.8.2" --no-deps -i https://pypi.tuna.tsinghua.edu.cn/simple 2>/dev/null || \
+    echo "使用--no-deps安装..."
     pip install "autogluon.tabular[all]==0.8.2" --no-deps 2>/dev/null || \
     pip install "autogluon.tabular==0.8.2" --no-deps 2>/dev/null
 
@@ -69,15 +69,13 @@ else
 fi
 
 echo ""
-echo "[3/4] 检查DGL..."
+echo "[3/4] 安装DGL..."
 export DGL_DOWNLOAD=1
 export DGLBACKEND=pytorch
 
-if python -c "import dgl; print('DGL版本:', dgl.__version__)" 2>/dev/null; then
+if python -c "import dgl" 2>/dev/null; then
     echo "DGL已可用"
 else
-    echo "DGL不可用，尝试安装..."
-
     CUDA_VER=""
     if python -c "import torch; v=torch.version.cuda; assert v" 2>/dev/null; then
         CUDA_VER=$(python -c "
@@ -89,7 +87,6 @@ if cv:
     if major >= 12: print('cu121')
     elif major == 11 and minor >= 8: print('cu118')
     elif major == 11: print('cu117')
-    else: print(f'cu{major}{minor}')
 " 2>/dev/null)
     fi
 
@@ -97,25 +94,15 @@ if cv:
     DGL_INSTALLED=false
 
     if [ -n "$CUDA_VER" ]; then
-        echo "检测到CUDA: $CUDA_VER"
+        echo "PyTorch CUDA: $CUDA_VER, 安装匹配DGL..."
         pip install dgl -f "https://data.dgl.ai/wheels/$CUDA_VER/repo.html" --quiet 2>/dev/null
         python -c "import dgl" 2>/dev/null && DGL_INSTALLED=true
     fi
 
     if [ "$DGL_INSTALLED" = false ]; then
+        echo "尝试DGL CPU版本..."
         pip uninstall dgl -y 2>/dev/null || true
-        pip install dgl --no-index -f https://data.dgl.ai/wheels/repo.html --quiet 2>/dev/null
-        python -c "import dgl" 2>/dev/null && DGL_INSTALLED=true
-    fi
-
-    if [ "$DGL_INSTALLED" = false ]; then
-        pip uninstall dgl -y 2>/dev/null || true
-        pip install dgl -f https://data.dgl.ai/wheels/repo.html --quiet 2>/dev/null || true
-        python -c "import dgl" 2>/dev/null && DGL_INSTALLED=true
-    fi
-
-    if [ "$DGL_INSTALLED" = false ]; then
-        pip uninstall dgl -y 2>/dev/null || true
+        pip install dgl -f https://data.dgl.ai/wheels/repo.html --quiet 2>/dev/null || \
         pip install dgl --quiet 2>/dev/null || true
         python -c "import dgl" 2>/dev/null && DGL_INSTALLED=true
     fi
