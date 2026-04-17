@@ -1,15 +1,15 @@
 """
 热点残基预测工具
-集成 ppihotspotid (ML) 和 hotspot-prediction (DL) 两个模型
-DL模型: 5折集成推理 (5-fold ensemble)
+集成 ppihotspotid (ML - AutoGluon 14模型集成) 和 hotspot-prediction (DL - GAT+ESM-2)
+ML: TabularPredictor.load() 加载完整AutoGluon集成 (13 L1基础模型 + 1 L2加权集成 = 62子模型)
+DL: 5折集成推理 (5-fold ensemble)
 支持 Top-K 选择策略
 """
 import os
 import sys
-import tempfile
 import numpy as np
 from pathlib import Path
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Dict, List, Optional, Any
 
 import pandas as pd
 
@@ -70,50 +70,48 @@ class HotspotPredictor:
             fallback = self._rule_based_predict(residues)
             return self._select_top_k(fallback, residues, "rule")
 
-    _TY_TO_OHE_COL = {
-        'ACE': 1, 'ALA': 2, 'ARG': 3, 'ASN': 4, 'ASP': 5,
-        'CYS': 6, 'GLN': 7, 'GLU': 8, 'GLY': 9, 'HIS': 10,
-        'ILE': 11, 'LEU': 12, 'LYS': 13, 'MET': 14, 'NME': 15,
-        'PHE': 16, 'PRO': 17, 'SER': 18, 'THR': 19, 'TRP': 20,
-        'TYR': 21
-    }
-    _ML_NUM_FEATURES = 25
-    _ML_OHE_DIM = 22
-    _ML_NUM_COLS = 3
-
     def _predict_ml(self, residues: pd.DataFrame) -> Dict[str, Any]:
-        xgb_models = self._load_ml_predictor()
+        predictor = self._load_ml_predictor()
 
-        if xgb_models:
+        if predictor is not None:
             try:
-                import xgboost as xgb
+                pred_data = pd.DataFrame({
+                    'Ty': residues['res_name'].values,
+                    'cons': residues['conservation'].values,
+                    'sasa': residues['sasa'].values,
+                    'gas_e': residues['energy'].values,
+                })
 
-                n = len(residues)
-                features = np.zeros((n, self._ML_NUM_FEATURES), dtype=np.float32)
+                predictions = predictor.predict(pred_data)
 
-                for i, row in residues.iterrows():
-                    ty = row['res_name']
-                    col = self._TY_TO_OHE_COL.get(ty, 0)
-                    features[i, col] = 1.0
-                    features[i, self._ML_OHE_DIM] = row['conservation']
-                    features[i, self._ML_OHE_DIM + 1] = row['sasa']
-                    features[i, self._ML_OHE_DIM + 2] = row['energy']
+                label_map = predictor.class_labels_internal_dict
+                pos_label = None
+                for label, idx in label_map.items():
+                    if str(label).upper() == 'P':
+                        pos_label = idx
+                        break
 
-                all_probs = []
-                feature_names = [f"f{i}" for i in range(self._ML_NUM_FEATURES)]
-                dmatrix = xgb.DMatrix(features, feature_names=feature_names)
-                for fold_name, model in xgb_models.items():
-                    proba = model.predict(dmatrix, validate_features=False)
-                    all_probs.append(proba)
+                if pos_label is None and len(label_map) == 2:
+                    pos_label = 1
 
-                scores = np.mean(all_probs, axis=0)
+                if pos_label is not None:
+                    try:
+                        pred_proba = predictor.predict_proba(pred_data)
+                        if pred_proba.shape[1] > pos_label:
+                            scores = pred_proba.iloc[:, pos_label].values
+                        else:
+                            scores = (predictions == list(label_map.keys())[list(label_map.values()).index(pos_label)]).astype(float)
+                    except Exception:
+                        scores = (predictions == list(label_map.keys())[list(label_map.values()).index(pos_label)]).astype(float)
+                else:
+                    scores = predictions.astype(float).values
 
-                n_models = len(xgb_models)
-                print(f"[ML] XGBoost预测完成 ({n_models}折集成)")
+                n_models = len(predictor.model_names()) if hasattr(predictor, 'model_names') else 0
+                print(f"[ML] AutoGluon预测完成 ({n_models}个模型集成)")
                 return {"scores": scores, "method": "ml", "model_loaded": True}
 
             except Exception as e:
-                print(f"[ML] XGBoost预测失败: {e}")
+                print(f"[ML] AutoGluon预测失败: {e}")
                 import traceback
                 traceback.print_exc()
 
@@ -135,13 +133,16 @@ class HotspotPredictor:
                     node_features = self._build_node_features(residues, esm_features)
                     g = self._build_graph(atom_array, residues)
 
+                    device = next(iter(dl_models.values())).input_proj[0].weight.device
+
                     all_probs = []
                     with torch.no_grad():
-                        node_features_tensor = torch.tensor(node_features, dtype=torch.float32)
+                        node_features_tensor = torch.tensor(node_features, dtype=torch.float32).to(device)
+                        g = g.to(device)
                         for fold_name, model in dl_models.items():
                             logits = model(g, node_features_tensor)
                             probs = torch.softmax(logits, dim=1)
-                            all_probs.append(probs[:, 1].numpy())
+                            all_probs.append(probs[:, 1].cpu().numpy())
 
                     scores = np.mean(all_probs, axis=0)
                     n_models = len(dl_models)
@@ -329,49 +330,80 @@ class HotspotPredictor:
 
         return scores
 
-    def _load_ml_predictor(self) -> Dict[str, Any]:
+    def _load_ml_predictor(self):
         if self._ml_loaded:
             return self._ml_predictor
 
         try:
-            import xgboost as xgb
+            from autogluon.tabular import TabularPredictor
 
-            xgb_dir = self.ml_model_path / "models" / "XGBoost_BAG_L1"
-            if not xgb_dir.exists():
-                print(f"[ML] XGBoost模型目录不存在: {xgb_dir}")
-                self._ml_predictor = {}
+            if not self.ml_model_path.exists():
+                print(f"[ML] AutoGluon模型目录不存在: {self.ml_model_path}")
+                self._ml_predictor = None
                 self._ml_loaded = True
                 return self._ml_predictor
 
-            self._ml_predictor = {}
-            for fold_dir in sorted(xgb_dir.iterdir()):
-                if not fold_dir.is_dir():
-                    continue
-                xgb_file = fold_dir / "xgb.ubj"
-                if xgb_file.exists():
-                    try:
-                        model = xgb.Booster()
-                        model.load_model(str(xgb_file))
-                        self._ml_predictor[fold_dir.name] = model
-                        print(f"[ML] XGBoost {fold_dir.name} 加载成功")
-                    except Exception as e:
-                        print(f"[ML] XGBoost {fold_dir.name} 加载失败: {e}")
+            print(f"[ML] 加载AutoGluon集成模型: {self.ml_model_path}")
+            self._ml_predictor = TabularPredictor.load(
+                str(self.ml_model_path),
+                require_version_match=False,
+                require_py_version_match=False,
+            )
 
-            if self._ml_predictor:
-                n = len(self._ml_predictor)
-                print(f"[ML] XGBoost模型加载完成 ({n}折)")
-            else:
-                print("[ML] 没有可用的XGBoost模型")
+            model_names = self._ml_predictor.model_names()
+            n_models = len(model_names)
+            print(f"[ML] AutoGluon模型加载成功 ({n_models}个模型: {', '.join(model_names)})")
 
         except ImportError:
-            print("[ML] xgboost未安装，跳过ML模型")
-            self._ml_predictor = {}
+            print("[ML] autogluon未安装，尝试安装...")
+            self._try_install_autogluon()
+            try:
+                from autogluon.tabular import TabularPredictor
+                self._ml_predictor = TabularPredictor.load(
+                    str(self.ml_model_path),
+                    require_version_match=False,
+                    require_py_version_match=False,
+                )
+                model_names = self._ml_predictor.model_names()
+                n_models = len(model_names)
+                print(f"[ML] AutoGluon模型加载成功 ({n_models}个模型: {', '.join(model_names)})")
+            except Exception as e2:
+                print(f"[ML] AutoGluon安装后仍无法加载: {e2}")
+                self._ml_predictor = None
         except Exception as e:
-            print(f"[ML] 模型加载失败: {e}")
-            self._ml_predictor = {}
+            print(f"[ML] AutoGluon模型加载失败: {e}")
+            import traceback
+            traceback.print_exc()
+            self._ml_predictor = None
 
         self._ml_loaded = True
         return self._ml_predictor
+
+    def _try_install_autogluon(self):
+        try:
+            import subprocess
+            print("[ML] 安装 autogluon.tabular[all]==0.8.2 ...")
+            subprocess.check_call([
+                sys.executable, '-m', 'pip', 'install',
+                'autogluon.tabular[all]==0.8.2',
+                '--quiet',
+                '-i', 'https://pypi.tuna.tsinghua.edu.cn/simple',
+            ], timeout=300)
+            print("[ML] autogluon安装完成")
+        except subprocess.TimeoutExpired:
+            print("[ML] autogluon安装超时")
+        except Exception as e:
+            print(f"[ML] autogluon安装失败: {e}")
+            try:
+                import subprocess
+                print("[ML] 尝试安装最新版autogluon...")
+                subprocess.check_call([
+                    sys.executable, '-m', 'pip', 'install',
+                    'autogluon',
+                    '--quiet',
+                ], timeout=300)
+            except Exception as e2:
+                print(f"[ML] autogluon安装失败: {e2}")
 
     def _load_dl_models(self) -> Dict[str, Any]:
         if self._dl_loaded:
@@ -379,14 +411,25 @@ class HotspotPredictor:
 
         os.environ.setdefault('DGLBACKEND', 'pytorch')
         os.environ.setdefault('DGL_DOWNLOAD', '1')
-        os.environ['CUDA_VISIBLE_DEVICES'] = ''
 
         try:
             import torch
+
+            has_cuda = torch.cuda.is_available()
+            device = torch.device('cuda' if has_cuda else 'cpu')
+            print(f"[DL] PyTorch设备: {device}" + (f" ({torch.cuda.get_device_name(0)})" if has_cuda else ""))
+
             torch.set_num_threads(min(4, os.cpu_count() or 4))
 
             try:
                 import dgl
+                if has_cuda:
+                    try:
+                        dgl_d = dgl.device('cuda:0')
+                        print(f"[DL] DGL CUDA可用")
+                    except Exception:
+                        print(f"[DL] DGL CUDA不可用，使用CPU")
+                print(f"[DL] DGL版本: {dgl.__version__}")
             except OSError as e:
                 err_msg = str(e)
                 if 'libcusparseLt' in err_msg or 'cuda' in err_msg.lower() or 'cusparse' in err_msg.lower():
@@ -394,6 +437,7 @@ class HotspotPredictor:
                     self._try_dgl_cpu_fallback()
                     try:
                         import dgl
+                        print(f"[DL] DGL CPU版本加载成功: {dgl.__version__}")
                     except OSError as e2:
                         print(f"[DL] CPU版DGL仍无法加载: {e2}")
                         self._dl_models = {}
@@ -421,16 +465,20 @@ class HotspotPredictor:
                         )
 
                         try:
-                            state_dict = torch.load(str(model_file), map_location='cpu', weights_only=True)
+                            state_dict = torch.load(str(model_file), map_location=device, weights_only=True)
                         except TypeError:
-                            state_dict = torch.load(str(model_file), map_location='cpu')
+                            state_dict = torch.load(str(model_file), map_location=device)
+                        except RuntimeError:
+                            state_dict = torch.load(str(model_file), map_location='cpu', weights_only=False)
+
                         if 'model_state_dict' in state_dict:
                             model.load_state_dict(state_dict['model_state_dict'])
                         else:
                             model.load_state_dict(state_dict)
                         model.eval()
+                        model = model.to(device)
                         self._dl_models[f"fold{fold_idx}"] = model
-                        print(f"[DL] Fold {fold_idx} 模型加载成功")
+                        print(f"[DL] Fold {fold_idx} 模型加载成功 (device={device})")
                     except Exception as e:
                         print(f"[DL] Fold {fold_idx} 加载失败: {e}")
                 else:
@@ -446,9 +494,9 @@ class HotspotPredictor:
         except OSError as e:
             err_msg = str(e)
             if 'libcusparseLt' in err_msg or 'cuda' in err_msg.lower():
-                print(f"[DL] CUDA库缺失({e.__class__.__name__})，尝试安装CPU版DGL...")
+                print(f"[DL] CUDA库缺失，尝试安装CPU版DGL...")
                 self._dl_models = {}
-                self._try_install_dgl_cpu()
+                self._try_dgl_cpu_fallback()
             else:
                 print(f"[DL] 系统库缺失: {e}")
                 self._dl_models = {}
@@ -480,10 +528,11 @@ class HotspotPredictor:
             for cmd in cpu_install_cmds:
                 try:
                     subprocess.check_call(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    test_env = {**os.environ, 'CUDA_VISIBLE_DEVICES': '', 'DGL_DOWNLOAD': '1'}
                     test = subprocess.run(
                         [sys.executable, '-c', 'import dgl; print(dgl.__version__)'],
                         capture_output=True, text=True, timeout=15,
-                        env={**os.environ, 'CUDA_VISIBLE_DEVICES': '', 'DGL_DOWNLOAD': '1'}
+                        env=test_env
                     )
                     if test.returncode == 0:
                         installed = True
@@ -503,9 +552,6 @@ class HotspotPredictor:
         except Exception as e:
             print(f"[DL] DGL CPU版本安装失败: {e}")
 
-    def _try_install_dgl_cpu(self):
-        self._try_dgl_cpu_fallback()
-
     def _load_esm_model(self):
         if self._esm_loaded:
             return self._esm_model
@@ -517,12 +563,19 @@ class HotspotPredictor:
             model_name = "facebook/esm2_t33_650M_UR50D"
             print(f"[ESM] 正在加载: {model_name}...")
 
+            has_cuda = torch.cuda.is_available()
+            device = torch.device('cuda' if has_cuda else 'cpu')
+
+            tokenizer = AutoTokenizer.from_pretrained(model_name)
+            model = AutoModel.from_pretrained(model_name).to(device)
+            model.eval()
+
             self._esm_model = {
-                'tokenizer': AutoTokenizer.from_pretrained(model_name),
-                'model': AutoModel.from_pretrained(model_name)
+                'tokenizer': tokenizer,
+                'model': model,
+                'device': device,
             }
-            self._esm_model['model'].eval()
-            print("[ESM] 模型加载成功")
+            print(f"[ESM] 模型加载成功 (device={device})")
         except ImportError:
             print("[ESM] transformers未安装，跳过ESM特征")
             self._esm_model = None
@@ -543,11 +596,13 @@ class HotspotPredictor:
         try:
             tokenizer = esm['tokenizer']
             model = esm['model']
+            device = esm['device']
 
             with torch.no_grad():
                 inputs = tokenizer(sequence, return_tensors="pt", padding=True)
+                inputs = {k: v.to(device) for k, v in inputs.items()}
                 outputs = model(**inputs)
-                embeddings = outputs.last_hidden_state[0, 1:-1].numpy()
+                embeddings = outputs.last_hidden_state[0, 1:-1].cpu().numpy()
 
             return embeddings
         except Exception as e:
@@ -590,7 +645,6 @@ class HotspotPredictor:
 
     def _build_graph(self, atom_array, residues_df: pd.DataFrame):
         import dgl
-        import torch
 
         n_residues = len(residues_df)
 
@@ -720,4 +774,4 @@ class HotspotPredictor:
         else:
             base = 0.4
 
-        return base * (0.6 + 0.4 * surface_factor) if False else base
+        return base

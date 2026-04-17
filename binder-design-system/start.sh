@@ -17,17 +17,31 @@ if ! pip list 2>/dev/null | grep -q streamlit; then
     pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple 2>/dev/null || pip install -r requirements.txt
 fi
 
+echo "检查AutoGluon..."
+if ! python -c "import autogluon.tabular; print('AutoGluon版本:', autogluon.tabular.__version__)" 2>/dev/null; then
+    echo "AutoGluon未安装，安装0.8.2版本..."
+    pip install "autogluon.tabular[all]==0.8.2" -i https://pypi.tuna.tsinghua.edu.cn/simple 2>/dev/null || \
+    pip install "autogluon.tabular[all]==0.8.2" 2>/dev/null || \
+    pip install autogluon 2>/dev/null || true
+    if python -c "import autogluon.tabular" 2>/dev/null; then
+        echo "✅ AutoGluon安装成功"
+    else
+        echo "⚠️ AutoGluon安装失败，ML模型将不可用"
+    fi
+else
+    echo "AutoGluon已可用"
+fi
+
 echo "检查DGL兼容性..."
-export CUDA_VISIBLE_DEVICES=""
 export DGL_DOWNLOAD=1
 export DGLBACKEND=pytorch
 
 if ! python -c "import dgl; print('DGL版本:', dgl.__version__)" 2>/dev/null; then
-    echo "DGL不可用，尝试安装CPU版本..."
+    echo "DGL不可用，尝试安装..."
 
     pip uninstall dgl -y 2>/dev/null || true
 
-    echo "尝试方式1: --no-index (仅从DGL仓库安装CPU版)..."
+    echo "尝试方式1: --no-index (仅从DGL仓库安装)..."
     pip install dgl --no-index -f https://data.dgl.ai/wheels/repo.html 2>/dev/null
 
     if ! python -c "import dgl; print('DGL版本:', dgl.__version__)" 2>/dev/null; then
@@ -49,12 +63,6 @@ if ! python -c "import dgl; print('DGL版本:', dgl.__version__)" 2>/dev/null; t
     fi
 else
     echo "DGL已可用"
-fi
-
-echo "检查XGBoost..."
-if ! python -c "import xgboost; print('XGBoost版本:', xgboost.__version__)" 2>/dev/null; then
-    echo "安装XGBoost..."
-    pip install xgboost -i https://pypi.tuna.tsinghua.edu.cn/simple
 fi
 
 mkdir -p outputs data models
