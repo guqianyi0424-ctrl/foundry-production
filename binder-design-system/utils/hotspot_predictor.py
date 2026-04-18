@@ -419,49 +419,52 @@ class HotspotPredictor:
             print("[ML]   conda activate binder")
             return
 
-        try:
-            import subprocess
+        import subprocess
+
+        def _pip_install(spec, no_deps=False, timeout=120):
             try:
-                import pkg_resources
-            except ImportError:
-                print("[ML] 安装 setuptools (提供 pkg_resources)...")
-                subprocess.check_call([
-                    sys.executable, '-m', 'pip', 'install',
-                    'setuptools', '--quiet',
-                ], timeout=120)
+                cmd = [sys.executable, '-m', 'pip', 'install', spec, '--quiet']
+                if no_deps:
+                    cmd.insert(4, '--no-deps')
+                subprocess.check_call(cmd, timeout=timeout)
+                return True
+            except subprocess.TimeoutExpired:
+                print(f"[ML] 安装 {spec} 超时")
+                return False
+            except Exception as e:
+                print(f"[ML] 安装 {spec} 失败: {e}")
+                return False
 
-            pkgs = [
-                'autogluon.common==0.8.2',
-                'autogluon.core==0.8.2',
-                'autogluon.features==0.8.2',
-                'autogluon.tabular==0.8.2',
-            ]
-            for pkg in pkgs:
-                print(f"[ML] 安装 {pkg} (--no-deps)...")
-                subprocess.check_call([
-                    sys.executable, '-m', 'pip', 'install',
-                    pkg, '--no-deps', '--quiet',
-                ], timeout=300)
+        try:
+            import pkg_resources
+        except ImportError:
+            print("[ML] 安装 setuptools (提供 pkg_resources)...")
+            if not _pip_install('setuptools'):
+                print("[ML] ❌ setuptools 安装失败，AutoGluon 无法加载")
+                return
 
-            compat_deps = [
-                'pandas==1.5.3',
-                'scipy==1.11.4',
-                'scikit-learn==1.2.2',
-                '"boto3>=1.10,<2"',
-                '"psutil>=5.7.3,<6"',
-            ]
-            for dep in compat_deps:
-                print(f"[ML] 安装兼容依赖 {dep}...")
-                subprocess.check_call([
-                    sys.executable, '-m', 'pip', 'install',
-                    dep, '--quiet',
-                ], timeout=120)
+        pkgs = [
+            'autogluon.common==0.8.2',
+            'autogluon.core==0.8.2',
+            'autogluon.features==0.8.2',
+            'autogluon.tabular==0.8.2',
+        ]
+        for pkg in pkgs:
+            print(f"[ML] 安装 {pkg} (--no-deps)...")
+            _pip_install(pkg, no_deps=True, timeout=300)
 
-            print("[ML] AutoGluon子包安装完成")
-        except subprocess.TimeoutExpired:
-            print("[ML] autogluon安装超时")
-        except Exception as e:
-            print(f"[ML] autogluon安装失败: {e}")
+        compat_deps = [
+            'pandas==1.5.3',
+            'scipy==1.11.4',
+            'scikit-learn==1.2.2',
+            'boto3>=1.10,<2',
+            'psutil>=5.7.3,<6',
+        ]
+        for dep in compat_deps:
+            print(f"[ML] 安装兼容依赖 {dep}...")
+            _pip_install(dep)
+
+        print("[ML] AutoGluon子包安装完成")
 
     def _detect_cuda_version(self):
         try:
