@@ -47,7 +47,7 @@ class RFD3Runner:
         ]
 
         if hotspot_str:
-            overrides.append(f"specification.hotspot_res={hotspot_str}")
+            overrides.append(f"specification.hotspot_res=[{hotspot_str}]")
         if contig:
             overrides.append(f"specification.contigmap.contigs=[{contig}]")
 

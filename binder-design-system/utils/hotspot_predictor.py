@@ -388,6 +388,16 @@ class HotspotPredictor:
             print("[ML] autogluon未安装，尝试安装...")
             self._try_install_autogluon()
             try:
+                import importlib
+                if 'pkg_resources' in sys.modules:
+                    importlib.reload(sys.modules['pkg_resources'])
+                else:
+                    import pkg_resources
+
+                for mod_name in list(sys.modules.keys()):
+                    if mod_name.startswith('autogluon'):
+                        del sys.modules[mod_name]
+
                 _patch_autogluon_compat()
                 from autogluon.tabular import TabularPredictor
                 self._ml_predictor = TabularPredictor.load(
