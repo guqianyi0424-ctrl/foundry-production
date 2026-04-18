@@ -1,6 +1,6 @@
 """
 RFDiffusion3 调用模块
-支持 Top-K 设计选择和云服务器路径
+跨 conda 环境调用: binder(Python3.10) -> foundry(Python3.12) via conda run
 """
 import os
 import subprocess
@@ -10,33 +10,32 @@ from pathlib import Path
 from typing import Dict, List, Optional, Any
 
 
+FOUNDRY_ENV = "foundry"
+
+
 class RFD3Runner:
-    """RFDiffusion3 运行器"""
 
     def __init__(self):
         self.base_path = Path(__file__).parent.parent.parent
-        self.rfd3_path = self._find_rfd3()
         self.output_dir = self.base_path / "binder-design-system" / "outputs" / "rfd3"
         self.output_dir.mkdir(parents=True, exist_ok=True)
+        self._foundry_available = None
 
-    def _find_rfd3(self) -> Optional[Path]:
-        possible = [
-            self.base_path / "RFdiffusion",
-            self.base_path / "rfdiffusion",
-            self.base_path / "RFdiffusion-main",
-            Path("/workspace/RFdiffusion"),
-            Path("/opt/RFdiffusion"),
-            Path(os.getenv("RFD3_PATH", "/nonexistent")),
-        ]
-        for p in possible:
-            if p.exists():
-                return p
-        return None
+    def _check_foundry(self) -> bool:
+        if self._foundry_available is not None:
+            return self._foundry_available
+        try:
+            result = subprocess.run(
+                ["conda", "run", "-n", FOUNDRY_ENV, "--no-banner", "rfd3", "--help"],
+                capture_output=True, text=True, timeout=30
+            )
+            self._foundry_available = result.returncode == 0
+        except Exception:
+            self._foundry_available = False
+        return self._foundry_available
 
     def is_available(self) -> bool:
-        if self.rfd3_path is None:
-            return False
-        return (self.rfd3_path / "run_inference.py").exists()
+        return self._check_foundry()
 
     def run(
         self,
@@ -46,19 +45,6 @@ class RFD3Runner:
         num_designs: int = 3,
         job_id: str = "default"
     ) -> Dict[str, Any]:
-        """
-        运行RFDiffusion3生成Binder主链
-
-        Args:
-            target_pdb: 目标蛋白PDB文件路径
-            hotspot_residues: 热点残基列表 (如 ["A45", "A67"])
-            binder_length: Binder长度 (aa)
-            num_designs: 生成数量 (Top-K)
-            job_id: 任务ID
-
-        Returns:
-            结果字典，包含Top-K设计
-        """
         job_dir = self.output_dir / job_id
         job_dir.mkdir(parents=True, exist_ok=True)
 
@@ -68,16 +54,19 @@ class RFD3Runner:
         contig = f"A{binder_length}"
         hotspot_str = ",".join(hotspot_residues) if hotspot_residues else ""
 
-        cmd = [
-            "python", str(self.rfd3_path / "run_inference.py"),
-            "--pdb", target_pdb,
-            "--contigmap.contigs", contig,
-            "--inference.num_designs", str(num_designs),
-            "--output_dir", str(job_dir),
+        overrides = [
+            f"inputs={target_pdb}",
+            f"out_dir={job_dir}",
+            f"diffusion_batch_size={num_designs}",
+            "n_batches=1",
         ]
 
         if hotspot_str:
-            cmd.extend(["--hotspot_residues", hotspot_str])
+            overrides.append(f"specification.hotspot_res={hotspot_str}")
+        if contig:
+            overrides.append(f"specification.contigmap.contigs=[{contig}]")
+
+        cmd = ["conda", "run", "-n", FOUNDRY_ENV, "--no-banner", "rfd3", "design"] + overrides
 
         try:
             result = subprocess.run(
@@ -85,7 +74,6 @@ class RFD3Runner:
                 capture_output=True,
                 text=True,
                 timeout=1800,
-                env={**os.environ, "PYTHONPATH": str(self.rfd3_path)}
             )
 
             if result.returncode != 0:
@@ -111,7 +99,9 @@ class RFD3Runner:
             return {"success": False, "error": str(e), "designs": []}
 
     def _collect_results(self, job_dir: Path) -> List[Dict]:
-        design_files = sorted(glob.glob(str(job_dir / "*.pdb")))
+        design_files = sorted(glob.glob(str(job_dir / "**/*.pdb"), recursive=True))
+        if not design_files:
+            design_files = sorted(glob.glob(str(job_dir / "*.pdb")))
         designs = []
         for i, pdb_path in enumerate(design_files):
             plddt = self._parse_plddt_from_pdb(pdb_path)
@@ -124,7 +114,6 @@ class RFD3Runner:
         return designs
 
     def _rank_and_select_top_k(self, designs: List[Dict], top_k: int) -> List[Dict]:
-        """按pLDDT排序并选取Top-K"""
         designs.sort(key=lambda x: x.get("plddt", 0), reverse=True)
         selected = designs[:top_k]
         for i, d in enumerate(selected):
@@ -132,7 +121,6 @@ class RFD3Runner:
         return selected
 
     def _parse_plddt_from_pdb(self, pdb_path: str) -> float:
-        """从PDB文件中解析pLDDT分数"""
         try:
             scores = []
             with open(pdb_path, "r") as f:

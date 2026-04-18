@@ -1,5 +1,6 @@
 """
 RoseTTAFold3 调用模块
+跨 conda 环境调用: binder(Python3.10) -> foundry(Python3.12) via conda run
 支持结构预测和RMSD验证
 """
 import os
@@ -10,50 +11,38 @@ from pathlib import Path
 from typing import Dict, List, Optional, Any
 
 
+FOUNDRY_ENV = "foundry"
+
+
 class RF3Runner:
-    """RoseTTAFold3 运行器"""
 
     def __init__(self):
         self.base_path = Path(__file__).parent.parent.parent
-        self.rf3_path = self._find_rf3()
         self.output_dir = self.base_path / "binder-design-system" / "outputs" / "rf3"
         self.output_dir.mkdir(parents=True, exist_ok=True)
+        self._foundry_available = None
 
-    def _find_rf3(self) -> Optional[Path]:
-        possible = [
-            self.base_path / "RoseTTAFold3",
-            self.base_path / "rosettafold3",
-            self.base_path / "RF3",
-            Path("/workspace/RoseTTAFold3"),
-            Path("/opt/RoseTTAFold3"),
-            Path(os.getenv("RF3_PATH", "/nonexistent")),
-        ]
-        for p in possible:
-            if p.exists():
-                return p
-        return None
+    def _check_foundry(self) -> bool:
+        if self._foundry_available is not None:
+            return self._foundry_available
+        try:
+            result = subprocess.run(
+                ["conda", "run", "-n", FOUNDRY_ENV, "--no-banner", "rf3", "--help"],
+                capture_output=True, text=True, timeout=30
+            )
+            self._foundry_available = result.returncode == 0
+        except Exception:
+            self._foundry_available = False
+        return self._foundry_available
 
     def is_available(self) -> bool:
-        if self.rf3_path is None:
-            return False
-        return (self.rf3_path / "run_rf3.py").exists() or \
-               (self.rf3_path / "predict.py").exists()
+        return self._check_foundry()
 
     def run(
         self,
         sequence: str,
         job_id: str = "default"
     ) -> Dict[str, Any]:
-        """
-        运行RoseTTAFold3预测结构
-
-        Args:
-            sequence: 氨基酸序列
-            job_id: 任务ID
-
-        Returns:
-            结果字典
-        """
         job_dir = self.output_dir / job_id
         job_dir.mkdir(parents=True, exist_ok=True)
 
@@ -64,14 +53,11 @@ class RF3Runner:
         if not self.is_available():
             return self._mock_run(sequence, job_dir)
 
-        run_script = self.rf3_path / "run_rf3.py"
-        if not run_script.exists():
-            run_script = self.rf3_path / "predict.py"
-
         cmd = [
-            "python", str(run_script),
-            "--input", str(fasta_path),
-            "--output_dir", str(job_dir),
+            "conda", "run", "-n", FOUNDRY_ENV, "--no-banner",
+            "rf3", "fold",
+            f"inputs={fasta_path}",
+            f"out_dir={job_dir}",
         ]
 
         try:
@@ -80,7 +66,6 @@ class RF3Runner:
                 capture_output=True,
                 text=True,
                 timeout=3600,
-                env={**os.environ, "PYTHONPATH": str(self.rf3_path)}
             )
 
             if result.returncode != 0:
@@ -90,7 +75,9 @@ class RF3Runner:
                     "pdb_path": None
                 }
 
-            pdb_files = sorted(glob.glob(str(job_dir / "*.pdb")))
+            pdb_files = sorted(glob.glob(str(job_dir / "**/*.pdb"), recursive=True))
+            if not pdb_files:
+                pdb_files = sorted(glob.glob(str(job_dir / "*.pdb")))
             if not pdb_files:
                 return {"success": False, "error": "未生成PDB文件", "pdb_path": None}
 
@@ -113,7 +100,9 @@ class RF3Runner:
             return {"success": False, "error": str(e), "pdb_path": None}
 
     def _parse_pae(self, job_dir: Path) -> Optional[List[List[float]]]:
-        json_files = glob.glob(str(job_dir / "*pae*.json"))
+        json_files = glob.glob(str(job_dir / "**/*pae*.json"), recursive=True)
+        if not json_files:
+            json_files = glob.glob(str(job_dir / "*pae*.json"))
         if json_files:
             try:
                 with open(json_files[0], "r") as f:
@@ -123,7 +112,9 @@ class RF3Runner:
         return None
 
     def _parse_plddt(self, job_dir: Path) -> Optional[List[float]]:
-        json_files = glob.glob(str(job_dir / "*plddt*.json"))
+        json_files = glob.glob(str(job_dir / "**/*plddt*.json"), recursive=True)
+        if not json_files:
+            json_files = glob.glob(str(job_dir / "*plddt*.json"))
         if json_files:
             try:
                 with open(json_files[0], "r") as f:
@@ -182,7 +173,6 @@ class RF3Runner:
 
     @staticmethod
     def calculate_rmsd(pdb1_path: str, pdb2_path: str) -> float:
-        """计算两个PDB结构的RMSD (Kabsch算法)"""
         try:
             import numpy as np
 
@@ -231,7 +221,6 @@ class RF3Runner:
 
     @staticmethod
     def calculate_per_residue_rmsd(pdb1_path: str, pdb2_path: str) -> List[float]:
-        """计算每个残基的RMSD"""
         try:
             import numpy as np
 
@@ -282,18 +271,6 @@ class RF3Runner:
         job_id: str = "default",
         rmsd_threshold: float = 2.0
     ) -> Dict[str, Any]:
-        """
-        完整验证流程: RF3预测 + RMSD计算
-
-        Args:
-            backbone_pdb: RFD3生成的主链PDB
-            sequence: MPNN设计的序列
-            job_id: 任务ID
-            rmsd_threshold: RMSD阈值
-
-        Returns:
-            验证结果字典
-        """
         rf3_result = self.run(sequence, job_id)
 
         if not rf3_result["success"]:
