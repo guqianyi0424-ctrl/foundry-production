@@ -9,8 +9,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
 CONDA_ENV_NAME="binder-design"
-CONDA_PYTHON="$HOME/miniconda3/envs/$CONDA_ENV_NAME/bin/python"
-CONDA_PIP="$HOME/miniconda3/envs/$CONDA_ENV_NAME/bin/pip"
 
 if ! command -v conda &>/dev/null; then
     if [ -f "$HOME/miniconda3/bin/conda" ]; then
@@ -30,7 +28,7 @@ eval "$(conda shell.bash hook 2>/dev/null)"
 
 if ! conda env list 2>/dev/null | grep -q "^$CONDA_ENV_NAME "; then
     echo "创建Python 3.10环境: $CONDA_ENV_NAME"
-    conda create -n "$CONDA_ENV_NAME" python=3.10 -y 2>/dev/null
+    conda create -n "$CONDA_ENV_NAME" python=3.10 -y
 fi
 
 conda activate "$CONDA_ENV_NAME" 2>/dev/null
@@ -41,7 +39,7 @@ if [ "$PY_VER" != "3.10" ]; then
     echo "删除旧环境并重新创建..."
     conda deactivate 2>/dev/null
     conda env remove -n "$CONDA_ENV_NAME" -y 2>/dev/null
-    conda create -n "$CONDA_ENV_NAME" python=3.10 -y 2>/dev/null
+    conda create -n "$CONDA_ENV_NAME" python=3.10 -y
     conda activate "$CONDA_ENV_NAME" 2>/dev/null
     PY_VER=$(python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
 fi
@@ -49,22 +47,25 @@ echo "✅ Python版本: $PY_VER"
 
 echo ""
 echo "[1/4] 安装基础依赖..."
-pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple 2>/dev/null || \
+pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple || \
 pip install -r requirements.txt
 
 echo ""
 echo "[2/4] 安装AutoGluon 0.8.2..."
-if python -c "import autogluon.tabular" 2>/dev/null; then
-    echo "AutoGluon已可用"
+if python -c "from autogluon.tabular import TabularPredictor" 2>/dev/null; then
+    echo "✅ AutoGluon已可用"
 else
-    echo "使用--no-deps安装..."
-    pip install "autogluon.tabular[all]==0.8.2" --no-deps 2>/dev/null || \
-    pip install "autogluon.tabular==0.8.2" --no-deps 2>/dev/null
+    echo "安装AutoGluon子包 (--no-deps)..."
+    pip install autogluon.core==0.8.2 --no-deps && \
+    pip install autogluon.features==0.8.2 --no-deps && \
+    pip install autogluon.tabular==0.8.2 --no-deps
 
-    if python -c "import autogluon.tabular" 2>/dev/null; then
+    if python -c "from autogluon.tabular import TabularPredictor" 2>/dev/null; then
         echo "✅ AutoGluon安装成功"
     else
-        echo "⚠️ AutoGluon安装失败，ML模型将不可用"
+        echo "⚠️ AutoGluon导入失败，诊断信息:"
+        python -c "import autogluon.tabular" 2>&1 || true
+        echo "⚠️ ML模型将不可用"
     fi
 fi
 
@@ -73,9 +74,19 @@ echo "[3/4] 安装DGL..."
 export DGL_DOWNLOAD=1
 export DGLBACKEND=pytorch
 
-if python -c "import dgl" 2>/dev/null; then
-    echo "DGL已可用"
+if [ -z "$LD_LIBRARY_PATH" ]; then
+    export LD_LIBRARY_PATH="/usr/local/cuda/lib64:$HOME/miniconda3/envs/$CONDA_ENV_NAME/lib"
 else
+    export LD_LIBRARY_PATH="/usr/local/cuda/lib64:$HOME/miniconda3/envs/$CONDA_ENV_NAME/lib:$LD_LIBRARY_PATH"
+fi
+
+if python -c "import dgl; print(f'DGL {dgl.__version__}')" 2>/dev/null; then
+    echo "✅ DGL已可用"
+else
+    echo "DGL导入失败，错误信息:"
+    python -c "import dgl" 2>&1 || true
+    echo ""
+
     CUDA_VER=""
     if python -c "import torch; v=torch.version.cuda; assert v" 2>/dev/null; then
         CUDA_VER=$(python -c "
@@ -90,21 +101,42 @@ if cv:
 " 2>/dev/null)
     fi
 
-    pip uninstall dgl -y 2>/dev/null || true
     DGL_INSTALLED=false
 
     if [ -n "$CUDA_VER" ]; then
-        echo "PyTorch CUDA: $CUDA_VER, 安装匹配DGL..."
-        pip install dgl -f "https://data.dgl.ai/wheels/$CUDA_VER/repo.html" --quiet 2>/dev/null
-        python -c "import dgl" 2>/dev/null && DGL_INSTALLED=true
+        echo "PyTorch CUDA: $CUDA_VER, 安装DGL..."
+        pip install dgl==2.1.0 -f "https://data.dgl.ai/wheels/$CUDA_VER/repo.html" --no-deps
+        if python -c "import dgl" 2>/dev/null; then
+            DGL_INSTALLED=true
+        else
+            echo "DGL $CUDA_VER 导入仍失败:"
+            python -c "import dgl" 2>&1 || true
+        fi
     fi
 
     if [ "$DGL_INSTALLED" = false ]; then
-        echo "尝试DGL CPU版本..."
+        echo "尝试DGL 1.1.3 (更兼容)..."
         pip uninstall dgl -y 2>/dev/null || true
-        pip install dgl -f https://data.dgl.ai/wheels/repo.html --quiet 2>/dev/null || \
-        pip install dgl --quiet 2>/dev/null || true
-        python -c "import dgl" 2>/dev/null && DGL_INSTALLED=true
+        if [ -n "$CUDA_VER" ]; then
+            pip install dgl==1.1.3 -f "https://data.dgl.ai/wheels/$CUDA_VER/repo.html" --no-deps
+        else
+            pip install dgl==1.1.3 -f https://data.dgl.ai/wheels/repo.html --no-deps
+        fi
+        if python -c "import dgl" 2>/dev/null; then
+            DGL_INSTALLED=true
+        else
+            echo "DGL 1.1.3 导入失败:"
+            python -c "import dgl" 2>&1 || true
+        fi
+    fi
+
+    if [ "$DGL_INSTALLED" = false ]; then
+        echo "尝试PyPI DGL..."
+        pip uninstall dgl -y 2>/dev/null || true
+        pip install dgl --no-deps
+        if python -c "import dgl" 2>/dev/null; then
+            DGL_INSTALLED=true
+        fi
     fi
 
     if [ "$DGL_INSTALLED" = true ]; then

@@ -417,19 +417,19 @@ class HotspotPredictor:
             print("[ML] 请使用 conda 创建 Python 3.10 环境:")
             print("[ML]   conda create -n binder-design python=3.10 -y")
             print("[ML]   conda activate binder-design")
-            print("[ML]   pip install 'autogluon.tabular[all]==0.8.2' --no-deps")
+            print("[ML]   bash start.sh")
             return
 
         try:
             import subprocess
-            print("[ML] 安装 autogluon.tabular[all]==0.8.2 (--no-deps)...")
-            subprocess.check_call([
-                sys.executable, '-m', 'pip', 'install',
-                'autogluon.tabular[all]==0.8.2',
-                '--no-deps',
-                '--quiet',
-            ], timeout=300)
-            print("[ML] autogluon安装完成")
+            pkgs = ['autogluon.core==0.8.2', 'autogluon.features==0.8.2', 'autogluon.tabular==0.8.2']
+            for pkg in pkgs:
+                print(f"[ML] 安装 {pkg} (--no-deps)...")
+                subprocess.check_call([
+                    sys.executable, '-m', 'pip', 'install',
+                    pkg, '--no-deps', '--quiet',
+                ], timeout=300)
+            print("[ML] AutoGluon子包安装完成")
         except subprocess.TimeoutExpired:
             print("[ML] autogluon安装超时")
         except Exception as e:
