@@ -1,6 +1,6 @@
 """
 ProteinMPNN 调用模块
-跨 conda 环境调用: binder(Python3.10) -> foundry(Python3.12) via conda run
+跨 conda 环境调用: binder(Python3.10) -> foundry(Python3.12)
 """
 import os
 import subprocess
@@ -9,8 +9,7 @@ import glob
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 
-
-FOUNDRY_ENV = "foundry"
+from utils.conda_bridge import is_foundry_available, run_foundry_cli
 
 
 class MPNNRunner:
@@ -19,23 +18,9 @@ class MPNNRunner:
         self.base_path = Path(__file__).parent.parent.parent
         self.output_dir = self.base_path / "binder-design-system" / "outputs" / "mpnn"
         self.output_dir.mkdir(parents=True, exist_ok=True)
-        self._foundry_available = None
-
-    def _check_foundry(self) -> bool:
-        if self._foundry_available is not None:
-            return self._foundry_available
-        try:
-            result = subprocess.run(
-                ["conda", "run", "-n", FOUNDRY_ENV, "--no-banner", "mpnn", "--help"],
-                capture_output=True, text=True, timeout=30
-            )
-            self._foundry_available = result.returncode == 0
-        except Exception:
-            self._foundry_available = False
-        return self._foundry_available
 
     def is_available(self) -> bool:
-        return self._check_foundry()
+        return is_foundry_available()
 
     def run(
         self,
@@ -51,8 +36,7 @@ class MPNNRunner:
         if not self.is_available():
             return self._mock_run(backbone_pdb, num_sequences, job_dir, top_k)
 
-        cmd = [
-            "conda", "run", "-n", FOUNDRY_ENV, "--no-banner",
+        cmd_args = [
             "mpnn",
             "--structure_path", backbone_pdb,
             "--out_directory", str(job_dir),
@@ -62,12 +46,7 @@ class MPNNRunner:
         ]
 
         try:
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=600,
-            )
+            result = run_foundry_cli(cmd_args, timeout=600)
 
             if result.returncode != 0:
                 return {
@@ -88,6 +67,8 @@ class MPNNRunner:
 
         except subprocess.TimeoutExpired:
             return {"success": False, "error": "MPNN运行超时(10min)", "sequences": []}
+        except RuntimeError:
+            return self._mock_run(backbone_pdb, num_sequences, job_dir, top_k)
         except Exception as e:
             return {"success": False, "error": str(e), "sequences": []}
 

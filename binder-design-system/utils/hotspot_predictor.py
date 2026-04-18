@@ -415,20 +415,48 @@ class HotspotPredictor:
         if py_ver >= (3, 11):
             print(f"[ML] ❌ Python {py_ver.major}.{py_ver.minor} >= 3.11, AutoGluon 0.8.2 需要 Python 3.8-3.10")
             print("[ML] 请使用 conda 创建 Python 3.10 环境:")
-            print("[ML]   conda create -n binder-design python=3.10 -y")
-            print("[ML]   conda activate binder-design")
-            print("[ML]   bash start.sh")
+            print("[ML]   conda create -n binder python=3.10 -y")
+            print("[ML]   conda activate binder")
             return
 
         try:
             import subprocess
-            pkgs = ['autogluon.core==0.8.2', 'autogluon.features==0.8.2', 'autogluon.tabular==0.8.2']
+            try:
+                import pkg_resources
+            except ImportError:
+                print("[ML] 安装 setuptools (提供 pkg_resources)...")
+                subprocess.check_call([
+                    sys.executable, '-m', 'pip', 'install',
+                    'setuptools', '--quiet',
+                ], timeout=120)
+
+            pkgs = [
+                'autogluon.common==0.8.2',
+                'autogluon.core==0.8.2',
+                'autogluon.features==0.8.2',
+                'autogluon.tabular==0.8.2',
+            ]
             for pkg in pkgs:
                 print(f"[ML] 安装 {pkg} (--no-deps)...")
                 subprocess.check_call([
                     sys.executable, '-m', 'pip', 'install',
                     pkg, '--no-deps', '--quiet',
                 ], timeout=300)
+
+            compat_deps = [
+                'pandas==1.5.3',
+                'scipy==1.11.4',
+                'scikit-learn==1.2.2',
+                '"boto3>=1.10,<2"',
+                '"psutil>=5.7.3,<6"',
+            ]
+            for dep in compat_deps:
+                print(f"[ML] 安装兼容依赖 {dep}...")
+                subprocess.check_call([
+                    sys.executable, '-m', 'pip', 'install',
+                    dep, '--quiet',
+                ], timeout=120)
+
             print("[ML] AutoGluon子包安装完成")
         except subprocess.TimeoutExpired:
             print("[ML] autogluon安装超时")

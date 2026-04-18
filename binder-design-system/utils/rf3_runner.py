@@ -1,6 +1,6 @@
 """
 RoseTTAFold3 调用模块
-跨 conda 环境调用: binder(Python3.10) -> foundry(Python3.12) via conda run
+跨 conda 环境调用: binder(Python3.10) -> foundry(Python3.12)
 支持结构预测和RMSD验证
 """
 import os
@@ -10,8 +10,7 @@ import json
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 
-
-FOUNDRY_ENV = "foundry"
+from utils.conda_bridge import is_foundry_available, run_foundry_cli
 
 
 class RF3Runner:
@@ -20,23 +19,9 @@ class RF3Runner:
         self.base_path = Path(__file__).parent.parent.parent
         self.output_dir = self.base_path / "binder-design-system" / "outputs" / "rf3"
         self.output_dir.mkdir(parents=True, exist_ok=True)
-        self._foundry_available = None
-
-    def _check_foundry(self) -> bool:
-        if self._foundry_available is not None:
-            return self._foundry_available
-        try:
-            result = subprocess.run(
-                ["conda", "run", "-n", FOUNDRY_ENV, "--no-banner", "rf3", "--help"],
-                capture_output=True, text=True, timeout=30
-            )
-            self._foundry_available = result.returncode == 0
-        except Exception:
-            self._foundry_available = False
-        return self._foundry_available
 
     def is_available(self) -> bool:
-        return self._check_foundry()
+        return is_foundry_available()
 
     def run(
         self,
@@ -53,19 +38,10 @@ class RF3Runner:
         if not self.is_available():
             return self._mock_run(sequence, job_dir)
 
-        cmd = [
-            "conda", "run", "-n", FOUNDRY_ENV, "--no-banner",
-            "rf3", "fold",
-            f"inputs={fasta_path}",
-            f"out_dir={job_dir}",
-        ]
-
         try:
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=3600,
+            result = run_foundry_cli(
+                ["rf3", "fold", f"inputs={fasta_path}", f"out_dir={job_dir}"],
+                timeout=3600
             )
 
             if result.returncode != 0:
@@ -96,6 +72,8 @@ class RF3Runner:
 
         except subprocess.TimeoutExpired:
             return {"success": False, "error": "RF3运行超时(60min)", "pdb_path": None}
+        except RuntimeError:
+            return self._mock_run(sequence, job_dir)
         except Exception as e:
             return {"success": False, "error": str(e), "pdb_path": None}
 

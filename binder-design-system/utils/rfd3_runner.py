@@ -1,6 +1,6 @@
 """
 RFDiffusion3 调用模块
-跨 conda 环境调用: binder(Python3.10) -> foundry(Python3.12) via conda run
+跨 conda 环境调用: binder(Python3.10) -> foundry(Python3.12)
 """
 import os
 import subprocess
@@ -9,8 +9,7 @@ import json
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 
-
-FOUNDRY_ENV = "foundry"
+from utils.conda_bridge import is_foundry_available, run_foundry_cli
 
 
 class RFD3Runner:
@@ -19,23 +18,9 @@ class RFD3Runner:
         self.base_path = Path(__file__).parent.parent.parent
         self.output_dir = self.base_path / "binder-design-system" / "outputs" / "rfd3"
         self.output_dir.mkdir(parents=True, exist_ok=True)
-        self._foundry_available = None
-
-    def _check_foundry(self) -> bool:
-        if self._foundry_available is not None:
-            return self._foundry_available
-        try:
-            result = subprocess.run(
-                ["conda", "run", "-n", FOUNDRY_ENV, "--no-banner", "rfd3", "--help"],
-                capture_output=True, text=True, timeout=30
-            )
-            self._foundry_available = result.returncode == 0
-        except Exception:
-            self._foundry_available = False
-        return self._foundry_available
 
     def is_available(self) -> bool:
-        return self._check_foundry()
+        return is_foundry_available()
 
     def run(
         self,
@@ -66,14 +51,10 @@ class RFD3Runner:
         if contig:
             overrides.append(f"specification.contigmap.contigs=[{contig}]")
 
-        cmd = ["conda", "run", "-n", FOUNDRY_ENV, "--no-banner", "rfd3", "design"] + overrides
-
         try:
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=1800,
+            result = run_foundry_cli(
+                ["rfd3", "design"] + overrides,
+                timeout=1800
             )
 
             if result.returncode != 0:
@@ -95,6 +76,8 @@ class RFD3Runner:
 
         except subprocess.TimeoutExpired:
             return {"success": False, "error": "RFD3运行超时(30min)", "designs": []}
+        except RuntimeError:
+            return self._mock_run(target_pdb, hotspot_residues, binder_length, num_designs, job_dir)
         except Exception as e:
             return {"success": False, "error": str(e), "designs": []}
 
