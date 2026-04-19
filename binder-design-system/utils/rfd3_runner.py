@@ -104,6 +104,33 @@ class RFD3Runner:
         except Exception as e:
             return {"success": False, "error": str(e), "designs": []}
 
+    def _parse_pdb_chains(self, pdb_path: str) -> Dict[str, tuple]:
+        chains = {}
+        try:
+            with open(pdb_path, "r") as f:
+                for line in f:
+                    if not line.startswith("ATOM") and not line.startswith("HETATM"):
+                        continue
+                    if len(line) < 22:
+                        continue
+                    chain_id = line[21].strip()
+                    if not chain_id:
+                        continue
+                    try:
+                        res_id = int(line[22:26].strip())
+                    except (ValueError, IndexError):
+                        continue
+                    if chain_id not in chains:
+                        chains[chain_id] = [res_id, res_id]
+                    else:
+                        if res_id < chains[chain_id][0]:
+                            chains[chain_id][0] = res_id
+                        if res_id > chains[chain_id][1]:
+                            chains[chain_id][1] = res_id
+        except Exception as e:
+            print(f"[RFD3] PDB解析失败: {e}")
+        return chains
+
     def _generate_input_yaml(
         self,
         target_pdb: str,
@@ -111,30 +138,51 @@ class RFD3Runner:
         binder_length: int,
         job_dir: Path
     ) -> str:
-        spec = {
-            "input": target_pdb,
-            "contig": f"{binder_length},/0,A1-999",
-            "is_non_loopy": True,
-        }
+        chains = self._parse_pdb_chains(target_pdb)
 
-        if hotspot_residues:
-            hotspot_dict = {}
-            for res in hotspot_residues:
-                hotspot_dict[res] = "ALL"
-            spec["select_hotspots"] = hotspot_dict
-            spec["infer_ori_strategy"] = "hotspots"
+        if not chains:
+            print("[RFD3] ⚠️ 无法解析PDB链信息，使用默认contig")
+            contig = f"{binder_length},/0,A1-999"
+        else:
+            chain_parts = []
+            for chain_id in sorted(chains.keys()):
+                res_start, res_end = chains[chain_id]
+                chain_parts.append(f"{chain_id}{res_start}-{res_end}")
+            contig = f"{binder_length},/0," + ",".join(chain_parts)
 
-        yaml_data = {"binder_design": spec}
+        validated_hotspots = []
+        if hotspot_residues and chains:
+            for hs in hotspot_residues:
+                hs_chain = None
+                hs_resid = None
+                for c in hs:
+                    if c.isalpha():
+                        hs_chain = c
+                    elif c.isdigit():
+                        idx = hs.index(c)
+                        hs_chain = hs[:idx]
+                        hs_resid = hs[idx:]
+                        break
+                if hs_chain and hs_resid and hs_chain in chains:
+                    res_start, res_end = chains[hs_chain]
+                    if res_start <= int(hs_resid) <= res_end:
+                        validated_hotspots.append(hs)
+                    else:
+                        print(f"[RFD3] ⚠️ 热点 {hs} 不在链 {hs_chain} 范围({res_start}-{res_end})内，已跳过")
+                elif hs_chain and hs_chain not in chains:
+                    print(f"[RFD3] ⚠️ 热点 {hs} 的链 {hs_chain} 不在PDB中，已跳过")
+                else:
+                    validated_hotspots.append(hs)
 
         yaml_path = job_dir / "rfd3_input.yaml"
         with open(yaml_path, "w") as f:
             f.write("binder_design:\n")
             f.write(f"  input: {target_pdb}\n")
-            f.write(f"  contig: {spec['contig']}\n")
+            f.write(f"  contig: {contig}\n")
             f.write(f"  is_non_loopy: true\n")
-            if hotspot_residues:
+            if validated_hotspots:
                 f.write("  select_hotspots:\n")
-                for res in hotspot_residues:
+                for res in validated_hotspots:
                     f.write(f"    {res}: ALL\n")
                 f.write("  infer_ori_strategy: hotspots\n")
 

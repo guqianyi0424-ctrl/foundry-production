@@ -1,8 +1,6 @@
 """
 热点残基预测工具
-集成 ppihotspotid (ML - AutoGluon 14模型集成) 和 hotspot-prediction (DL - GAT+ESM-2)
-ML: TabularPredictor.load() 加载完整AutoGluon集成 (13 L1基础模型 + 1 L2加权集成 = 62子模型)
-DL: 5折集成推理 (5-fold ensemble)
+DL: hotspot-prediction (GAT+ESM-2) 5折集成推理
 支持 Top-K 选择策略
 """
 import os
@@ -14,47 +12,14 @@ from typing import Dict, List, Optional, Any
 import pandas as pd
 
 
-def _patch_autogluon_compat():
-    _compat_defaults = {
-        'passthrough': False,
-        'passthrough_stage': 'first',
-        'passthrough_types': None,
-    }
-    try:
-        from autogluon.features.generators.abstract import AbstractFeatureGenerator
-
-        if not getattr(AbstractFeatureGenerator, '_compat_patched', False):
-            original_getattr = getattr(AbstractFeatureGenerator, '__getattr__', None)
-
-            def _compat_getattr(self, name):
-                if name in _compat_defaults:
-                    return _compat_defaults[name]
-                if original_getattr is not None:
-                    return original_getattr(self, name)
-                raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
-
-            AbstractFeatureGenerator.__getattr__ = _compat_getattr
-            AbstractFeatureGenerator._compat_patched = True
-            print("[ML] AutoGluon兼容性补丁已应用 (passthrough等属性)")
-    except ImportError:
-        pass
-    except Exception as e:
-        print(f"[ML] AutoGluon兼容性补丁失败: {e}")
-
-
 class HotspotPredictor:
-    """热点残基预测器 - 集成ML和DL两个模型"""
+    """热点残基预测器 - DL模型 (GAT+ESM-2)"""
 
     def __init__(self, top_k: int = 3):
         self.top_k = top_k
         self.base_path = Path(__file__).parent.parent.parent
-        self.ppihotspotid_path = self.base_path / "ppihotspotid-main"
         self.hotspot_dl_path = self.base_path / "hotspot-prediction"
 
-        self.ml_model_path = self.ppihotspotid_path / "AutogluonModels" / "ag-20230915_030535"
-
-        self._ml_predictor = None
-        self._ml_loaded = False
         self._dl_models = {}
         self._dl_loaded = False
         self._esm_model = None
@@ -63,7 +28,7 @@ class HotspotPredictor:
     def predict(
         self,
         atom_array,
-        method: str = "both",
+        method: str = "dl",
         pdb_string: str = None,
         top_k: int = None
     ) -> Dict[str, Any]:
@@ -79,72 +44,13 @@ class HotspotPredictor:
                 "error": "无法提取残基特征"
             }
 
-        results_ml = None
-        results_dl = None
+        results_dl = self._predict_dl(residues, atom_array)
 
-        if method in ("ml", "both"):
-            results_ml = self._predict_ml(residues)
-
-        if method in ("dl", "both"):
-            results_dl = self._predict_dl(residues, atom_array)
-
-        if method == "both" and results_ml and results_dl:
-            return self._merge_results(results_ml, results_dl, residues)
-        elif method == "ml" and results_ml:
-            return self._select_top_k(results_ml, residues, "ml")
-        elif method == "dl" and results_dl:
+        if results_dl:
             return self._select_top_k(results_dl, residues, "dl")
         else:
             fallback = self._rule_based_predict(residues)
             return self._select_top_k(fallback, residues, "rule")
-
-    def _predict_ml(self, residues: pd.DataFrame) -> Dict[str, Any]:
-        predictor = self._load_ml_predictor()
-
-        if predictor is not None:
-            try:
-                pred_data = pd.DataFrame({
-                    'Ty': residues['res_name'].values,
-                    'cons': residues['conservation'].values,
-                    'sasa': residues['sasa'].values,
-                    'gas_e': residues['energy'].values,
-                })
-
-                predictions = predictor.predict(pred_data)
-
-                label_map = predictor.class_labels_internal_dict
-                pos_label = None
-                for label, idx in label_map.items():
-                    if str(label).upper() == 'P':
-                        pos_label = idx
-                        break
-
-                if pos_label is None and len(label_map) == 2:
-                    pos_label = 1
-
-                if pos_label is not None:
-                    try:
-                        pred_proba = predictor.predict_proba(pred_data)
-                        if pred_proba.shape[1] > pos_label:
-                            scores = pred_proba.iloc[:, pos_label].values
-                        else:
-                            scores = (predictions == list(label_map.keys())[list(label_map.values()).index(pos_label)]).astype(float)
-                    except Exception:
-                        scores = (predictions == list(label_map.keys())[list(label_map.values()).index(pos_label)]).astype(float)
-                else:
-                    scores = predictions.astype(float).values
-
-                n_models = len(predictor.model_names()) if hasattr(predictor, 'model_names') else 0
-                print(f"[ML] AutoGluon预测完成 ({n_models}个模型集成)")
-                return {"scores": scores, "method": "ml", "model_loaded": True}
-
-            except Exception as e:
-                print(f"[ML] AutoGluon预测失败: {e}")
-                import traceback
-                traceback.print_exc()
-
-        scores = self._compute_rule_scores(residues, "ml")
-        return {"scores": scores, "method": "ml", "model_loaded": False}
 
     def _predict_dl(self, residues: pd.DataFrame, atom_array) -> Dict[str, Any]:
         dl_models = self._load_dl_models()
@@ -186,72 +92,6 @@ class HotspotPredictor:
 
         scores = self._compute_rule_scores(residues, "dl")
         return {"scores": scores, "method": "dl", "model_loaded": False}
-
-    def _merge_results(
-        self,
-        results_ml: Dict,
-        results_dl: Dict,
-        residues: pd.DataFrame
-    ) -> Dict[str, Any]:
-        ml_scores = results_ml["scores"]
-        dl_scores = results_dl["scores"]
-
-        ml_loaded = results_ml.get("model_loaded", False)
-        dl_loaded = results_dl.get("model_loaded", False)
-
-        if ml_loaded and dl_loaded:
-            combined = 0.5 * ml_scores + 0.5 * dl_scores
-        elif ml_loaded:
-            combined = ml_scores
-        elif dl_loaded:
-            combined = dl_scores
-        else:
-            combined = 0.5 * ml_scores + 0.5 * dl_scores
-
-        all_scores_dict = {}
-        for idx, row in residues.iterrows():
-            label = f"{row['chain_id']}{row['res_id']}"
-            all_scores_dict[label] = {
-                "ml_score": float(ml_scores[idx]) if idx < len(ml_scores) else 0.0,
-                "dl_score": float(dl_scores[idx]) if idx < len(dl_scores) else 0.0,
-                "combined_score": float(combined[idx]) if idx < len(combined) else 0.0,
-                "residue_name": row["res_name"],
-                "chain_id": row["chain_id"],
-                "res_id": row["res_id"]
-            }
-
-        sorted_items = sorted(
-            all_scores_dict.items(),
-            key=lambda x: x[1]["combined_score"],
-            reverse=True
-        )
-
-        top_k_items = sorted_items[:self.top_k]
-
-        hotspots_detail = []
-        for label, info in top_k_items:
-            hotspots_detail.append({
-                "label": label,
-                "chain": info["chain_id"],
-                "residue_id": info["res_id"],
-                "residue_name": info["residue_name"],
-                "ml_score": round(info["ml_score"], 4),
-                "dl_score": round(info["dl_score"], 4),
-                "combined_score": round(info["combined_score"], 4),
-                "score": round(info["combined_score"], 4)
-            })
-
-        return {
-            "method": "both",
-            "ml_model_loaded": ml_loaded,
-            "dl_model_loaded": dl_loaded,
-            "hotspots": [h["label"] for h in hotspots_detail],
-            "hotspots_detail": hotspots_detail,
-            "all_scores": all_scores_dict,
-            "total_residues": len(residues),
-            "num_hotspots": len(hotspots_detail),
-            "top_k": self.top_k
-        }
 
     def _select_top_k(
         self,
@@ -357,178 +197,6 @@ class HotspotPredictor:
             scores[idx] = min(s, 1.0)
 
         return scores
-
-    def _load_ml_predictor(self):
-        if self._ml_loaded:
-            return self._ml_predictor
-
-        _patch_autogluon_compat()
-
-        try:
-            from autogluon.tabular import TabularPredictor
-
-            if not self.ml_model_path.exists():
-                print(f"[ML] AutoGluon模型目录不存在: {self.ml_model_path}")
-                self._ml_predictor = None
-                self._ml_loaded = True
-                return self._ml_predictor
-
-            print(f"[ML] 加载AutoGluon集成模型: {self.ml_model_path}")
-            self._ml_predictor = TabularPredictor.load(
-                str(self.ml_model_path),
-                require_version_match=False,
-                require_py_version_match=False,
-            )
-
-            model_names = self._ml_predictor.model_names()
-            n_models = len(model_names)
-            print(f"[ML] AutoGluon模型加载成功 ({n_models}个模型: {', '.join(model_names)})")
-
-        except ImportError:
-            print("[ML] autogluon未安装，尝试安装...")
-            self._try_install_autogluon()
-            try:
-                self._refresh_import_paths()
-
-                for mod_name in list(sys.modules.keys()):
-                    if mod_name.startswith('autogluon'):
-                        del sys.modules[mod_name]
-
-                _patch_autogluon_compat()
-                from autogluon.tabular import TabularPredictor
-                self._ml_predictor = TabularPredictor.load(
-                    str(self.ml_model_path),
-                    require_version_match=False,
-                    require_py_version_match=False,
-                )
-                model_names = self._ml_predictor.model_names()
-                n_models = len(model_names)
-                print(f"[ML] AutoGluon模型加载成功 ({n_models}个模型: {', '.join(model_names)})")
-            except Exception as e2:
-                print(f"[ML] AutoGluon安装后仍无法加载: {e2}")
-                self._ml_predictor = None
-        except Exception as e:
-            print(f"[ML] AutoGluon模型加载失败: {e}")
-            import traceback
-            traceback.print_exc()
-            self._ml_predictor = None
-
-        self._ml_loaded = True
-        return self._ml_predictor
-
-    def _try_install_autogluon(self):
-        py_ver = sys.version_info
-        if py_ver >= (3, 11):
-            print(f"[ML] ❌ Python {py_ver.major}.{py_ver.minor} >= 3.11, AutoGluon 0.8.2 需要 Python 3.8-3.10")
-            print("[ML] 请使用 conda 创建 Python 3.10 环境:")
-            print("[ML]   conda create -n binder python=3.10 -y")
-            print("[ML]   conda activate binder")
-            return
-
-        import subprocess
-
-        def _pip_install(spec, no_deps=False, timeout=120):
-            try:
-                cmd = [sys.executable, '-m', 'pip', 'install', spec, '--quiet']
-                if no_deps:
-                    cmd.insert(4, '--no-deps')
-                subprocess.check_call(cmd, timeout=timeout)
-                return True
-            except subprocess.TimeoutExpired:
-                print(f"[ML] 安装 {spec} 超时")
-                return False
-            except Exception as e:
-                print(f"[ML] 安装 {spec} 失败: {e}")
-                return False
-
-        try:
-            import pkg_resources
-        except ImportError:
-            print("[ML] 安装 setuptools (提供 pkg_resources)...")
-            if not _pip_install('setuptools'):
-                print("[ML] ❌ setuptools 安装失败，AutoGluon 无法加载")
-                return
-
-        pkgs = [
-            'autogluon.common==0.8.2',
-            'autogluon.core==0.8.2',
-            'autogluon.features==0.8.2',
-            'autogluon.tabular==0.8.2',
-        ]
-        for pkg in pkgs:
-            print(f"[ML] 安装 {pkg} (--no-deps)...")
-            _pip_install(pkg, no_deps=True, timeout=300)
-
-        compat_deps = [
-            'pandas==1.5.3',
-            'scipy==1.11.4',
-            'scikit-learn==1.2.2',
-            'boto3>=1.10,<2',
-            'psutil>=5.7.3,<6',
-        ]
-        for dep in compat_deps:
-            print(f"[ML] 安装兼容依赖 {dep}...")
-            _pip_install(dep)
-
-        print("[ML] AutoGluon子包安装完成")
-
-    def _refresh_import_paths(self):
-        import importlib
-        import subprocess
-
-        if 'pkg_resources' in sys.modules:
-            del sys.modules['pkg_resources']
-        sys.path_importer_cache.clear()
-        importlib.invalidate_caches()
-
-        try:
-            import pkg_resources
-            print("[ML] pkg_resources 加载成功")
-            return
-        except ImportError:
-            pass
-
-        result = subprocess.run(
-            [sys.executable, '-c',
-             'import setuptools, os; print(os.path.dirname(os.path.dirname(setuptools.__file__)))'],
-            capture_output=True, text=True, timeout=15
-        )
-        if result.returncode == 0:
-            site_dir = result.stdout.strip()
-            if site_dir and site_dir not in sys.path:
-                sys.path.insert(0, site_dir)
-                print(f"[ML] 添加 site-packages 到 sys.path: {site_dir}")
-
-        if 'pkg_resources' in sys.modules:
-            del sys.modules['pkg_resources']
-        sys.path_importer_cache.clear()
-        importlib.invalidate_caches()
-
-        try:
-            import pkg_resources
-            print("[ML] pkg_resources 加载成功")
-            return
-        except ImportError:
-            pass
-
-        import site
-        for sp in site.getsitepackages():
-            if sp not in sys.path:
-                sys.path.insert(0, sp)
-        user_sp = site.getusersitepackages()
-        if user_sp and user_sp not in sys.path:
-            sys.path.insert(0, user_sp)
-
-        if 'pkg_resources' in sys.modules:
-            del sys.modules['pkg_resources']
-        sys.path_importer_cache.clear()
-        importlib.invalidate_caches()
-
-        try:
-            import pkg_resources
-            print("[ML] pkg_resources 加载成功 (手动路径)")
-        except ImportError:
-            print("[ML] ❌ pkg_resources 仍无法加载，请手动运行: pip install setuptools")
 
     def _detect_cuda_version(self):
         try:

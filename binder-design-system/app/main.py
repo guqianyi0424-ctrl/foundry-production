@@ -1,6 +1,6 @@
 """
 蛋白质Binder设计系统 - 主应用
-集成: 热点残基预测(ML+DL) + RFD3 + MPNN + RF3 全流程
+集成: 热点残基预测(DL) + RFD3 + MPNN + RF3 全流程
 Top-K=3 | 单字母氨基酸 | RMSD评估筛选 | 序列-3D联动高亮
 """
 import sys
@@ -98,7 +98,6 @@ def init_session():
         "current_step": 0,
         "atom_array": None,
         "structure_summary": None,
-        "hotspot_results_ml": None,
         "hotspot_results_dl": None,
         "selected_hotspots": [],
         "clicked_residues": [],
@@ -195,111 +194,42 @@ def build_sequence_html(chain_id, residues, hotspot_labels, clicked_labels):
     return "\n".join(rows_html)
 
 
-def predict_hotspots(method, top_k):
+def predict_hotspots(top_k):
     predictor = HotspotPredictor(top_k=top_k)
     pdb_string = st.session_state.structure_parser.to_pdb_string(st.session_state.atom_array)
 
-    results_ml = None
-    results_dl = None
+    with st.spinner("运行DL模型 (hotspot-prediction GAT+ESM-2)..."):
+        try:
+            results_dl = predictor.predict(
+                st.session_state.atom_array,
+                method="dl",
+                pdb_string=pdb_string,
+                top_k=top_k
+            )
+            st.session_state.hotspot_results_dl = results_dl
+        except Exception as e:
+            st.error(f"DL预测失败: {e}")
+            results_dl = None
 
-    if "ML" in method or "两个" in method:
-        with st.spinner("运行ML模型 (ppihotspotid)..."):
-            try:
-                results_ml = predictor.predict(
-                    st.session_state.atom_array,
-                    method="ml",
-                    pdb_string=pdb_string,
-                    top_k=top_k
-                )
-                st.session_state.hotspot_results_ml = results_ml
-            except Exception as e:
-                st.error(f"ML预测失败: {e}")
+    if results_dl and "hotspots" in results_dl:
+        hotspots_detail = []
+        for label in results_dl["hotspots"]:
+            info = results_dl["all_scores"].get(label, {})
+            hotspots_detail.append({
+                "label": label,
+                "chain": info.get("chain_id", "A"),
+                "residue_id": str(info.get("res_id", "")),
+                "residue_name": info.get("residue_name", ""),
+                "dl_score": info.get("score", 0),
+                "combined_score": info.get("score", 0)
+            })
+        st.session_state.selected_hotspots = hotspots_detail
+    else:
+        st.session_state.selected_hotspots = []
 
-    if "DL" in method or "两个" in method:
-        with st.spinner("运行DL模型 (hotspot-prediction)..."):
-            try:
-                results_dl = predictor.predict(
-                    st.session_state.atom_array,
-                    method="dl",
-                    pdb_string=pdb_string,
-                    top_k=top_k
-                )
-                st.session_state.hotspot_results_dl = results_dl
-            except Exception as e:
-                st.error(f"DL预测失败: {e}")
-
-    merged_hotspots = merge_hotspot_results(results_ml, results_dl, top_k)
-    st.session_state.selected_hotspots = merged_hotspots
     st.session_state.current_step = max(st.session_state.current_step, 1)
-    st.success(f"预测完成！选取 Top-{top_k} 热点残基: {', '.join([h['label'] for h in merged_hotspots])}")
-
-
-def merge_hotspot_results(results_ml, results_dl, top_k):
-    all_scores = {}
-
-    if results_ml and "all_scores" in results_ml:
-        for label, score_info in results_ml["all_scores"].items():
-            if isinstance(score_info, dict):
-                ml_s = score_info.get("score", score_info.get("ml_score", 0))
-            else:
-                ml_s = float(score_info)
-            if label not in all_scores:
-                all_scores[label] = {"ml": 0, "dl": 0, "residue_name": "", "chain_id": "", "res_id": ""}
-            all_scores[label]["ml"] = ml_s
-            if isinstance(score_info, dict):
-                all_scores[label]["residue_name"] = score_info.get("residue_name", "")
-                all_scores[label]["chain_id"] = score_info.get("chain_id", "A")
-                all_scores[label]["res_id"] = score_info.get("res_id", "")
-
-    if results_dl and "all_scores" in results_dl:
-        for label, score_info in results_dl["all_scores"].items():
-            if isinstance(score_info, dict):
-                dl_s = score_info.get("score", score_info.get("dl_score", 0))
-            else:
-                dl_s = float(score_info)
-            if label not in all_scores:
-                all_scores[label] = {"ml": 0, "dl": 0, "residue_name": "", "chain_id": "", "res_id": ""}
-            all_scores[label]["dl"] = dl_s
-            if isinstance(score_info, dict):
-                if not all_scores[label].get("residue_name"):
-                    all_scores[label]["residue_name"] = score_info.get("residue_name", "")
-                if not all_scores[label].get("chain_id"):
-                    all_scores[label]["chain_id"] = score_info.get("chain_id", "A")
-                if not all_scores[label].get("res_id"):
-                    all_scores[label]["res_id"] = score_info.get("res_id", "")
-
-    combined = []
-    for label, scores in all_scores.items():
-        ml_s = scores.get("ml", 0)
-        dl_s = scores.get("dl", 0)
-        if ml_s > 0 and dl_s > 0:
-            combined_score = 0.5 * ml_s + 0.5 * dl_s
-        elif ml_s > 0:
-            combined_score = ml_s
-        else:
-            combined_score = dl_s
-
-        chain = scores.get("chain_id", "A")
-        res_id = scores.get("res_id", "")
-        if not res_id:
-            for c in label:
-                if c.isdigit():
-                    res_id = label[label.index(c):]
-                    chain = label[:label.index(c)]
-                    break
-
-        combined.append({
-            "label": label,
-            "chain": chain if chain else "A",
-            "residue_id": str(res_id),
-            "residue_name": scores.get("residue_name", ""),
-            "ml_score": ml_s,
-            "dl_score": dl_s,
-            "combined_score": combined_score
-        })
-
-    combined.sort(key=lambda x: x["combined_score"], reverse=True)
-    return combined[:top_k]
+    if st.session_state.selected_hotspots:
+        st.success(f"预测完成！选取 Top-{top_k} 热点残基: {', '.join([h['label'] for h in st.session_state.selected_hotspots])}")
 
 
 def run_full_pipeline(binder_length, num_designs, num_sequences, rmsd_threshold):
@@ -796,8 +726,7 @@ def render_hotspot_section():
                     "链": h.get("chain", "A"),
                     "三字母": res_name,
                     "单字母": one_letter,
-                    "ML得分": f"{h.get('ml_score', 0):.4f}",
-                    "DL得分": f"{h.get('dl_score', 0):.4f}",
+                    "DL得分": f"{h.get('dl_score', h.get('combined_score', 0)):.4f}",
                     "综合得分": f"{h.get('combined_score', 0):.4f}"
                 })
             st.dataframe(pd.DataFrame(df_data), use_container_width=True)
@@ -812,16 +741,7 @@ def render_pipeline_panel():
 
         c_predict, c_run, c_reset = st.columns([2, 2, 1])
         with c_predict:
-            method = st.selectbox(
-                "预测方法",
-                options=[
-                    "两个模型都运行 (Top-3)",
-                    "ppihotspotid (ML)",
-                    "hotspot-prediction (DL)"
-                ],
-                index=0,
-                label_visibility="collapsed"
-            )
+            st.markdown("**🎯 热点预测 (DL)**")
 
         with c_run:
             binder_len = st.slider("Binder长度", 40, 150, 80, step=5, label_visibility="collapsed")
@@ -829,7 +749,7 @@ def render_pipeline_panel():
         with c_reset:
             if st.button("🎯 预测热点", type="primary", use_container_width=True):
                 if st.session_state.atom_array is not None:
-                    predict_hotspots(method, TOP_K)
+                    predict_hotspots(TOP_K)
                 else:
                     st.warning("请先上传蛋白质文件")
 
@@ -945,20 +865,19 @@ def render_welcome():
 
         1. **上传目标蛋白结构** - 上方选择 PDB/CIF 文件
         2. **查看序列与3D** - 左侧单字母序列 + 右侧3D结构
-        3. **预测热点残基** - ML+DL双模型自动选取Top-3
+        3. **预测热点残基** - DL模型自动选取Top-3
         4. **运行全流程** - RFD3 → MPNN → RF3 自动化设计
 
         ### 📋 工作流程
 
         ```
-        目标蛋白 → 热点预测(ML+DL) → RFD3(Top-3) → MPNN(Top-3) → RF3验证 → RMSD<2Å筛选
+        目标蛋白 → 热点预测(DL) → RFD3(Top-3) → MPNN(Top-3) → RF3验证 → RMSD<2Å筛选
         ```
 
         ### 🔧 集成模型
 
         | 模型 | 功能 | 说明 |
         |------|------|------|
-        | ppihotspotid (ML) | 热点残基预测 | XGBoost机器学习 |
         | hotspot-prediction (DL) | 热点残基预测 | GAT+ESM-2深度学习 |
         | RFDiffusion3 | Binder主链生成 | 扩散模型 |
         | ProteinMPNN | 序列设计 | 图神经网络 |
