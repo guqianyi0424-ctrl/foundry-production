@@ -389,9 +389,14 @@ class HotspotPredictor:
             self._try_install_autogluon()
             try:
                 import importlib
-                if 'pkg_resources' in sys.modules:
-                    importlib.reload(sys.modules['pkg_resources'])
-                else:
+                importlib.invalidate_caches()
+
+                try:
+                    import pkg_resources
+                except ImportError:
+                    import site
+                    site.main()
+                    importlib.invalidate_caches()
                     import pkg_resources
 
                 for mod_name in list(sys.modules.keys()):
