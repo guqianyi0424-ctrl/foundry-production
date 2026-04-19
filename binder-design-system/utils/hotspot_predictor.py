@@ -476,10 +476,14 @@ class HotspotPredictor:
         import importlib
         import subprocess
 
+        if 'pkg_resources' in sys.modules:
+            del sys.modules['pkg_resources']
+        sys.path_importer_cache.clear()
         importlib.invalidate_caches()
 
         try:
             import pkg_resources
+            print("[ML] pkg_resources 加载成功")
             return
         except ImportError:
             pass
@@ -495,19 +499,17 @@ class HotspotPredictor:
                 sys.path.insert(0, site_dir)
                 print(f"[ML] 添加 site-packages 到 sys.path: {site_dir}")
 
-        result2 = subprocess.run(
-            [sys.executable, '-c',
-             'import pkg_resources; print("OK")'],
-            capture_output=True, text=True, timeout=10
-        )
-        if result2.returncode == 0 and "OK" in result2.stdout:
-            importlib.invalidate_caches()
-            try:
-                import pkg_resources
-                print("[ML] pkg_resources 加载成功")
-                return
-            except ImportError:
-                pass
+        if 'pkg_resources' in sys.modules:
+            del sys.modules['pkg_resources']
+        sys.path_importer_cache.clear()
+        importlib.invalidate_caches()
+
+        try:
+            import pkg_resources
+            print("[ML] pkg_resources 加载成功")
+            return
+        except ImportError:
+            pass
 
         import site
         for sp in site.getsitepackages():
@@ -517,7 +519,11 @@ class HotspotPredictor:
         if user_sp and user_sp not in sys.path:
             sys.path.insert(0, user_sp)
 
+        if 'pkg_resources' in sys.modules:
+            del sys.modules['pkg_resources']
+        sys.path_importer_cache.clear()
         importlib.invalidate_caches()
+
         try:
             import pkg_resources
             print("[ML] pkg_resources 加载成功 (手动路径)")

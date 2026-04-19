@@ -55,11 +55,10 @@ class RFD3Runner:
         if not self.is_available():
             return self._mock_run(target_pdb, hotspot_residues, binder_length, num_designs, job_dir)
 
-        contig = f"A{binder_length}"
-        hotspot_str = ",".join(hotspot_residues) if hotspot_residues else ""
+        yaml_path = self._generate_input_yaml(target_pdb, hotspot_residues, binder_length, job_dir)
 
         overrides = [
-            f"inputs={target_pdb}",
+            f"inputs={yaml_path}",
             f"out_dir={job_dir}",
             f"diffusion_batch_size={num_designs}",
             "n_batches=1",
@@ -67,11 +66,6 @@ class RFD3Runner:
 
         if self._ckpt_path:
             overrides.append(f"ckpt_path={self._ckpt_path}")
-
-        if hotspot_str:
-            overrides.append(f"+specification.hotspot_res=[{hotspot_str}]")
-        if contig:
-            overrides.append(f"+specification.contigmap.contigs=[{contig}]")
 
         try:
             result = run_foundry_cli(
@@ -110,8 +104,48 @@ class RFD3Runner:
         except Exception as e:
             return {"success": False, "error": str(e), "designs": []}
 
+    def _generate_input_yaml(
+        self,
+        target_pdb: str,
+        hotspot_residues: List[str],
+        binder_length: int,
+        job_dir: Path
+    ) -> str:
+        spec = {
+            "input": target_pdb,
+            "contig": f"{binder_length},/0,A1-999",
+            "is_non_loopy": True,
+        }
+
+        if hotspot_residues:
+            hotspot_dict = {}
+            for res in hotspot_residues:
+                hotspot_dict[res] = "ALL"
+            spec["select_hotspots"] = hotspot_dict
+            spec["infer_ori_strategy"] = "hotspots"
+
+        yaml_data = {"binder_design": spec}
+
+        yaml_path = job_dir / "rfd3_input.yaml"
+        with open(yaml_path, "w") as f:
+            f.write("binder_design:\n")
+            f.write(f"  input: {target_pdb}\n")
+            f.write(f"  contig: {spec['contig']}\n")
+            f.write(f"  is_non_loopy: true\n")
+            if hotspot_residues:
+                f.write("  select_hotspots:\n")
+                for res in hotspot_residues:
+                    f.write(f"    {res}: ALL\n")
+                f.write("  infer_ori_strategy: hotspots\n")
+
+        return str(yaml_path)
+
     def _collect_results(self, job_dir: Path) -> List[Dict]:
-        design_files = sorted(glob.glob(str(job_dir / "**/*.pdb"), recursive=True))
+        design_files = sorted(glob.glob(str(job_dir / "**/*.cif.gz"), recursive=True))
+        if not design_files:
+            design_files = sorted(glob.glob(str(job_dir / "**/*.cif"), recursive=True))
+        if not design_files:
+            design_files = sorted(glob.glob(str(job_dir / "**/*.pdb"), recursive=True))
         if not design_files:
             design_files = sorted(glob.glob(str(job_dir / "*.pdb")))
         designs = []
