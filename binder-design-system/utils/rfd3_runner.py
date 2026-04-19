@@ -58,9 +58,16 @@ class RFD3Runner:
             )
 
             if result.returncode != 0:
+                stderr = result.stderr or ""
+                if "Invalid checkpoint" in stderr or "could not find checkpoint" in stderr:
+                    return {
+                        "success": False,
+                        "error": "RFD3模型权重未下载。请在foundry环境下运行:\n  conda activate foundry\n  foundry install rfd3 --checkpoint-dir ./checkpoints",
+                        "designs": []
+                    }
                 return {
                     "success": False,
-                    "error": result.stderr[-500:] if result.stderr else "Unknown error",
+                    "error": stderr[-500:] if stderr else "Unknown error",
                     "designs": []
                 }
 

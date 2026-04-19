@@ -388,16 +388,7 @@ class HotspotPredictor:
             print("[ML] autogluon未安装，尝试安装...")
             self._try_install_autogluon()
             try:
-                import importlib
-                importlib.invalidate_caches()
-
-                try:
-                    import pkg_resources
-                except ImportError:
-                    import site
-                    site.main()
-                    importlib.invalidate_caches()
-                    import pkg_resources
+                self._refresh_import_paths()
 
                 for mod_name in list(sys.modules.keys()):
                     if mod_name.startswith('autogluon'):
@@ -480,6 +471,58 @@ class HotspotPredictor:
             _pip_install(dep)
 
         print("[ML] AutoGluon子包安装完成")
+
+    def _refresh_import_paths(self):
+        import importlib
+        import subprocess
+
+        importlib.invalidate_caches()
+
+        try:
+            import pkg_resources
+            return
+        except ImportError:
+            pass
+
+        result = subprocess.run(
+            [sys.executable, '-c',
+             'import setuptools, os; print(os.path.dirname(os.path.dirname(setuptools.__file__)))'],
+            capture_output=True, text=True, timeout=15
+        )
+        if result.returncode == 0:
+            site_dir = result.stdout.strip()
+            if site_dir and site_dir not in sys.path:
+                sys.path.insert(0, site_dir)
+                print(f"[ML] 添加 site-packages 到 sys.path: {site_dir}")
+
+        result2 = subprocess.run(
+            [sys.executable, '-c',
+             'import pkg_resources; print("OK")'],
+            capture_output=True, text=True, timeout=10
+        )
+        if result2.returncode == 0 and "OK" in result2.stdout:
+            importlib.invalidate_caches()
+            try:
+                import pkg_resources
+                print("[ML] pkg_resources 加载成功")
+                return
+            except ImportError:
+                pass
+
+        import site
+        for sp in site.getsitepackages():
+            if sp not in sys.path:
+                sys.path.insert(0, sp)
+        user_sp = site.getusersitepackages()
+        if user_sp and user_sp not in sys.path:
+            sys.path.insert(0, user_sp)
+
+        importlib.invalidate_caches()
+        try:
+            import pkg_resources
+            print("[ML] pkg_resources 加载成功 (手动路径)")
+        except ImportError:
+            print("[ML] ❌ pkg_resources 仍无法加载，请手动运行: pip install setuptools")
 
     def _detect_cuda_version(self):
         try:
