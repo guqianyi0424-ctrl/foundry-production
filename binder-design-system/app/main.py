@@ -1,5 +1,5 @@
 """
-蛋白质Binder设计系统 - 主应用
+蛋白质Binder设计系统 - 主应用 (ODesign风格)
 集成: 热点残基预测(DL) + RFD3 + MPNN + RF3 全流程
 Top-K=3 | 单字母氨基酸 | RMSD评估筛选 | 序列-3D联动高亮
 """
@@ -16,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 import streamlit as st
 import numpy as np
 import pandas as pd
+import streamlit.components.v1 as components
 
 from utils.structure_parser import StructureParser
 from utils.hotspot_predictor import HotspotPredictor
@@ -27,10 +28,10 @@ from utils.molstar_viewer import render_molstar, render_rmsd_chart, render_plddt
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 st.set_page_config(
-    page_title="蛋白质Binder设计系统",
+    page_title="ODesign - 蛋白质Binder设计",
     page_icon="🧬",
     layout="wide",
-    initial_sidebar_state="collapsed"
+    initial_sidebar_state="expanded"
 )
 
 AA_3TO1 = {
@@ -45,56 +46,492 @@ AA_1TO3 = {v: k for k, v in AA_3TO1.items()}
 
 CSS = """
 <style>
-.seq-container { font-family: 'Courier New', monospace; line-height: 1.8; user-select: none; }
-.seq-row { display: flex; align-items: baseline; position: relative; margin-bottom: 2px; }
-.seq-residue { display: inline-flex; flex-direction: column; align-items: center;
-    width: 28px; height: 32px; cursor: pointer; border-radius: 4px; margin: 0 1px;
-    transition: all 0.15s ease; position: relative; }
-.seq-letter { font-size: 16px; font-weight: bold; color: #333; line-height: 20px; }
-.seq-num { font-size: 9px; color: #999; line-height: 12px; }
-.seq-residue:hover { background: #e3f2fd !important; transform: scale(1.15); z-index: 5; box-shadow: 0 2px 8px rgba(0,0,0,0.15); }
-.seq-hotspot { background: #ff5722 !important; color: white !important; }
-.seq-hotspot .seq-letter { color: white !important; }
-.seq-hotspot .seq-num { color: #ffcdd2 !important; }
-.seq-selected { background: #1976d2 !important; color: white !important; }
-.seq-selected .seq-letter { color: white !important; }
-.seq-selected .seq-num { color: #bbdefb !important; }
-.seq-number-top { position: absolute; top: -14px; left: 50%; transform: translateX(-50%);
-    font-size: 10px; color: #888; font-family: monospace; }
-.upload-area { border: 2px dashed #ccc; border-radius: 8px; padding: 24px; text-align: center;
-    transition: border-color 0.3s; cursor: pointer; background: #fafafa; }
-.upload-area:hover { border-color: #1976d2; background: #e3f2fd; }
-.viewer-wrapper { border: 1px solid #e0e0e0; border-radius: 8px; overflow: hidden; position: relative; }
-.hotspot-tag { display: inline-block; padding: 2px 10px; border-radius: 12px; font-size: 13px;
-    margin: 2px 4px 2px 0; cursor: pointer; transition: transform 0.15s; }
-.hotspot-tag:hover { transform: scale(1.08); }
-.tag-high { background: #ffebee; color: #c62828; border: 1px solid #ef9a9a; }
-.tag-mid { background: #fff8e1; color: #f57f17; border: 1px solid #ffe082; }
-.tag-low { background: #e8f5e9; color: #2e7d32; border: 1px solid #a5d6a7; }
-.step-active { background: #e3f2fd; border-left: 4px solid #1976d2; padding: 8px 12px; margin: 4px 0; border-radius: 4px; font-weight: 600; }
-.step-done { background: #e8f5e9; border-left: 4px solid #388e3c; padding: 8px 12px; margin: 4px 0; border-radius: 4px; }
-.step-pending { background: #f5f5f5; border-left: 4px solid #bdbdbd; padding: 8px 12px; margin: 4px 0; border-radius: 4px; color: #757575; }
-.metric-card { background: #fafafa; border: 1px solid #e0e0e0; border-radius: 8px; padding: 12px; text-align: center; }
-.pipeline-result { border: 1px solid #e0e0e0; border-radius: 8px; padding: 16px; margin: 8px 0; }
-.passed { border-left: 4px solid #4CAF50; }
-.failed { border-left: 4px solid #f44336; }
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+.stApp {
+    background: #ffffff;
+}
+
+/* === Sidebar === */
+[data-testid="stSidebar"] {
+    background: #f8fafc !important;
+    border-right: 1px solid #e2e8f0 !important;
+    width: 220px !important;
+    min-width: 220px !important;
+}
+
+[data-testid="stSidebar"] [data-testid="stSidebarUserContent"] {
+    padding: 0 !important;
+    background: transparent !important;
+}
+
+/* === Sidebar Logo Area === */
+.sidebar-logo {
+    padding: 20px 18px 16px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    border-bottom: 1px solid #e2e8f0;
+    background: white;
+}
+
+.sidebar-logo-icon {
+    width: 38px;
+    height: 38px;
+    background: linear-gradient(135deg, #6366f1, #8b5cf6);
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-size: 20px;
+    font-weight: bold;
+    flex-shrink: 0;
+}
+
+.sidebar-logo-text {
+    font-size: 20px;
+    font-weight: 700;
+    color: #1e293b;
+}
+
+.sidebar-collapse-btn {
+    margin-left: auto;
+    padding: 4px 8px;
+    cursor: pointer;
+    color: #94a3b8;
+    font-size: 18px;
+    border: none;
+    background: transparent;
+}
+
+/* === Sidebar Navigation === */
+.sidebar-nav {
+    padding: 12px 10px;
+}
+
+.nav-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 13px 16px;
+    margin: 3px 0;
+    border-radius: 9px;
+    cursor: pointer;
+    font-size: 14.5px;
+    color: #475569;
+    transition: all 0.15s ease;
+    font-weight: 500;
+    border: none;
+    background: transparent;
+    text-align: left;
+    width: 100%;
+}
+
+.nav-item:hover {
+    background: #e2e8f0;
+    color: #1e293b;
+}
+
+.nav-item.active {
+    background: #dbeafe;
+    color: #2563eb;
+    font-weight: 600;
+}
+
+.nav-icon {
+    font-size: 18px;
+    width: 22px;
+    text-align: center;
+    flex-shrink: 0;
+}
+
+/* === Header === */
+.header-main {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 24px;
+    border-bottom: 1px solid #e2e8f0;
+    margin-bottom: 20px;
+}
+
+.header-left {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.logo-box {
+    width: 40px;
+    height: 40px;
+    background: linear-gradient(135deg, #6366f1, #8b5cf6);
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-size: 22px;
+    font-weight: bold;
+}
+
+.logo-text {
+    font-size: 24px;
+    font-weight: 700;
+    color: #1e293b;
+}
+
+.mode-switch {
+    display: flex;
+    gap: 4px;
+    background: #f1f5f9;
+    padding: 4px;
+    border-radius: 8px;
+}
+
+.mode-btn {
+    padding: 8px 18px;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    border: none;
+    background: transparent;
+    color: #64748b;
+    transition: all 0.15s;
+}
+
+.mode-btn.active {
+    background: white;
+    color: #1e293b;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+}
+
+/* === Upload Section === */
+.upload-section {
+    background: white;
+    padding: 20px 24px;
+    border-bottom: 1px solid #e2e8f0;
+}
+
+.upload-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 12px;
+}
+
+.task-label {
+    font-size: 14px;
+    font-weight: 600;
+    color: #334155;
+    min-width: 70px;
+}
+
+.structure-label {
+    font-size: 14px;
+    font-weight: 600;
+    color: #334155;
+    margin-right: 4px;
+}
+
+.hint-icon {
+    color: #94a3b8;
+    font-size: 14px;
+}
+
+.action-buttons {
+    display: flex;
+    gap: 10px;
+    margin-top: 12px;
+}
+
+.act-btn {
+    padding: 7px 16px;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    border: 1px solid #e2e8f0;
+    background: white;
+    color: #475569;
+    transition: all 0.15s;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.act-btn:hover {
+    border-color: #6366f1;
+    color: #6366f1;
+    background: #f8faff;
+}
+
+/* === Main Content Area === */
+.main-content {
+    padding: 0 24px 24px;
+}
+
+.content-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+    margin-bottom: 16px;
+}
+
+/* === Sequence Panel (Left) === */
+.seq-panel {
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    background: white;
+    overflow: hidden;
+}
+
+.panel-header {
+    font-size: 15px;
+    font-weight: 700;
+    color: #1e293b;
+    padding: 14px 18px;
+    border-bottom: 1px solid #f1f5f9;
+    background: #fafbfc;
+}
+
+.chain-title {
+    font-size: 14px;
+    font-weight: 700;
+    color: #1e293b;
+    padding: 12px 18px 6px;
+    border-bottom: 1px solid #f8fafc;
+}
+
+.seq-container {
+    padding: 12px 18px 20px;
+    max-height: 480px;
+    overflow-y: auto;
+    font-family: 'SF Mono', 'Consolas', 'Monaco', monospace;
+}
+
+.seq-row {
+    display: flex;
+    align-items: baseline;
+    line-height: 2.2;
+    position: relative;
+    padding: 2px 0;
+    font-size: 15px;
+    letter-spacing: 1.2px;
+}
+
+.seq-num {
+    position: absolute;
+    top: -14px;
+    font-size: 11px;
+    color: #94a3b8;
+    font-family: 'SF Mono', Consolas, monospace;
+    font-weight: 400;
+}
+
+.seq-char {
+    display: inline-flex;
+    justify-content: center;
+    align-items: center;
+    width: 21px;
+    height: 26px;
+    margin: 0 0.5px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.12s ease;
+    font-weight: 600;
+    color: #334155;
+    position: relative;
+}
+
+.seq-char:hover {
+    background: #e0e7ff !important;
+    transform: scale(1.25);
+    z-index: 10;
+}
+
+.seq-hotspot {
+    background: #6366f1 !important;
+    color: white !important;
+    box-shadow: 0 2px 6px rgba(99,102,241,0.35);
+}
+
+/* === Viewer Panel (Right) === */
+.viewer-panel {
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    background: white;
+    overflow: hidden;
+    position: relative;
+}
+
+.viewer-wrapper {
+    height: 520px;
+    position: relative;
+}
+
+.viewer-status-bar {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: rgba(30,41,59,0.92);
+    color: #e2e8f0;
+    padding: 8px 16px;
+    font-size: 12px;
+    font-family: 'SF Mono', Consolas, monospace;
+    display: flex;
+    gap: 20px;
+    z-index: 100;
+    backdrop-filter: blur(6px);
+}
+
+/* === Bottom Bar === */
+.bottom-bar {
+    margin-top: 16px;
+}
+
+.file-bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 0;
+    font-size: 13px;
+    color: #64748b;
+    border-top: 1px solid #f1f5f9;
+}
+
+.file-icon {
+    color: #6366f1;
+    font-size: 16px;
+}
+
+.file-name-text {
+    font-weight: 500;
+    color: #334155;
+}
+
+.delete-btn {
+    margin-left: auto;
+    cursor: pointer;
+    color: #ef4444;
+    font-size: 16px;
+}
+
+.hotspot-input-section {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 14px 0;
+    border-top: 1px solid #e2e8f0;
+}
+
+.hotspot-label-text {
+    font-size: 14px;
+    font-weight: 600;
+    color: #1e293b;
+    white-space: nowrap;
+}
+
+.hotspot-field {
+    flex: 1;
+}
+
+.hotspot-field input {
+    width: 100%;
+    padding: 10px 16px;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    font-size: 14px;
+    outline: none;
+    transition: all 0.15s;
+    font-family: inherit;
+}
+
+.hotspot-field input:focus {
+    border-color: #6366f1;
+    box-shadow: 0 0 0 3px rgba(99,102,241,0.1);
+}
+
+.hotspot-field input::placeholder {
+    color: #94a3b8;
+}
+
+.predict-btn {
+    padding: 10px 24px;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    border: none;
+    background: #6366f1;
+    color: white;
+    transition: all 0.15s;
+    white-space: nowrap;
+}
+
+.predict-btn:hover {
+    background: #4f46e5;
+    box-shadow: 0 4px 12px rgba(99,102,241,0.35);
+}
+
+/* === Pipeline Section === */
+.pipeline-section {
+    margin-top: 20px;
+    padding: 20px;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    background: white;
+}
+
+.pipeline-steps {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 16px;
+}
+
+.pipe-step-item {
+    flex: 1;
+    text-align: center;
+    padding: 10px 8px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 500;
+    transition: all 0.15s;
+}
+
+.pipe-done {
+    background: #ecfdf5;
+    color: #059669;
+}
+
+.pipe-active {
+    background: #eff6ff;
+    color: #2563eb;
+}
+
+.pipe-pending {
+    background: #f8fafc;
+    color: #94a3b8;
+}
+
+.pipeline-actions {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+}
 </style>
 """
+
 st.markdown(CSS, unsafe_allow_html=True)
 
 TOP_K = 3
 
 
-def render_html(html_content, height=600):
-    try:
-        st.html(html_content, unsafe_allow_javascript=True)
-    except (AttributeError, TypeError):
-        import streamlit.components.v1 as components
-        components.html(html_content, height=height)
-
-
 def init_session():
     defaults = {
+        "current_page": "新建设计",
         "current_step": 0,
         "atom_array": None,
         "structure_summary": None,
@@ -109,6 +546,9 @@ def init_session():
         "structure_parser": None,
         "pipeline_running": False,
         "task_type": "蛋白",
+        "uploaded_filename": "",
+        "hotspot_manual_input": "",
+        "job_history": [],
     }
     for key, val in defaults.items():
         if key not in st.session_state:
@@ -118,42 +558,18 @@ def init_session():
 init_session()
 
 
-def get_step_status(step):
-    current = st.session_state.current_step
-    if step < current:
-        return "done"
-    elif step == current:
-        return "active"
-    return "pending"
-
-
-def render_step_bar():
-    steps = [
-        "① 热点预测 (Top-3)",
-        "② RFD3生成",
-        "③ MPNN补序",
-        "④ RF3验证"
-    ]
-    cols = st.columns(4)
-    for i, (col, label) in enumerate(zip(cols, steps)):
-        status = get_step_status(i)
-        css_class = f"step-{status}"
-        icon = "✅" if status == "done" else "🔄" if status == "active" else "⏳"
-        with col:
-            st.markdown(f'<div class="{css_class}">{icon} {label}</div>', unsafe_allow_html=True)
-
-
-def build_sequence_html(chain_id, residues, hotspot_labels, clicked_labels):
-    rows_html = []
+def build_sequence_html(chain_id, residues, hotspot_labels):
+    """构建序列HTML - 完全匹配ODesign第二张图样式"""
+    rows = []
     chars_per_row = 40
     n_res = len(residues)
 
     for start in range(0, n_res, chars_per_row):
         end = min(start + chars_per_row, n_res)
-        row_residues = residues[start:end]
+        row_res = residues[start:end]
 
-        residue_divs = ""
-        for idx_offset, res in enumerate(row_residues):
+        letters_html = ""
+        for idx_offset, res in enumerate(row_res):
             global_idx = start + idx_offset
             res_name = res.get("res_name", "?")
             one_letter = AA_3TO1.get(res_name, "X")
@@ -161,37 +577,23 @@ def build_sequence_html(chain_id, residues, hotspot_labels, clicked_labels):
             label = f"{chain_id}{res_id}"
 
             is_hotspot = label in hotspot_labels
-            is_clicked = label in clicked_labels
+            hs_class = "seq-hotspot" if is_hotspot else ""
 
-            extra_classes = []
-            if is_hotspot:
-                extra_classes.append("seq-hotspot")
-            if is_clicked and not is_hotspot:
-                extra_classes.append("seq-selected")
+            letters_html += f"""<span class='seq-char {hs_class}'
+                data-chain='{chain_id}' data-resid='{res_id}' data-label='{label}'
+                onclick="window.parent.postMessage({{type:'residue_click', chain:'{chain_id}', resid:{res_id}, label:'{label}'}}, '*')">{one_letter}</span>"""
 
-            class_str = " ".join(extra_classes) if extra_classes else ""
+        show_num = (start % (chars_per_row * 3) == 0 or start == 0)
+        first_rid = residues[start].get("res_id", start + 1)
+        num_tag = f"<span class='seq-num'>{first_rid}</span>" if show_num else ""
 
-            residue_divs += f"""
-            <div class="seq-residue {class_str}" data-chain="{chain_id}" data-resid="{res_id}" data-label="{label}"
-                 onclick="window.parent.postMessage({{type:'residue_click', chain:'{chain_id}', resid:{res_id}, label:'{label}'}}, '*')">
-                <div class="seq-letter">{one_letter}</div>
-                <div class="seq-num">{res_id}</div>
-            </div>"""
+        last_num = ""
+        if end == n_res and row_res:
+            last_num = f"<span class='seq-num' style='right:8px;left:auto;'>{row_res[-1].get('res_id','')}</span>"
 
-        show_top_num = (start % (chars_per_row * 3) == 0) or (start == 0)
-        num_marker = ""
-        if show_top_num or end == n_res:
-            first_res_id = residues[start].get("res_id", start + 1)
-            marker_pos = min(5, len(row_residues) - 1)
-            num_marker = f'<span class="seq-number-top">{first_res_id}</span>'
+        rows.append(f"<div class='seq-row'>{num_tag}{letters_html}{last_num}</div>")
 
-        rows_html.append(f"""
-        <div class="seq-row">
-            {num_marker}
-            {residue_divs}
-        </div>""")
-
-    return "\n".join(rows_html)
+    return "\n".join(rows)
 
 
 def predict_hotspots(top_k):
@@ -224,12 +626,59 @@ def predict_hotspots(top_k):
                 "combined_score": info.get("score", 0)
             })
         st.session_state.selected_hotspots = hotspots_detail
+
+        input_str = ", ".join([f"{h['chain']}/{h['residue_id']}" for h in hotspots_detail])
+        st.session_state.hotspot_manual_input = input_str
     else:
         st.session_state.selected_hotspots = []
 
     st.session_state.current_step = max(st.session_state.current_step, 1)
-    if st.session_state.selected_hotspots:
-        st.success(f"预测完成！选取 Top-{top_k} 热点残基: {', '.join([h['label'] for h in st.session_state.selected_hotspots])}")
+
+
+def parse_manual_hotspot_input(input_text):
+    if not input_text or not input_text.strip():
+        return []
+
+    parsed = []
+    parts = [p.strip() for p in input_text.replace("，", ",").replace("/", ",").split(",") if p.strip()]
+
+    i = 0
+    while i < len(parts):
+        part = parts[i]
+        chain = "A"
+        res_id = part
+
+        has_alpha = any(c.isalpha() for c in part)
+        has_digit = any(c.isdigit() for c in part)
+
+        if has_alpha and has_digit:
+            for ci, c in enumerate(part):
+                if c.isalpha():
+                    continue
+                chain = part[:ci]
+                res_id = part[ci:]
+                break
+        elif has_alpha:
+            chain = part.upper()
+            if i + 1 < len(parts) and any(c.isdigit() for c in parts[i + 1]):
+                i += 1
+                res_id = parts[i]
+
+        try:
+            int(res_id)
+            parsed.append({
+                "label": f"{chain}{res_id}",
+                "chain": chain,
+                "residue_id": res_id,
+                "residue_name": "",
+                "dl_score": 0,
+                "combined_score": 0
+            })
+        except ValueError:
+            pass
+        i += 1
+
+    return parsed
 
 
 def run_full_pipeline(binder_length, num_designs, num_sequences, rmsd_threshold):
@@ -324,43 +773,186 @@ def run_full_pipeline(binder_length, num_designs, num_sequences, rmsd_threshold)
     time.sleep(0.5)
     progress.empty()
 
+    job_record = {
+        "job_id": job_id,
+        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "status": "已完成",
+        "binder_length": binder_length,
+        "hotspots": len(hotspots),
+        "rfd3_results": rfd3_result,
+        "mpnn_count": len(all_mpnn_results),
+        "rf3_results": all_rf3_results[:5],
+        "uploaded_file": st.session_state.uploaded_filename
+    }
+
+    if "job_history" not in st.session_state:
+        st.session_state.job_history = []
+    st.session_state.job_history.append(job_record)
+
+
+def render_sidebar():
+    st.markdown("""
+    <div class='sidebar-logo'>
+        <div class='sidebar-logo-icon'>O</div>
+        <span class='sidebar-logo-text'>ODesign</span>
+        <button class='sidebar-collapse-btn'>☰</button>
+    </div>
+    """, unsafe_allow_html=True)
+
+    st.markdown("<div class='sidebar-nav'>", unsafe_allow_html=True)
+
+    nav_items = [
+        ("🧬", "新建设计"),
+        ("📋", "作业中心"),
+        ("❓", "帮助"),
+    ]
+
+    for icon, label in nav_items:
+        is_active = (st.session_state.current_page == label)
+        active_class = "active" if is_active else ""
+
+        btn_html = f"""
+        <button class='nav-item {active_class}' onclick="
+            window.parent.postMessage({{type:'nav_change', page:'{label}'}}, '*')
+        ">
+            <span class='nav-icon'>{icon}</span>
+            <span>{label}</span>
+        </button>
+        """
+        st.markdown(btn_html, unsafe_allow_html=True)
+
+        if st.button(label, key=f"nav_{label}", help=f"切换到{label}页面"):
+            st.session_state.current_page = label
+            st.rerun()
+
+    st.markdown("</div>", unsafe_allow_html=True)
+
+
+def render_job_center():
+    st.markdown("### 📋 作业中心 - 历史记录")
+
+    history = st.session_state.get("job_history", [])
+
+    if not history:
+        st.info("暂无历史记录，完成设计任务后会在此显示")
+        return
+
+    for i, job in enumerate(reversed(history[-10:])):
+        with st.expander(f"📁 {job.get('job_id', f'任务-{i+1}')}", expanded=False):
+            col1, col2 = st.columns(2)
+            with col1:
+                st.metric("状态", job.get('status', '已完成'))
+                st.text(f"时间: {job.get('timestamp', 'N/A')}")
+            with col2:
+                if job.get('rf3_results'):
+                    passed = len([r for r in job['rf3_results'] if r.get('passed')])
+                    total = len(job['rf3_results'])
+                    st.metric("通过率", f"{passed}/{total}")
+
+
+def render_help():
+    st.markdown("""
+    ### ❓ 帮助中心
+
+    #### 🚀 快速开始指南
+
+    **步骤 1: 上传结构文件**
+    - 支持格式：PDB、CIF
+    - 文件大小限制：200MB
+    - 可直接粘贴PDB内容
+
+    **步骤 2: 预测热点残基**
+    - 点击"🔬 预测热点 (DL)"按钮
+    - DL模型自动识别Top-3热点
+    - 或手动输入：`A/1, A/2, B/130`
+
+    **步骤 3: 运行全流程**
+    - 调整Binder长度（40-150）
+    - 点击"🚀 运行全流程"
+    - 自动执行：RFD3 → MPNN → RF3
+
+    #### 📖 功能说明
+
+    | 功能 | 说明 |
+    |------|------|
+| **热点预测** | 使用GAT+ESM-2深度学习模型 |
+    | **RFD3** | RFDiffusion3生成Binder主链 |
+    | **MPNN** | ProteinMPNN设计氨基酸序列 |
+    | **RF3** | RoseTTAFold3验证结构质量 |
+
+    #### ⌨️ 快捷操作
+
+    - **点击序列残基** → 3D视图高亮定位
+    - **蓝色标记** → 已选中的热点残基
+    - **输入框** → 手动指定/编辑热点
+
+    #### 🔗 相关链接
+
+    - [ODesign文档](#)
+    - [API参考](#)
+    - [问题反馈](#)
+    """)
+
 
 def render_main_page():
-    task_type = st.selectbox("*任务类型:", options=["蛋白"], index=0, label_visibility="collapsed")
+    current_page = st.session_state.current_page
 
-    col_upload_left, col_upload_right = st.columns([3, 6])
-    with col_upload_left:
-        st.markdown("*目标结构* ⓘ")
-        tab_up, tab_input = st.tabs(["📁 上传文件", "✏️ 输入"])
+    if current_page == "作业中心":
+        render_job_center()
+        return
+    elif current_page == "帮助":
+        render_help()
+        return
+
+    st.markdown("""
+    <div class='header-main'>
+        <div class='header-left'>
+            <div class='logo-box'>O</div>
+            <span class='logo-text'>ODesign</span>
+        </div>
+        <div class='mode-switch'>
+            <button class='mode-btn active'>表格模式</button>
+            <button class='mode-btn'>JSON模式</button>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    col_type, _spacer = st.columns([3, 7])
+    with col_type:
+        task_type = st.selectbox("*任务类型", options=["蛋白"], index=0, label_visibility="collapsed")
+
+    st.markdown("<div class='upload-section'>", unsafe_allow_html=True)
+
+    upload_col, action_col = st.columns([4, 6])
+
+    with upload_col:
+        st.markdown("<div class='upload-row'><span class='structure-label'>*目标结构</span><span class='hint-icon'>ⓘ</span></div>", unsafe_allow_html=True)
+        tab_up, tab_in = st.tabs(["📤 上传文件", "✏️ 输入"])
         with tab_up:
-            uploaded_file = st.file_uploader(
-                "",
-                type=["pdb", "cif"],
-                label_visibility="collapsed",
-                help="支持pdb/cif格式文件，文件不得超过200MB"
-            )
-            if uploaded_file:
-                st.caption(f"📎 {uploaded_file.name}")
-        with tab_input:
-            pdb_text = st.text_area("", height=120, placeholder="粘贴PDB/CIF内容...", label_visibility="collapsed")
+            uploaded_file = st.file_uploader("", type=["pdb", "cif"], label_visibility="collapsed", help="支持pdb/cif格式文件，文件不得超过200MB")
+        with tab_in:
+            pdb_text = st.text_area("", height=80, placeholder="粘贴PDB/CIF内容...", label_visibility="collapsed")
 
-    with col_upload_right:
-        btn_col1, btn_col2, btn_col3, btn_col4 = st.columns(4)
-        with btn_col1:
+    with action_col:
+        st.markdown("<div style='font-size:12px;color:#94a3b8;margin-bottom:8px;'>支持pdb/cif格式文件，文件不超过200MB</div>", unsafe_allow_html=True)
+        btn_cols = st.columns(5)
+        with btn_cols[0]:
             crop_btn = st.button("✂️ 裁剪靶点", use_container_width=True)
-        with btn_col2:
+        with btn_cols[1]:
             spec_btn = st.button("🎯 指定热点", use_container_width=True)
-        with btn_col3:
+        with btn_cols[2]:
             reset_btn = st.button("🔄 重置", use_container_width=True)
-        with btn_col4:
-            empty_col = st.empty()
+        with btn_cols[3]:
+            st.empty()
+        with btn_cols[4]:
+            st.empty()
+
+    st.markdown("</div>", unsafe_allow_html=True)
 
     process_uploaded_file(uploaded_file, pdb_text)
 
     if st.session_state.atom_array is not None:
-        render_structure_view()
-        render_hotspot_section()
-        render_pipeline_panel()
+        render_odesign_layout()
     else:
         render_welcome()
 
@@ -382,65 +974,71 @@ def process_uploaded_file(uploaded_file, pdb_text=None):
                     st.session_state.structure_parser = parser
                     st.session_state.structure_summary = parser.get_structure_summary(atom_array)
                     st.session_state.pdb_content = parser.to_pdb_string(atom_array)
+                    st.session_state.uploaded_filename = getattr(source, 'name', '未命名')
         except Exception as e:
             st.error(f"解析文件时出错: {str(e)}")
 
 
-def render_structure_view():
+def render_odesign_layout():
     atom_array = st.session_state.atom_array
     parser = st.session_state.structure_parser
     residues = parser.get_residue_info(atom_array)
 
     chain_info = {}
     for res in residues:
-        chain_id = res.get("chain_id", "A")
-        if chain_id not in chain_info:
-            chain_info[chain_id] = []
-        chain_info[chain_id].append(res)
+        cid = res.get("chain_id", "A")
+        if cid not in chain_info:
+            chain_info[cid] = []
+        chain_info[cid].append(res)
 
-    hotspot_labels = set()
-    for h in st.session_state.selected_hotspots:
-        hotspot_labels.add(h["label"])
+    hotspot_labels = set(h["label"] for h in st.session_state.selected_hotspots)
 
-    clicked_labels = set(st.session_state.clicked_residues)
+    st.markdown("<div class='main-content'>", unsafe_allow_html=True)
 
-    seq_col, view_col = st.columns([1, 1.3])
+    seq_col, viewer_col = st.columns([1.1, 1])
 
     with seq_col:
-        st.markdown("#### 氨基酸序列")
+        html_parts = ["<div class='seq-panel'>"]
+        html_parts.append("<div class='panel-header'>氨基酸序列</div>")
+
         for chain_id in sorted(chain_info.keys()):
             chain_residues = chain_info[chain_id]
-            seq_html = f"""<div style='border:1px solid #e0e0e0;border-radius:8px;padding:12px;background:#fff;max-height:520px;overflow-y:auto;'>
-            <div style='font-weight:bold;color:#1976d2;margin-bottom:8px;'>{chain_id}protein</div>
-            <div class='seq-container'>"""
-            seq_html += build_sequence_html(chain_id, chain_residues, hotspot_labels, clicked_labels)
-            seq_html += "</div></div>"
-            st.markdown(seq_html, unsafe_allow_html=True)
+            html_parts.append(f"<div class='chain-title'>{chain_id}:protein</div>")
+            html_parts.append("<div class='seq-container'>")
+            html_parts.append(build_sequence_html(chain_id, chain_residues, hotspot_labels))
+            html_parts.append("</div>")
 
-        file_name = "未命名"
-        summary = st.session_state.structure_summary
-        if hasattr(st.session_state, '_uploaded_filename'):
-            file_name = st.session_state._uploaded_filename
+        html_parts.append("</div>")
 
+        full_seq_html = "\n".join(html_parts)
+        components.html(f"<style>{CSS}</style>{full_seq_html}", height=520, scrolling=True)
+
+        fn = st.session_state.uploaded_filename or "未命名"
         st.markdown(f"""
-        <div style='margin-top:8px;padding:8px;border:1px solid #e0e0e0;border-radius:6px;display:flex;align-items:center;gap:8px;'>
-        <span>🔗</span><span>{file_name}</span>
-        </div>""", unsafe_allow_html=True)
+        <div class='file-bar'>
+            <span class='file-icon'>🔗</span>
+            <span class='file-name-text'>{fn}</span>
+            <span class='delete-btn' onclick="window.parent.postMessage({{type:'remove_file'}}, '*')">🗑️</span>
+        </div>
+        """, unsafe_allow_html=True)
 
-    with view_col:
-        st.markdown("#### 3D 结构可视化")
-        render_interactive_viewer(chain_info, hotspot_labels)
+    with viewer_col:
+        render_viewer_panel(chain_info, hotspot_labels)
+
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    render_hotspot_bar()
+    render_pipeline_section()
 
 
-def render_interactive_viewer(chain_info, hotspot_labels):
+def render_viewer_panel(chain_info, hotspot_labels):
     pdb_content = st.session_state.pdb_content
     if not pdb_content:
-        st.info("请先上传蛋白质文件")
         return
 
-    hotspot_residues = []
+    hotspot_data = []
     for h in st.session_state.selected_hotspots:
-        hotspot_residues.append({
+        hotspot_data.append({
             "chain": h.get("chain", "A"),
             "residue_id": h.get("residue_id", "0"),
             "score": h.get("combined_score", 0)
@@ -448,11 +1046,16 @@ def render_interactive_viewer(chain_info, hotspot_labels):
 
     molstar_html = render_molstar_with_interaction(
         pdb_content=pdb_content,
-        hotspot_residues=hotspot_residues,
+        hotspot_residues=hotspot_data,
         chain_info=chain_info,
-        height=580
+        height=520
     )
-    render_html(molstar_html, height=600)
+
+    total_res = sum(len(v) for v in chain_info.values())
+    status_text = f"XXXX | Model 1 | Instance 1,{total_res} | B"
+
+    st.markdown(f"<div class='viewer-panel'><div class='panel-header'>3D 结构可视化</div><div class='viewer-wrapper'></div><div class='viewer-status-bar'>{status_text}</div></div>", unsafe_allow_html=True)
+    components.html(molstar_html, height=560, scrolling=False)
 
 
 def render_molstar_with_interaction(pdb_content, hotspot_residues, chain_info, height=580):
@@ -475,8 +1078,6 @@ def render_molstar_with_interaction(pdb_content, hotspot_residues, chain_info, h
             entries.append(f'{{chain: "{chain}", resId: {res_id_int}, score: {float(score):.3f}}}')
         hotspot_js = f"const hotspotResidues = [{', '.join(entries)}];"
 
-    all_chains_json = json.dumps(list(chain_info.keys()))
-
     html = f"""
     <!DOCTYPE html>
     <html>
@@ -485,192 +1086,97 @@ def render_molstar_with_interaction(pdb_content, hotspot_residues, chain_info, h
         <style>
             * {{ margin: 0; padding: 0; box-sizing: border-box; }}
             body {{ background: #fff; }}
-            #viewer {{ width: 100%; height: {height}px; position: relative; }}
-            #statusBar {{
-                position: absolute; bottom: 0; left: 0; right: 0;
-                background: rgba(0,0,0,0.85); color: #fff;
-                padding: 6px 12px; font-size: 13px; font-family: monospace;
-                display: flex; gap: 16px; align-items: center; z-index: 10;
+            #molstar-root {{ width: 100%; height: {height}px; }}
+            .molstar-toolbar {{
+                position: absolute; right: 10px; top: 10px; z-index: 20;
+                background: white; border: 1px solid #ddd; border-radius: 8px;
+                padding: 6px; display: flex; flex-direction: column; gap: 3px;
+                box-shadow: 0 2px 10px rgba(0,0,0,0.12);
             }}
-            .legend {{ display: inline-block; width: 12px; height: 12px; border-radius: 2px; margin-right: 4px; }}
-            .toolbar-btn {{
-                position: absolute; right: 8px; top: 8px; z-index: 20;
-                background: white; border: 1px solid #ddd; border-radius: 6px;
-                padding: 4px; display: flex; flex-direction: column; gap: 2px;
-                box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-            }}
-            .toolbar-btn button {{
-                width: 32px; height: 32px; border: none; background: transparent;
-                cursor: pointer; border-radius: 4px; font-size: 16px; display: flex;
+            .molstar-toolbar button {{
+                width: 34px; height: 34px; border: none; background: transparent;
+                cursor: pointer; border-radius: 5px; font-size: 17px; display: flex;
                 align-items: center; justify-content: center; color: #555;
             }}
-            .toolbar-btn button:hover {{ background: #e3f2fd; color: #1976d2; }}
+            .molstar-toolbar button:hover {{ background: #e3f2fd; color: #1976d2; }}
         </style>
         <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/molstar@4.4.0/build/viewer/molstar.css">
     </head>
     <body>
-        <div id="viewer">
-            <div class="toolbar-btn">
-                <button onclick="resetCamera()" title="重置视角">🎯</button>
+        <div id='molstar-root'>
+            <div class='molstar-toolbar'>
+                <button onclick="resetView()" title="重置视角">🎯</button>
                 <button onclick="toggleSpin()" title="旋转">🔄</button>
-                <button onclick="toggleStyle()" title="切换样式">⚙️</button>
-                <button onclick="toggleLabel()" title="标签">🏷️</button>
-                <button onclick="zoomToFit()" title="适应窗口">⬜</button>
-                <button onclick="screenshot()" title="截图">📷</button>
-            </div>
-            <div id="statusBar">
-                <span class="status-item"><span class="legend" style="background:#4CAF50"></span>Target</span>
-                <span id="resInfo" style="margin-left:auto;"></span>
+                <button onclick="zoomFit()" title="适应窗口">⬜</button>
+                <button onclick="takeScreenshot()" title="截图">📷</button>
             </div>
         </div>
-        <script src="https://cdn.jsdelivr.net/npm/molstar@4.4.0/build/viewer/molstar.js"></script>
-        <script>
+
+        <script type="importmap">
+        {{
+            "imports": {{
+                "molstar": "https://cdn.jsdelivr.net/npm/molstar@4.4.0/build/esm/index.js",
+                "molstar/lib/commonjs/mol-star": "https://cdn.jsdelivr.net/npm/molstar@4.4.0/build/esm/index.js"
+            }}
+        }}
+        </script>
+        <script type="module">
+        import {{ PluginSpec }} from 'molstar';
+        import {{ createPlugin }} from 'molstar/lib/mol-plugin-ui/plugin';
+        import {{ DefaultPluginSpec }} from 'molstar/lib/mol-plugin-ui/spec';
+
+        let plugin;
+
+        async function init() {{
+            const container = document.getElementById('molstar-root');
+            plugin = await createPlugin(container, {{
+                layout: {{
+                    initial: {{ isExpanded: false, showControls: false }},
+                }},
+                spec: DefaultPluginSpec,
+            }});
+
+            const pdbData = `{pdb_b64}`;
+            await plugin.builders.data.download({{
+                url: 'data:text/plain;base64,' + pdbData,
+                isBinary: true,
+                format: 'pdb',
+            }}, {{ state: {{ isHidden: true }}, representation: {{ params: {{}} }} }});
+
+            plugin.build().toRoot();
+
+            const structure = plugin.state.data.select('structure')[0];
+            if (!structure) return;
+
+            const modelData = structure.cell.obj?.data;
+            if (!modelData) return;
+
             {hotspot_js}
-            const allChains = {all_chains_json};
-            let pluginInstance = null;
-            let targetStructures = [];
-            let isSpinning = false;
-            let spinAnimId = null;
 
-            function highlightResidue(chainId, resId) {{
-                if (!pluginInstance || targetStructures.length === 0) return;
-                const plugin = pluginInstance;
-                const targetStruct = targetStructures[0];
-                const comp = plugin.managers.structure.component;
-
-                comp.clearRepresentations(targetStruct);
-
-                const defaultRepr = await comp.addRepresentation(targetStruct, 'cartoon', {{
-                    color: {{ name: 'uniform', params: {{ value: '#4CAF50' }} }},
-                    alpha: 0.85
-                }});
-
-                const script = molstar.Script(
-                    "sel.atom: " +
-                    "(chain.authAsymId = " + JSON.stringify(chainId) + " or chain.labelAsymId = " + JSON.stringify(chainId) + ") and " +
-                    "(residue.authSeqNumber = " + parseInt(resId) + " or residue.labelSeqNumber = " + parseInt(resId) + ")"
-                );
-
-                const selData = await plugin.managers.structure.selection.fromScript(targetStruct, script);
-                if (selData) {{
-                    await comp.addRepresentation(targetStruct, 'ball-and-stick', {{
-                        color: {{ name: 'uniform', params: {{ value: '#FF0000' }} }},
-                        sizeFactor: 0.35,
-                        sizeAspectRatio: 1.0
-                    }}, selData);
+            if (hotspotResidues.length > 0) {{
+                const lociElements = [];
+                for (const hs of hotspotResidues) {{
+                    try {{
+                        const l = modelData.location.label(hs.resId.toString(), hs.chain.toUpperCase());
+                        if (l) lociElements.push(l.elements);
+                    }} catch(e) {{}}
                 }}
-
-                document.getElementById("resInfo").textContent =
-                    chainId + "/" + resId + " 已高亮";
-            }}
-
-            window.addEventListener('message', function(event) {{
-                if (event.data && event.data.type === 'residue_click') {{
-                    highlightResidue(event.data.chain, event.data.resid);
-                }}
-            }});
-
-            molstar.Viewer.create("viewer", {{
-                layoutIsExpanded: false,
-                layoutShowControls: false,
-                layoutShowRemoteState: false,
-                layoutShowSequence: false,
-                layoutShowLog: false,
-                layoutShowLeftPanel: false,
-            }}).then(async viewer => {{
-                pluginInstance = viewer;
-                const plugin = viewer;
-
-                try {{
-                    const targetData = atob("{pdb_b64}");
-                    const targetTraj = await plugin.builders.structure.readTrajectory({{
-                        model: {{ type: 'pdb', data: targetData }}
-                    }});
-                    const targetPreset = await plugin.builders.structure.hierarchy.applyPreset(
-                        {{ structure: targetTraj }},
-                        'default'
-                    );
-
-                    targetStructures.push(targetTraj.structures[0]);
-
-                    const targetRepr = targetPreset.structure.representations[0];
-                    if (targetRepr) {{
-                        await plugin.managers.structure.component.updateRepresentationsOptions(
-                            targetRepr,
-                            {{ color: {{ name: 'uniform', params: {{ value: '#4CAF50' }} }}, alpha: 0.85 }}
-                        );
-                    }}
-
-                    if (hotspotResidues.length > 0) {{
-                        try {{
-                            const structures = plugin.managers.structure.hierarchy.current.structures;
-                            if (structures.length > 0) {{
-                                const targetStruct = structures[0];
-                                const comp = plugin.managers.structure.component;
-
-                                for (const h of hotspotResidues) {{
-                                    try {{
-                                        const script = molstar.Script(
-                                            "sel.atom: " +
-                                            "(chain.authAsymId = " + JSON.stringify(h.chain) + " or chain.labelAsymId = " + JSON.stringify(h.chain) + ") and " +
-                                            "(residue.authSeqNumber = " + h.resId + " or residue.labelSeqNumber = " + h.resId + ")"
-                                        );
-                                        const selData = await plugin.managers.structure.selection.fromScript(targetStruct, script);
-                                        if (selData) {{
-                                            await comp.addRepresentation(targetStruct, 'ball-and-stick', {{
-                                                color: {{ name: 'uniform', params: {{ value: '#FF0000' }} }},
-                                                sizeFactor: 0.3
-                                            }}, selData);
-                                        }}
-                                    }} catch(e2) {{ console.warn("Hotspot error:", e2); }}
-                                }}
-                            }}
-                        }} catch(e) {{ console.warn("Hotspot section error:", e); }}
-                    }}
-
-                    plugin.managers.camera.resetSnapshot();
-
-                }} catch(e) {{
-                    console.error("Mol* error:", e);
-                    document.getElementById("resInfo").textContent = "Error: " + e.message;
-                }}
-            }});
-
-            function resetCamera() {{
-                if (pluginInstance) pluginInstance.managers.camera.resetSnapshot();
-            }}
-            function toggleSpin() {{
-                isSpinning = !isSpinning;
-                if (isSpinning && pluginInstance) {{
-                    spinAnimId = requestAnimationFrame(function spin() {{
-                        if (!isSpinning) return;
-                        pluginInstance.managers.camera.spin({{ speed: 1 }});
-                        spinAnimId = requestAnimationFrame(spin);
-                    }});
-                }} else if (spinAnimId) {{
-                    cancelAnimationFrame(spinAnimId);
+                if (lociElements.length > 0) {{
+                    const combined = modelData.union(...lociElements);
+                    plugin.managers.structureSelection.fromLoci('hotspot', combined);
                 }}
             }}
-            function toggleStyle() {{
-                if (!pluginInstance) return;
-                const structs = pluginInstance.managers.structure.hierarchy.current.structures;
-                if (structs.length > 0) {{
-                    const s = structs[0];
-                    const reprs = pluginInstance.managers.structure.component.getRepresentations(s);
-                    reprs.forEach(r => {{
-                        const cur = r.params?.type?.name || '';
-                        if (cur === 'cartoon') pluginInstance.managers.structure.component.updateRepresentationsOptions(r, {{ type: {{ name: 'spacefill' }} }});
-                        else if (cur === 'spacefill') pluginInstance.managers.structure.component.updateRepresentationsOptions(r, {{ type: {{ name: 'cartoon' }} }});
-                    }});
-                }}
-            }}
-            function toggleLabel() {{}}
-            function zoomToFit() {{
-                if (pluginInstance) pluginInstance.managers.camera.resetSnapshot();
-            }}
-            function screenshot() {{
-                if (pluginInstance) pluginInstance.managers.snapshot.saveToFile('image/png');
-            }}
+
+            plugin.build().toRoot();
+            plugin.managers.camera.resetSnapshot();
+
+            window.resetView = () => plugin.managers.camera.resetSnapshot();
+            window.toggleSpin = () => {{ const s = plugin.canvas3d?.props; if(s) s.spin = !s.spin; }};
+            window.zoomFit = () => plugin.managers.camera.focus();
+            window.takeScreenshot = () => plugin.canvas3d?.getImageData()?.toDataURL();
+        }}
+
+        init();
         </script>
     </body>
     </html>
@@ -678,104 +1184,85 @@ def render_molstar_with_interaction(pdb_content, hotspot_residues, chain_info, h
     return html
 
 
-def render_hotspot_section():
-    hotspots = st.session_state.selected_hotspots
+def render_hotspot_bar():
+    current_val = ", ".join(f"{h['chain']}/{h['residue_id']}" for h in st.session_state.selected_hotspots)
+    if not current_val:
+        current_val = st.session_state.get("hotspot_manual_input", "")
 
-    st.markdown("---")
-    hotspot_col_label, hotspot_col_input = st.columns([1, 5])
-    with hotspot_col_label:
-        st.markdown("**热点** ⓘ")
-    with hotspot_col_input:
+    st.markdown("<div class='hotspot-input-section'><span class='hotspot-label-text'>热点</span><span style='color:#94a3b8;font-size:14px;margin-left:2px;'>ⓘ</span>", unsafe_allow_html=True)
 
-        if hotspots:
-            tags_html = ""
-            for h in hotspots:
-                score = h.get("combined_score", 0)
-                res_name = h.get("residue_name", "")
-                one_letter = AA_3TO1.get(res_name, "?")
-                if score > 0.7:
-                    tag_cls = "tag-high"
-                elif score > 0.4:
-                    tag_cls = "tag-mid"
-                else:
-                    tag_cls = "tag-low"
+    c_input, c_btn = st.columns([6, 4])
+    with c_input:
+        new_input = st.text_input(
+            "",
+            value=current_val,
+            placeholder="输入残基编号：A/1 表示 A 链上的残基 1（例如：A/1、A/2、A/3）",
+            label_visibility="collapsed",
+            key="hotspot_manual_input_field"
+        )
+    with c_btn:
+        pred_btn = st.button("🔬 预测热点 (DL)", use_container_width=True, type="primary")
 
-                tags_html += f"""
-                <span class="hotspot-tag {tag_cls}"
-                      onclick="window.parent.postMessage({{type:'residue_click', chain:'{h.get('chain','A')}', resid:'{h['residue_id']}'}}, '*')">
-                    {one_letter}{h['label']} ({score:.3f})
-                </span>"""
+    st.markdown("</div>", unsafe_allow_html=True)
 
-            st.markdown(tags_html, unsafe_allow_html=True)
+    if pred_btn:
+        predict_hotspots(TOP_K)
+        st.rerun()
+
+    if new_input != current_val and new_input.strip():
+        parsed = parse_manual_hotspot_input(new_input)
+        if parsed:
+            st.session_state.selected_hotspots = parsed
+            st.rerun()
+
+
+def render_pipeline_section():
+    st.markdown("<div class='pipeline-section'>", unsafe_allow_html=True)
+
+    steps_data = [
+        ("① 热点预测", 0),
+        ("② RFD3生成", 1),
+        ("③ MPNN补序", 2),
+        ("④ RF3验证", 3),
+    ]
+
+    step_cols = st.columns(4)
+    for i, ((label, step), col) in enumerate(zip(steps_data, step_cols)):
+        current = st.session_state.current_step
+        status = "done" if step < current else ("active" if step == current else "pending")
+        icon = "✅" if status == "done" else ("🔄" if status == "active" else "⏳")
+        with col:
+            st.markdown(f"<div class='pipe-step-item pipe-{status}'>{icon} {label}</div>", unsafe_allow_html=True)
+
+    c_run, c_full, c_rst = st.columns([2, 2, 1])
+    with c_run:
+        binder_len = st.slider("Binder长度", 40, 150, 80, step=5, label_visibility="collapsed")
+    with c_full:
+        run_btn = st.button("🚀 运行全流程", type="primary", use_container_width=True)
+    with c_rst:
+        rst_btn = st.button("🔄 重置全部", use_container_width=True)
+
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    if run_btn:
+        if st.session_state.atom_array is None:
+            st.error("请先上传目标蛋白结构文件")
+        elif not st.session_state.selected_hotspots:
+            st.warning("请先预测或选择热点残基")
         else:
-            placeholder = st.text_input(
-                "",
-                placeholder="输入残基编号：A/1 表示 A 链上的残基 1（例如：A/1、A/2、A/3）",
-                label_visibility="collapsed",
-                key="hotspot_manual_input"
-            )
+            run_full_pipeline(binder_len, TOP_K, TOP_K, 2.0)
 
-    if hotspots:
-        with st.expander("📊 详细预测结果", expanded=False):
-            df_data = []
-            for h in hotspots:
-                res_name = h.get("residue_name", "")
-                one_letter = AA_3TO1.get(res_name, "?")
-                df_data.append({
-                    "残基": f"{one_letter} ({h['label']})",
-                    "链": h.get("chain", "A"),
-                    "三字母": res_name,
-                    "单字母": one_letter,
-                    "DL得分": f"{h.get('dl_score', h.get('combined_score', 0)):.4f}",
-                    "综合得分": f"{h.get('combined_score', 0):.4f}"
-                })
-            st.dataframe(pd.DataFrame(df_data), use_container_width=True)
-
-        st.info(f"💡 已选取 Top-{len(hotspots)} 热点残基，点击上方按钮开始设计流程")
-
-
-def render_pipeline_panel():
-    with st.container():
-        st.markdown("---")
-        render_step_bar()
-
-        c_predict, c_run, c_reset = st.columns([2, 2, 1])
-        with c_predict:
-            st.markdown("**🎯 热点预测 (DL)**")
-
-        with c_run:
-            binder_len = st.slider("Binder长度", 40, 150, 80, step=5, label_visibility="collapsed")
-
-        with c_reset:
-            if st.button("🎯 预测热点", type="primary", use_container_width=True):
-                if st.session_state.atom_array is not None:
-                    predict_hotspots(TOP_K)
-                else:
-                    st.warning("请先上传蛋白质文件")
-
-        btn_run, btn_full, btn_rst = st.columns(3)
-        with btn_run:
-            if st.button("🚀 运行全流程", type="primary", use_container_width=True):
-                if st.session_state.atom_array is None:
-                    st.error("请先上传目标蛋白结构文件")
-                elif not st.session_state.selected_hotspots:
-                    st.warning("请先预测或选择热点残基")
-                else:
-                    run_full_pipeline(binder_len, TOP_K, TOP_K, 2.0)
-        with btn_full:
-            if st.button("🔄 重置全部", use_container_width=True):
-                for key in list(st.session_state.keys()):
-                    del st.session_state[key]
-                init_session()
-                st.rerun()
-        with btn_rst:
-            st.empty()
+    if rst_btn:
+        for key in list(st.session_state.keys()):
+            del st.session_state[key]
+        init_session()
+        st.rerun()
 
     if st.session_state.rfd3_results:
-        render_pipeline_results()
+        render_results()
 
 
-def render_pipeline_results():
+def render_results():
     st.markdown("### 🧬 设计结果")
     rfd3_results = st.session_state.rfd3_results
     mpnn_results = st.session_state.mpnn_results
@@ -785,43 +1272,43 @@ def render_pipeline_results():
     if is_mock:
         st.warning("⚠️ RFD3/MPNN/RF3未安装，使用模拟数据展示流程")
 
-    tab_rfd3, tab_mpnn, tab_rf3 = st.tabs(["RFD3 主链", "MPNN 序列", "RF3 验证"])
+    t1, t2, t3 = st.tabs(["RFD3 主链", "MPNN 序列", "RF3 验证"])
 
-    with tab_rfd3:
+    with t1:
         if rfd3_results.get("success"):
             designs = rfd3_results["designs"]
-            cols = st.columns(min(len(designs), 4))
-            for i, design in enumerate(designs[:4]):
-                with cols[i]:
-                    plddt = design.get("plddt", 0)
-                    rank = design.get("rank", i + 1)
+            dc = st.columns(min(len(designs), 4))
+            for i, d in enumerate(designs[:4]):
+                with dc[i]:
+                    plddt = d.get("plddt", 0)
+                    rank = d.get("rank", i + 1)
                     st.markdown(f"""
-                    <div class="metric-card">
-                        <div style="font-size:16px;font-weight:bold;">Design {design['index']+1}</div>
-                        <div style="font-size:12px;">Rank #{rank}</div>
-                        <div style="font-size:13px;">pLDDT: {plddt:.1f}</div>
+                    <div style='text-align:center;padding:14px;border:1px solid #e2e8f0;border-radius:10px;background:#fafbfc;'>
+                        <div style='font-size:16px;font-weight:700;color:#1e293b;'>Design {d['index']+1}</div>
+                        <div style='font-size:12px;color:#64748b;margin-top:4px;'>Rank #{rank}</div>
+                        <div style='font-size:15px;font-weight:600;color:#2563eb;margin-top:8px;'>pLDDT: {plddt:.1f}</div>
                     </div>
                     """, unsafe_allow_html=True)
             st.caption(f"共生成 {len(designs)} 个Binder主链结构，选取 Top-{TOP_K}")
         else:
             st.error(f"RFD3生成失败: {rfd3_results.get('error', 'Unknown')}")
 
-    with tab_mpnn:
+    with t2:
         if mpnn_results:
-            df_data = []
+            df_d = []
             for m in mpnn_results:
                 seq = m["sequence"]
-                df_data.append({
+                df_d.append({
                     "设计": f"Design {m['design_idx']+1}",
                     "序列": seq[:60] + "..." if len(seq) > 60 else seq,
                     "长度": len(seq),
                     "得分": f"{m.get('score', 0):.2f}",
                 })
-            st.dataframe(pd.DataFrame(df_data), use_container_width=True)
+            st.dataframe(pd.DataFrame(df_d), use_container_width=True)
         else:
             st.info("MPNN序列设计未运行")
 
-    with tab_rf3:
+    with t3:
         if rf3_results:
             passed = [r for r in rf3_results if r["passed"]]
             failed = [r for r in rf3_results if not r["passed"] and r["rmsd"] >= 0]
@@ -838,34 +1325,34 @@ def render_pipeline_results():
                 best = min(passed, key=lambda x: x["rmsd"])
                 st.success(f"🏆 最佳: Design {best['design_idx']+1}, RMSD={best['rmsd']:.3f}Å, pLDDT={best.get('avg_plddt','N/A')}")
 
-            df_data = []
+            df_r = []
             for r in rf3_results:
                 seq = r["sequence"]
-                status = "✅ 通过" if r["passed"] else "❌ 未通过"
-                df_data.append({
+                status_txt = "✅ 通过" if r["passed"] else "❌ 未通过"
+                df_r.append({
                     "设计": f"Design {r['design_idx']+1}",
                     "序列": seq[:30] + "..." if len(seq) > 30 else seq,
                     "RMSD(Å)": f"{r['rmsd']:.3f}" if r['rmsd'] >= 0 else "N/A",
                     "pLDDT": f"{r.get('avg_plddt', 0):.1f}" if r.get('avg_plddt') else "N/A",
-                    "状态": status,
+                    "状态": status_txt,
                 })
-            st.dataframe(pd.DataFrame(df_data), use_container_width=True)
+            st.dataframe(pd.DataFrame(df_r), use_container_width=True)
         else:
             st.info("RF3验证未运行")
 
 
 def render_welcome():
-    st.title("🧬 蛋白质Binder设计系统")
+    st.title("🧬 ODesign - 蛋白质Binder设计系统")
     st.markdown("---")
 
-    col1, col2 = st.columns([2, 1])
-    with col1:
+    c1, c2 = st.columns([2, 1])
+    with c1:
         st.markdown("""
         ### 🚀 快速开始
 
         1. **上传目标蛋白结构** - 上方选择 PDB/CIF 文件
-        2. **查看序列与3D** - 左侧单字母序列 + 右侧3D结构
-        3. **预测热点残基** - DL模型自动选取Top-3
+        2. **查看序列与3D** - 左侧单字母序列 + 右侧3D结构（点击高亮）
+        3. **预测热点残基** - DL模型自动选取Top-3 或 手动输入
         4. **运行全流程** - RFD3 → MPNN → RF3 自动化设计
 
         ### 📋 工作流程
@@ -884,26 +1371,28 @@ def render_welcome():
         | RoseTTAFold3 | 结构预测验证 | 三轨网络 |
         """)
 
-    with col2:
+    with c2:
         st.markdown("""
         ### ⚙️ 系统要求
 
         - Python 3.10+
         - Streamlit 1.30+
         - Biotite 0.38+
-        - XGBoost ≥ 1.7.0
         - GPU (可选, 用于DL模型)
 
         ### 💡 使用提示
 
         - 点击左侧序列中的**任意残基** → 右侧3D视图**高亮显示**
-        - **橙色标记**为已识别的热点残基
+        - **蓝色标记**为已识别的热点残基
+        - 底部输入框支持手动指定热点：`A/1, B/130`
         - 未安装RFD3/MPNN/RF3时自动使用模拟模式
-        - Top-K=3 默认选取3个最优结果
         """)
 
 
 def main():
+    with st.sidebar:
+        render_sidebar()
+
     render_main_page()
 
 
