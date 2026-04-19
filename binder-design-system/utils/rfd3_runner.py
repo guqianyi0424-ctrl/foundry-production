@@ -18,6 +18,25 @@ class RFD3Runner:
         self.base_path = Path(__file__).parent.parent.parent
         self.output_dir = self.base_path / "binder-design-system" / "outputs" / "rfd3"
         self.output_dir.mkdir(parents=True, exist_ok=True)
+        self._ckpt_path = self._find_checkpoint()
+
+    def _find_checkpoint(self) -> Optional[str]:
+        search_paths = [
+            self.base_path / "foundry-production" / "checkpoints" / "rfd3_latest.ckpt",
+            self.base_path / "checkpoints" / "rfd3_latest.ckpt",
+            Path(os.path.expanduser("~/.foundry/checkpoints/rfd3_latest.ckpt")),
+            Path("/root/.foundry/checkpoints/rfd3_latest.ckpt"),
+        ]
+        for p in search_paths:
+            if p.exists():
+                return str(p)
+        ckpt_env = os.environ.get("FOUNDRY_CHECKPOINT_DIRS", "")
+        if ckpt_env:
+            for d in ckpt_env.split(os.pathsep):
+                p = Path(d) / "rfd3_latest.ckpt"
+                if p.exists():
+                    return str(p)
+        return None
 
     def is_available(self) -> bool:
         return is_foundry_available()
@@ -45,6 +64,9 @@ class RFD3Runner:
             f"diffusion_batch_size={num_designs}",
             "n_batches=1",
         ]
+
+        if self._ckpt_path:
+            overrides.append(f"ckpt_path={self._ckpt_path}")
 
         if hotspot_str:
             overrides.append(f"+specification.hotspot_res=[{hotspot_str}]")
