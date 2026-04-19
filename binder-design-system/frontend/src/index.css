@@ -1,0 +1,52 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --sidebar-width: 200px;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  background-color: #f5f7fa;
+  color: #1e293b;
+  overflow-x: hidden;
+}
+
+@layer components {
+  .seq-hotspot {
+    @apply bg-blue-500 text-white rounded px-0.5 mx-px font-semibold cursor-pointer transition-all hover:bg-blue-600;
+  }
+
+  .seq-residue {
+    @apply cursor-pointer transition-all hover:bg-gray-100 rounded px-px;
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    letter-spacing: 1.5px;
+  }
+
+  .design-card {
+    @apply bg-white border border-gray-200 rounded-xl p-4 transition-all hover:border-primary-300 hover:shadow-md;
+  }
+
+  .metric-card {
+    @apply bg-white border border-gray-200 rounded-xl p-4 text-center;
+  }
+
+  .tab-active {
+    @apply text-primary-600 border-b-2 border-primary-600 font-semibold;
+  }
+
+  .tab-inactive {
+    @apply text-gray-500 hover:text-gray-700 hover:border-b-2 hover:border-gray-300;
+  }
+}
+
+.molstar-container canvas {
+  outline: none !important;
+}
