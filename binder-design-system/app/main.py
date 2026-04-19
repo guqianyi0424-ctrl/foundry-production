@@ -24,6 +24,9 @@ from utils.rfd3_runner import RFD3Runner
 from utils.mpnn_runner import MPNNRunner
 from utils.rf3_runner import RF3Runner
 from utils.molstar_viewer import render_molstar, render_rmsd_chart, render_plddt_chart
+from utils.rfd3_visualizer import render_rfd3_viewer, render_rfd3_plddt_chart, render_rfd3_design_card
+from utils.mpnn_visualizer import render_mpnn_sequence_comparison, render_mpnn_score_chart, render_mpnn_legend
+from utils.rf3_visualizer import render_rf3_result_card, render_rf3_plddt_chart, render_rf3_pae_heatmap, render_rf3_rmsd_chart, render_rf3_summary_metrics
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
@@ -1272,29 +1275,49 @@ def render_results():
     if is_mock:
         st.warning("⚠️ RFD3/MPNN/RF3未安装，使用模拟数据展示流程")
 
-    t1, t2, t3 = st.tabs(["RFD3 主链", "MPNN 序列", "RF3 验证"])
+    t1, t2, t3 = st.tabs(["② RFD3 主链生成", "③ MPNN 序列设计", "④ RF3 结构验证"])
 
     with t1:
         if rfd3_results.get("success"):
             designs = rfd3_results["designs"]
-            dc = st.columns(min(len(designs), 4))
-            for i, d in enumerate(designs[:4]):
+
+            st.markdown(f"<div style='font-size:13px;color:#64748b;margin-bottom:12px;'>共生成 {len(designs)} 个Binder主链结构，选取 Top-{TOP_K}</div>", unsafe_allow_html=True)
+
+            dc = st.columns(min(len(designs), 3))
+            for i, d in enumerate(designs[:3]):
                 with dc[i]:
-                    plddt = d.get("plddt", 0)
-                    rank = d.get("rank", i + 1)
-                    st.markdown(f"""
-                    <div style='text-align:center;padding:14px;border:1px solid #e2e8f0;border-radius:10px;background:#fafbfc;'>
-                        <div style='font-size:16px;font-weight:700;color:#1e293b;'>Design {d['index']+1}</div>
-                        <div style='font-size:12px;color:#64748b;margin-top:4px;'>Rank #{rank}</div>
-                        <div style='font-size:15px;font-weight:600;color:#2563eb;margin-top:8px;'>pLDDT: {plddt:.1f}</div>
-                    </div>
-                    """, unsafe_allow_html=True)
-            st.caption(f"共生成 {len(designs)} 个Binder主链结构，选取 Top-{TOP_K}")
+                    st.markdown(render_rfd3_design_card(d, is_selected=(i == 0)), unsafe_allow_html=True)
+
+            selected_idx = st.selectbox("选择Design查看3D结构", range(len(designs)), format_func=lambda x: f"Design {x+1}", key="rfd3_select")
+
+            selected_design = designs[selected_idx]
+            design_pdb_path = selected_design.get("pdb_path", "")
+
+            if design_pdb_path and os.path.exists(design_pdb_path):
+                target_pdb = st.session_state.pdb_content
+                rfd3_html = render_rfd3_viewer(
+                    design_pdb_path=design_pdb_path,
+                    target_pdb_content=target_pdb,
+                    plddt_data=None,
+                    design_index=selected_idx,
+                    rank=selected_design.get("rank", selected_idx + 1),
+                    height=450
+                )
+                components.html(rfd3_html, height=480, scrolling=False)
+
+            plddt_val = selected_design.get("plddt", 0)
+            mock_plddt = [round(50 + (plddt_val - 50) * (0.7 + 0.6 * np.random.random()), 1) for _ in range(80)] if is_mock else None
+            if mock_plddt:
+                st.markdown(render_rfd3_plddt_chart(mock_plddt, selected_idx), unsafe_allow_html=True)
         else:
             st.error(f"RFD3生成失败: {rfd3_results.get('error', 'Unknown')}")
 
     with t2:
         if mpnn_results:
+            st.markdown(render_mpnn_sequence_comparison(mpnn_results), unsafe_allow_html=True)
+            st.markdown(render_mpnn_score_chart(mpnn_results), unsafe_allow_html=True)
+            st.markdown(render_mpnn_legend(), unsafe_allow_html=True)
+
             df_d = []
             for m in mpnn_results:
                 seq = m["sequence"]
@@ -1304,39 +1327,45 @@ def render_results():
                     "长度": len(seq),
                     "得分": f"{m.get('score', 0):.2f}",
                 })
-            st.dataframe(pd.DataFrame(df_d), use_container_width=True)
+            with st.expander("📊 查看详细数据表"):
+                st.dataframe(pd.DataFrame(df_d), use_container_width=True)
         else:
             st.info("MPNN序列设计未运行")
 
     with t3:
         if rf3_results:
-            passed = [r for r in rf3_results if r["passed"]]
-            failed = [r for r in rf3_results if not r["passed"] and r["rmsd"] >= 0]
+            st.markdown(render_rf3_summary_metrics(rf3_results), unsafe_allow_html=True)
 
-            mc1, mc2, mc3 = st.columns(3)
-            with mc1:
-                st.metric("总验证数", len(rf3_results))
-            with mc2:
-                st.metric("通过 (RMSD<阈值)", len(passed))
-            with mc3:
-                st.metric("未通过", len(failed))
+            selected_rf3_idx = st.selectbox("选择Design查看详情", range(len(rf3_results)), format_func=lambda x: f"Design {rf3_results[x].get('design_idx', x)+1}", key="rf3_select")
 
-            if passed:
-                best = min(passed, key=lambda x: x["rmsd"])
-                st.success(f"🏆 最佳: Design {best['design_idx']+1}, RMSD={best['rmsd']:.3f}Å, pLDDT={best.get('avg_plddt','N/A')}")
+            selected_rf3 = rf3_results[selected_rf3_idx]
+            st.markdown(render_rf3_result_card(selected_rf3, selected_rf3_idx), unsafe_allow_html=True)
 
-            df_r = []
-            for r in rf3_results:
-                seq = r["sequence"]
-                status_txt = "✅ 通过" if r["passed"] else "❌ 未通过"
-                df_r.append({
-                    "设计": f"Design {r['design_idx']+1}",
-                    "序列": seq[:30] + "..." if len(seq) > 30 else seq,
-                    "RMSD(Å)": f"{r['rmsd']:.3f}" if r['rmsd'] >= 0 else "N/A",
-                    "pLDDT": f"{r.get('avg_plddt', 0):.1f}" if r.get('avg_plddt') else "N/A",
-                    "状态": status_txt,
-                })
-            st.dataframe(pd.DataFrame(df_r), use_container_width=True)
+            plddt_data = selected_rf3.get("plddt")
+            if plddt_data:
+                st.markdown(render_rf3_plddt_chart(plddt_data, selected_rf3.get("design_idx", 0)), unsafe_allow_html=True)
+
+            pae_data = selected_rf3.get("pae")
+            if pae_data:
+                st.markdown(render_rf3_pae_heatmap(pae_data, selected_rf3.get("design_idx", 0)), unsafe_allow_html=True)
+
+            per_res_rmsd = selected_rf3.get("per_res_rmsd")
+            if per_res_rmsd:
+                st.markdown(render_rf3_rmsd_chart(per_res_rmsd, selected_rf3.get("design_idx", 0)), unsafe_allow_html=True)
+
+            with st.expander("📊 查看完整数据表"):
+                df_r = []
+                for r in rf3_results:
+                    seq = r["sequence"]
+                    status_txt = "✅ 通过" if r["passed"] else "❌ 未通过"
+                    df_r.append({
+                        "设计": f"Design {r['design_idx']+1}",
+                        "序列": seq[:30] + "..." if len(seq) > 30 else seq,
+                        "RMSD(Å)": f"{r['rmsd']:.3f}" if r['rmsd'] >= 0 else "N/A",
+                        "pLDDT": f"{r.get('avg_plddt', 0):.1f}" if r.get('avg_plddt') else "N/A",
+                        "状态": status_txt,
+                    })
+                st.dataframe(pd.DataFrame(df_r), use_container_width=True)
         else:
             st.info("RF3验证未运行")
 
