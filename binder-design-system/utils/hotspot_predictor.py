@@ -606,6 +606,55 @@ class HotspotPredictor:
             traceback.print_exc()
             return pd.DataFrame()
 
+    def predict_hotspots(
+        self,
+        pdb_string: str,
+        top_k: int = None,
+        method: str = "dl"
+    ) -> Dict[str, Any]:
+        if top_k is not None:
+            self.top_k = top_k
+
+        atom_array = self._parse_pdb_string(pdb_string)
+        if atom_array is None:
+            return {
+                "hotspots": [],
+                "hotspots_detail": [],
+                "all_scores": {},
+                "error": "无法解析PDB字符串"
+            }
+
+        result = self.predict(
+            atom_array=atom_array,
+            method=method,
+            pdb_string=pdb_string,
+            top_k=top_k
+        )
+        return result
+
+    def _parse_pdb_string(self, pdb_string: str):
+        try:
+            import io
+            import biotite.structure as bs
+            import biotite.structure.io.pdb as bpdb
+
+            pdb_file = bpdb.PDBFile.read(io.StringIO(pdb_string))
+            atom_array = pdb_file.get_structure(model=1)
+            atom_array = atom_array[bs.filter_amino_acids(atom_array)]
+            return atom_array
+        except ImportError:
+            print("[PDB] biotite未安装，尝试MDAnalysis...")
+            try:
+                import MDAnalysis as mda
+                u = mda.universe(pdb_string, format='PDB')
+                return u
+            except ImportError:
+                print("[PDB] 无可用的结构解析库")
+                return None
+        except Exception as e:
+            print(f"[PDB] 解析失败: {e}")
+            return None
+
     def _estimate_sasa(self, res_atoms, dist_to_center: float) -> float:
         num_atoms = len(res_atoms)
         base_sasa = num_atoms * 10.0

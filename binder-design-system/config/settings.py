@@ -1,6 +1,6 @@
 """
 系统配置文件 - 云服务器部署
-Top-K=3, 集成两个热点残基模型
+Top-K=5, 集成两个热点残基模型
 """
 import os
 from pathlib import Path
@@ -21,7 +21,7 @@ COS_CONFIG = {
     "bucket": os.getenv("COS_BUCKET", ""),
 }
 
-TOP_K = 3
+TOP_K = 5
 
 HOTSPOT_CONFIG = {
     "top_k": TOP_K,

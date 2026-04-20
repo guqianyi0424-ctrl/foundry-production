@@ -4,6 +4,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "app"))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from utils.hotspot_predictor import HotspotPredictor
 from utils.rfd3_runner import RFD3Runner
@@ -11,6 +12,8 @@ from utils.mpnn_runner import MPNNRunner
 from utils.rf3_runner import RF3Runner
 
 router = APIRouter()
+
+predictor = HotspotPredictor(top_k=5)
 
 class HotspotRequest(BaseModel):
     pdb_content: str
@@ -23,13 +26,23 @@ class PipelineRequest(BaseModel):
 @router.post("/predict-hotspot")
 async def predict_hotspot(req: HotspotRequest):
     try:
-        predictor = HotspotPredictor()
-        hotspots = predictor.predict_hotspots(req.pdb_content, top_k=3)
+        result = predictor.predict_hotspots(req.pdb_content, top_k=5)
+        hotspots_detail = result.get("hotspots_detail", [])
         return {
             "hotspots": [
-                {"chain": h.chain, "residue": h.residue, "score": h.score}
-                for h in hotspots
-            ]
+                {
+                    "chain": h.get("chain", h.get("chain_id", "")),
+                    "residue": h.get("residue_id", h.get("res_id", 0)),
+                    "residue_name": h.get("residue_name", ""),
+                    "score": h.get("score", h.get("combined_score", 0)),
+                    "label": h.get("label", ""),
+                }
+                for h in hotspots_detail
+            ],
+            "num_hotspots": result.get("num_hotspots", len(hotspots_detail)),
+            "method": result.get("method", "unknown"),
+            "model_loaded": result.get("model_loaded", False),
+            "total_residues": result.get("total_residues", 0),
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"热点预测失败: {str(e)}")
@@ -44,13 +57,13 @@ async def run_pipeline(req: PipelineRequest):
             pdb_content=req.pdb_content,
             hotspots=req.hotspots,
             binder_length=req.binder_length,
-            top_k=3,
+            top_k=5,
         )
 
         mpnn_results = []
         if rfd3_results.get("success"):
             mpnn_runner = MPNNRunner()
-            for design in rfd3_results["designs"][:3]:
+            for design in rfd3_results["designs"][:5]:
                 seq_result = await mpnn_runner.run(
                     pdb_path=design.get("pdb_path", ""),
                     num_sequences=1,

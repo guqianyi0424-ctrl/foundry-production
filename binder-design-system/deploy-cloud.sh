@@ -10,7 +10,7 @@ echo "=========================================="
 PROJECT_DIR="/workspace/foundry-production"
 BINDER_DIR="$PROJECT_DIR/binder-design-system"
 CONDA_ENV="foundry"
-CHECKPOINT_DIR="$PROJECT_DIR/checkpoints"
+CHECKPOINT_DIR="$PROJECT_DIR/foundry-production/checkpoints"
 BACKEND_PORT=8000
 FRONTEND_PORT=3000
 
@@ -73,30 +73,37 @@ if [ -d "$PROJECT_DIR/foundry-production" ]; then
 fi
 
 # 验证模型导入
-RFD3_OK=false; MPNN_OK=false; RF3_OK=false
+RFD3_OK=false; MPNN_OK=false; RF3_OK=false; HOTSPOT_OK=false
 python -c "from rfd3.engine import RFD3InferenceEngine" 2>/dev/null && RFD3_OK=true
 python -c "from mpnn.inference_engines.mpnn import MPNNInferenceEngine" 2>/dev/null && MPNN_OK=true
 python -c "from rf3.inference_engines.rf3 import RF3InferenceEngine" 2>/dev/null && RF3_OK=true
 
+HOTSPOT_DIR="$PROJECT_DIR/hotspot-prediction"
+if [ -d "$HOTSPOT_DIR" ]; then
+    pip install dgl -q 2>/dev/null || pip install dgl -f https://data.dgl.ai/wheels/repo.html -q 2>/dev/null || true
+    pip install torch-geometric -q 2>/dev/null || true
+    pip install transformers -q 2>/dev/null || true
+    pip install biopython pandas scipy scikit-learn imbalanced-learn -q 2>/dev/null || true
+    python -c "import dgl; import torch; print('DGL OK')" 2>/dev/null && HOTSPOT_OK=true
+fi
+
 echo "  RFD3 API: $([ "$RFD3_OK" = true ] && echo '✅' || echo '❌')"
 echo "  MPNN API: $([ "$MPNN_OK" = true ] && echo '✅' || echo '❌')"
 echo "  RF3  API: $([ "$RF3_OK" = true ] && echo '✅' || echo '❌')"
+echo "  Hotspot: $([ "$HOTSPOT_OK" = true ] && echo '✅' || echo '❌')"
 
-# ==================== 4. 下载模型权重 ====================
+# ==================== 4. 检查模型权重 ====================
 echo ""
 echo "[4/8] 检查模型权重..."
 
-mkdir -p "$CHECKPOINT_DIR"
-
-if [ ! -f "$CHECKPOINT_DIR/rfd3_latest.ckpt" ]; then
-    echo "  下载 RFD3/MPNN/RF3 模型权重 (~6GB)..."
-    foundry install rfd3 ligandmpnn rf3 --checkpoint-dir "$CHECKPOINT_DIR" 2>/dev/null || {
-        echo "  ⚠️ foundry install 失败，请手动运行:"
-        echo "    conda activate foundry"
-        echo "    foundry install rfd3 ligandmpnn rf3 --checkpoint-dir $CHECKPOINT_DIR"
-    }
+if [ -d "$CHECKPOINT_DIR" ] && ls "$CHECKPOINT_DIR"/*.ckpt "$CHECKPOINT_DIR"/*.pt 2>/dev/null | head -1 | grep -q .; then
+    echo "  ✅ 模型权重已存在: $CHECKPOINT_DIR"
+    ls -lh "$CHECKPOINT_DIR"/*.ckpt "$CHECKPOINT_DIR"/*.pt 2>/dev/null | awk '{print "    " $NF, $5}'
 else
-    echo "  ✅ 模型权重已存在"
+    echo "  ⚠️ 未找到模型权重，请确认权重文件位于: $CHECKPOINT_DIR"
+    echo "  如需下载，请手动运行:"
+    echo "    conda activate foundry"
+    echo "    foundry install rfd3 ligandmpnn rf3 --checkpoint-dir $CHECKPOINT_DIR"
 fi
 
 # ==================== 5. GPU 验证 ====================
@@ -216,6 +223,7 @@ echo "  模型状态:"
 echo "    RFD3: $([ "$RFD3_OK" = true ] && echo '✅ 可用' || echo '❌ 不可用')"
 echo "    MPNN: $([ "$MPNN_OK" = true ] && echo '✅ 可用' || echo '❌ 不可用')"
 echo "    RF3:  $([ "$RF3_OK" = true ] && echo '✅ 可用' || echo '❌ 不可用')"
+echo "    Hotspot: $([ "$HOTSPOT_OK" = true ] && echo '✅ 可用' || echo '❌ 不可用')"
 echo ""
 echo "  停止服务: pkill -f 'uvicorn backend.main:app'"
 echo "=========================================="

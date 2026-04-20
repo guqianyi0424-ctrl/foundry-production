@@ -11,7 +11,11 @@ export interface UploadResponse {
 }
 
 export interface PredictHotspotResponse {
-  hotspots: Array<{ chain: string; residue: number; score: number }>
+  hotspots: Array<{ chain: string; residue: number; residue_name: string; score: number; label: string }>
+  num_hotspots: number
+  method: string
+  model_loaded: boolean
+  total_residues: number
 }
 
 export interface RunPipelineResponse {

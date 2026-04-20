@@ -29,6 +29,18 @@ class RFD3Runner:
         except ImportError:
             return False
 
+    def _find_checkpoint(self) -> Optional[str]:
+        search_paths = [
+            self.base_path / "foundry-production" / "checkpoints" / "rfd3_latest.ckpt",
+            self.base_path / "checkpoints" / "rfd3_latest.ckpt",
+            Path(os.path.expanduser("~/.foundry/checkpoints/rfd3_latest.ckpt")),
+            Path("/root/.foundry/checkpoints/rfd3_latest.ckpt"),
+        ]
+        for p in search_paths:
+            if p.exists():
+                return str(p)
+        return None
+
     def is_available(self) -> bool:
         return self._api_available or is_foundry_available()
 

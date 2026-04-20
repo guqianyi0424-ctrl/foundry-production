@@ -7,10 +7,104 @@ import { RFD3Panel } from '@/components/ResultTabs/RFD3Panel'
 import { MPNNPanel } from '@/components/ResultTabs/MPNNPanel'
 import { RF3Panel } from '@/components/ResultTabs/RF3Panel'
 import { uploadPdb, predictHotspot, runPipeline } from '@/api'
+import type { PredictHotspotResponse } from '@/api'
 import { parseStructureFile } from '@/utils/pdbParser'
-import { Upload, Play, RotateCcw, Sparkles, Scissors, Target, RefreshCw } from 'lucide-react'
+import { Upload, Play, RotateCcw, Sparkles, Scissors, Target, RefreshCw, X, CheckCircle2 } from 'lucide-react'
 
 const TABS = ['② RFD3 主链生成', '③ MPNN 序列设计', '④ RF3 结构验证'] as const
+
+interface HotspotPredictionModalProps {
+  open: boolean
+  onClose: () => void
+  onConfirm: () => void
+  prediction: PredictHotspotResponse | null
+}
+
+function HotspotPredictionModal({ open, onClose, onConfirm, prediction }: HotspotPredictionModalProps) {
+  if (!open || !prediction) return null
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+      <div className="bg-white rounded-2xl shadow-2xl w-[520px] max-h-[80vh] overflow-hidden">
+        <div className="p-6 border-b border-gray-100">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full bg-green-100 flex items-center justify-center">
+                <CheckCircle2 size={22} className="text-green-600" />
+              </div>
+              <div>
+                <h3 className="text-lg font-bold text-gray-900">热点预测完成</h3>
+                <p className="text-sm text-gray-500 mt-0.5">
+                  预测了 <span className="text-green-600 font-semibold">{prediction.num_hotspots}</span> 个热点残基
+                  {prediction.model_loaded
+                    ? <span className="ml-1 text-blue-500">(DL模型)</span>
+                    : <span className="ml-1 text-amber-500">(规则预测)</span>
+                  }
+                </p>
+              </div>
+            </div>
+            <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors">
+              <X size={18} className="text-gray-400" />
+            </button>
+          </div>
+        </div>
+
+        <div className="p-6 max-h-[50vh] overflow-y-auto">
+          <div className="space-y-2">
+            {prediction.hotspots.map((h, i) => (
+              <div
+                key={i}
+                className="flex items-center justify-between p-3 rounded-xl bg-gray-50 hover:bg-blue-50 transition-colors"
+              >
+                <div className="flex items-center gap-3">
+                  <span className="w-7 h-7 rounded-full bg-blue-100 text-blue-700 text-xs font-bold flex items-center justify-center">
+                    {i + 1}
+                  </span>
+                  <div>
+                    <span className="text-sm font-medium text-gray-900">
+                      {h.residue_name} {h.residue}
+                    </span>
+                    <span className="ml-2 text-xs text-gray-400">链 {h.chain}</span>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="w-24 h-2 bg-gray-200 rounded-full overflow-hidden">
+                    <div
+                      className="h-full rounded-full bg-gradient-to-r from-blue-400 to-green-400"
+                      style={{ width: `${Math.min(h.score * 100, 100)}%` }}
+                    />
+                  </div>
+                  <span className="text-xs font-mono text-gray-600 w-12 text-right">
+                    {h.score.toFixed(3)}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="mt-4 p-3 bg-amber-50 rounded-xl text-xs text-amber-700">
+            💡 预测的热点残基已同步到3D结构中高亮显示，点击「确认」将自动填入热点框
+          </div>
+        </div>
+
+        <div className="p-4 border-t border-gray-100 flex justify-end gap-3">
+          <button
+            onClick={onClose}
+            className="px-5 py-2 rounded-lg border border-gray-200 text-gray-600 text-sm hover:bg-gray-50 transition-colors"
+          >
+            取消
+          </button>
+          <button
+            onClick={onConfirm}
+            className="px-5 py-2 rounded-lg bg-green-600 text-white text-sm font-medium hover:bg-green-700 transition-colors"
+          >
+            确认填入
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
 
 export function NewDesignPage() {
   const targetFile = useAppStore((s) => s.targetFile)
@@ -38,6 +132,9 @@ export function NewDesignPage() {
   const [activeTab, setActiveTab] = useState(0)
   const [taskType, setTaskType] = useState('蛋白')
   const [inputMode, setInputMode] = useState<'upload' | 'input'>('upload')
+  const [isPredicting, setIsPredicting] = useState(false)
+  const [predictionResult, setPredictionResult] = useState<PredictHotspotResponse | null>(null)
+  const [showPredictionModal, setShowPredictionModal] = useState(false)
 
   const handleUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -75,13 +172,33 @@ export function NewDesignPage() {
 
   const handlePredictHotspot = useCallback(async () => {
     if (!pdbContent) return
+    setIsPredicting(true)
     try {
       const res = await predictHotspot(pdbContent)
-      setSelectedHotspots(res.hotspots.map(h => ({ chain: h.chain, residue: h.residue, score: h.score })))
+      setPredictionResult(res)
+      setShowPredictionModal(true)
     } catch {
       alert('热点预测失败，请检查环境配置')
+    } finally {
+      setIsPredicting(false)
     }
-  }, [pdbContent, setSelectedHotspots])
+  }, [pdbContent])
+
+  const handleConfirmPrediction = useCallback(() => {
+    if (!predictionResult) return
+    setSelectedHotspots(
+      predictionResult.hotspots.map(h => ({
+        chain: h.chain,
+        residue: h.residue,
+        score: h.score,
+      }))
+    )
+    const hotspotStr = predictionResult.hotspots
+      .map(h => `${h.chain}/${h.residue}`)
+      .join(', ')
+    setRfd3Config({ hotspots: hotspotStr })
+    setShowPredictionModal(false)
+  }, [predictionResult, setSelectedHotspots, setRfd3Config])
 
   const handleTrimTarget = () => {
     if (!selectedRange) {
@@ -139,6 +256,13 @@ export function NewDesignPage() {
 
   return (
     <div className="p-6 max-w-[1400px] mx-auto space-y-5">
+      <HotspotPredictionModal
+        open={showPredictionModal}
+        onClose={() => setShowPredictionModal(false)}
+        onConfirm={handleConfirmPrediction}
+        prediction={predictionResult}
+      />
+
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
           <div className="flex bg-gray-100 rounded-lg p-0.5">
@@ -197,8 +321,8 @@ export function NewDesignPage() {
             <span>🧬</span> 结构与序列
           </h3>
           <div className="flex gap-2">
-            <button onClick={handlePredictHotspot} disabled={!pdbContent || isRunning} title="预测热点" className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs transition-all ${!pdbContent || isRunning ? 'border-gray-100 text-gray-300 cursor-not-allowed' : 'border-gray-200 text-gray-600 hover:bg-blue-50 hover:border-blue-200 hover:text-blue-600'}`}>
-              <Sparkles size={14} />预测热点
+            <button onClick={handlePredictHotspot} disabled={!pdbContent || isPredicting} title="AI预测热点残基 (Top-5)" className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs transition-all ${!pdbContent || isPredicting ? 'border-gray-100 text-gray-300 cursor-not-allowed' : 'border-purple-200 text-purple-600 hover:bg-purple-50 bg-purple-50/50'}`}>
+              <Sparkles size={14} />{isPredicting ? '预测中...' : '预测热点'}
             </button>
             <button onClick={handleTrimTarget} disabled={!selectedRange} title="裁剪靶点" className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs transition-all ${!selectedRange ? 'border-gray-100 text-gray-300 cursor-not-allowed' : 'border-gray-200 text-gray-600 hover:bg-orange-50 hover:border-orange-200 hover:text-orange-600'}`}>
               <Scissors size={14} />裁剪靶点
