@@ -1,7 +1,8 @@
 """
 RoseTTAFold3 调用模块
-跨 conda 环境调用: binder(Python3.10) -> foundry(Python3.12)
-支持结构预测和RMSD验证
+优先使用 foundry Python API (RF3InferenceEngine)
+回退到 conda_bridge CLI 调用
+最终回退到 mock 模式
 """
 import os
 import subprocess
@@ -19,14 +20,93 @@ class RF3Runner:
         self.base_path = Path(__file__).parent.parent.parent
         self.output_dir = self.base_path / "binder-design-system" / "outputs" / "rf3"
         self.output_dir.mkdir(parents=True, exist_ok=True)
+        self._api_available = self._check_api()
+
+    def _check_api(self) -> bool:
+        try:
+            from rf3.inference_engines.rf3 import RF3InferenceEngine
+            return True
+        except ImportError:
+            return False
 
     def is_available(self) -> bool:
-        return is_foundry_available()
+        return self._api_available or is_foundry_available()
 
     def run(
         self,
         sequence: str,
         job_id: str = "default"
+    ) -> Dict[str, Any]:
+        if self._api_available:
+            try:
+                return self._run_api(sequence, job_id)
+            except Exception as e:
+                print(f"[RF3] API调用失败，回退CLI: {e}")
+
+        if is_foundry_available():
+            try:
+                return self._run_cli(sequence, job_id)
+            except Exception as e:
+                print(f"[RF3] CLI调用失败，回退mock: {e}")
+
+        job_dir = self.output_dir / job_id
+        job_dir.mkdir(parents=True, exist_ok=True)
+        return self._mock_run(sequence, job_dir)
+
+    def _run_api(
+        self,
+        sequence: str,
+        job_id: str
+    ) -> Dict[str, Any]:
+        from rf3.inference_engines.rf3 import RF3InferenceEngine
+        from rf3.utils.inference import InferenceInput
+
+        job_dir = self.output_dir / job_id
+        job_dir.mkdir(parents=True, exist_ok=True)
+
+        inference_engine = RF3InferenceEngine(ckpt_path='rf3', verbose=False)
+
+        input_structure = InferenceInput.from_sequence(
+            sequence=sequence,
+            example_id=f"binder_{job_id}"
+        )
+        rf3_outputs = inference_engine.run(inputs=input_structure)
+
+        output_key = next(iter(rf3_outputs.keys()))
+        rf3_output = rf3_outputs[output_key][0]
+
+        atom_array = rf3_output.atom_array
+        pdb_path = job_dir / "rf3_predicted.pdb"
+        self._save_atom_array(atom_array, str(pdb_path))
+
+        summary = rf3_output.summary_confidences
+        conf = rf3_output.confidences
+
+        avg_plddt = summary.get('overall_plddt', 0.0)
+        plddt_list = []
+        if conf and 'atom_plddts' in conf:
+            import numpy as np
+            plddt_list = np.round(conf['atom_plddts'], 2).tolist()
+
+        pae_data = None
+        if conf and 'pae' in conf:
+            pae_data = conf['pae']
+
+        return {
+            "success": True,
+            "pdb_path": str(pdb_path),
+            "pae": pae_data,
+            "plddt": plddt_list,
+            "avg_plddt": round(float(avg_plddt), 1),
+            "ptm": summary.get('ptm', 0.0),
+            "ranking_score": summary.get('ranking_score', 0.0),
+            "output_dir": str(job_dir)
+        }
+
+    def _run_cli(
+        self,
+        sequence: str,
+        job_id: str
     ) -> Dict[str, Any]:
         job_dir = self.output_dir / job_id
         job_dir.mkdir(parents=True, exist_ok=True)
@@ -35,47 +115,66 @@ class RF3Runner:
         with open(fasta_path, "w") as f:
             f.write(f">binder\n{sequence}\n")
 
-        if not self.is_available():
-            return self._mock_run(sequence, job_dir)
+        result = run_foundry_cli(
+            ["rf3", "fold", f"inputs={fasta_path}", f"out_dir={job_dir}"],
+            timeout=3600
+        )
 
-        try:
-            result = run_foundry_cli(
-                ["rf3", "fold", f"inputs={fasta_path}", f"out_dir={job_dir}"],
-                timeout=3600
-            )
-
-            if result.returncode != 0:
-                return {
-                    "success": False,
-                    "error": result.stderr[-500:] if result.stderr else "Unknown error",
-                    "pdb_path": None
-                }
-
-            pdb_files = sorted(glob.glob(str(job_dir / "**/*.pdb"), recursive=True))
-            if not pdb_files:
-                pdb_files = sorted(glob.glob(str(job_dir / "*.pdb")))
-            if not pdb_files:
-                return {"success": False, "error": "未生成PDB文件", "pdb_path": None}
-
-            pae_data = self._parse_pae(job_dir)
-            plddt = self._parse_plddt(job_dir)
-            avg_plddt = sum(plddt) / len(plddt) if plddt else 0.0
-
+        if result.returncode != 0:
             return {
-                "success": True,
-                "pdb_path": pdb_files[0],
-                "pae": pae_data,
-                "plddt": plddt,
-                "avg_plddt": round(avg_plddt, 1),
-                "output_dir": str(job_dir)
+                "success": False,
+                "error": result.stderr[-500:] if result.stderr else "Unknown error",
+                "pdb_path": None
             }
 
-        except subprocess.TimeoutExpired:
-            return {"success": False, "error": "RF3运行超时(60min)", "pdb_path": None}
-        except RuntimeError:
-            return self._mock_run(sequence, job_dir)
-        except Exception as e:
-            return {"success": False, "error": str(e), "pdb_path": None}
+        pdb_files = sorted(glob.glob(str(job_dir / "**/*.pdb"), recursive=True))
+        if not pdb_files:
+            pdb_files = sorted(glob.glob(str(job_dir / "*.pdb")))
+        if not pdb_files:
+            return {"success": False, "error": "未生成PDB文件", "pdb_path": None}
+
+        pae_data = self._parse_pae(job_dir)
+        plddt = self._parse_plddt(job_dir)
+        avg_plddt = sum(plddt) / len(plddt) if plddt else 0.0
+
+        return {
+            "success": True,
+            "pdb_path": pdb_files[0],
+            "pae": pae_data,
+            "plddt": plddt,
+            "avg_plddt": round(avg_plddt, 1),
+            "output_dir": str(job_dir)
+        }
+
+    def _save_atom_array(self, atom_array, pdb_path: str):
+        try:
+            from atomworks.io.utils.io_utils import to_pdb_file
+            to_pdb_file(atom_array, pdb_path)
+        except ImportError:
+            try:
+                from atomworks.io.utils.io_utils import to_cif_file
+                cif_path = pdb_path.replace('.pdb', '.cif')
+                to_cif_file(atom_array, cif_path)
+            except ImportError:
+                self._write_atom_array_manual(atom_array, pdb_path)
+
+    def _write_atom_array_manual(self, atom_array, pdb_path: str):
+        with open(pdb_path, "w") as f:
+            for i in range(len(atom_array)):
+                atom = atom_array[i]
+                res_name = atom.res_name if hasattr(atom, 'res_name') else 'ALA'
+                atom_name = atom.atom_name if hasattr(atom, 'atom_name') else 'CA'
+                chain_id = atom.chain_id if hasattr(atom, 'chain_id') else 'A'
+                res_id = atom.res_id if hasattr(atom, 'res_id') else i + 1
+                x, y, z = atom.coord
+                bfactor = atom.b_factor if hasattr(atom, 'b_factor') else 50.0
+                element = atom.element if hasattr(atom, 'element') else 'C'
+                f.write(
+                    f"ATOM  {i+1:5d} {atom_name:<4s} {res_name:3s} {chain_id:1s}"
+                    f"{res_id:4d}    {x:8.3f}{y:8.3f}{z:8.3f}"
+                    f"  1.00 {bfactor:5.2f}           {element}\n"
+                )
+            f.write("END\n")
 
     def _parse_pae(self, job_dir: Path) -> Optional[List[List[float]]]:
         json_files = glob.glob(str(job_dir / "**/*pae*.json"), recursive=True)

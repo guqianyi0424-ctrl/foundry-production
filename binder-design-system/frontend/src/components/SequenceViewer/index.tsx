@@ -1,34 +1,109 @@
+import { useCallback, useRef, useState } from 'react'
 import { useAppStore } from '@/store/useAppStore'
-import { Upload, Link2, RotateCcw } from 'lucide-react'
-
-const AA_COLORS: Record<string, string> = {
-  A: '#4ade80', R: '#f87171', N: '#60a5fa', D: '#f87171',
-  C: '#facc15', Q: '#60a5fa', E: '#f87171', G: '#4ade80',
-  H: '#f87171', I: '#a3e635', L: '#a3e635', K: '#f87171',
-  M: '#a3e635', F: '#c084fc', P: '#fb923c', S: '#4ade80',
-  T: '#4ade80', W: '#c084fc', Y: '#c084fc', V: '#a3e635',
-}
+import { Link2, RotateCcw, Upload } from 'lucide-react'
 
 export function SequenceViewer() {
   const chains = useAppStore((s) => s.chains)
   const selectedHotspots = useAppStore((s) => s.selectedHotspots)
+  const selectedRange = useAppStore((s) => s.selectedRange)
+  const setSelectedRange = useAppStore((s) => s.setSelectedRange)
   const toggleHotspot = useAppStore((s) => s.toggleHotspot)
+  const setFocusedResidue = useAppStore((s) => s.setFocusedResidue)
+  const setHoveredResidue = useAppStore((s) => s.setHoveredResidue)
 
-  const isHotspot = (chainId: string, resIdx: number) =>
-    selectedHotspots.some(h => h.chain === chainId && h.residue === resIdx + 1)
+  const [dragState, setDragState] = useState<{
+    chainId: string | null;
+    startIdx: number;
+    currentIdx: number;
+    dragging: boolean;
+  }>({ chainId: null, startIdx: -1, currentIdx: -1, dragging: false })
+
+  const dragStartRef = useRef<{ chainId: string; idx: number; resSeq: number; moved: boolean } | null>(null)
+
+  const isHotspot = useCallback((chainId: string, resSeq: number) =>
+    selectedHotspots.some(h => h.chain === chainId && h.residue === resSeq), [selectedHotspots])
+
+  const isInSelectedRange = useCallback((chainId: string, resSeq: number): boolean => {
+    if (!selectedRange || selectedRange.chain !== chainId) return false
+    return resSeq >= selectedRange.startResSeq && resSeq <= selectedRange.endResSeq
+  }, [selectedRange])
+
+  const isInDragRange = useCallback((chainId: string, idx: number): boolean => {
+    if (!dragState.dragging || dragState.chainId !== chainId) return false
+    const start = Math.min(dragState.startIdx, dragState.currentIdx)
+    const end = Math.max(dragState.startIdx, dragState.currentIdx)
+    return idx >= start && idx <= end
+  }, [dragState])
+
+  const handleMouseDown = (chainId: string, idx: number, resSeq: number) => {
+    dragStartRef.current = { chainId, idx, resSeq, moved: false }
+    setDragState({ chainId, startIdx: idx, currentIdx: idx, dragging: true })
+  }
+
+  const handleMouseMove = (chainId: string, idx: number) => {
+    if (!dragState.dragging || !dragStartRef.current || dragState.chainId !== chainId) return
+    dragStartRef.current.moved = true
+    setDragState(prev => ({ ...prev, currentIdx: idx }))
+  }
+
+  const handleMouseEnter = (chainId: string, resSeq: number, idx: number) => {
+    setHoveredResidue({ chain: chainId, resSeq })
+    if (dragState.dragging && dragState.chainId === chainId) {
+      setDragState(prev => ({ ...prev, currentIdx: idx }))
+    }
+  }
+
+  const handleMouseUp = () => {
+    if (!dragState.dragging || !dragStartRef.current) {
+      setDragState({ chainId: null, startIdx: -1, currentIdx: -1, dragging: false })
+      dragStartRef.current = null
+      return
+    }
+    const { chainId, idx: startIdx, resSeq: startResSeq, moved } = dragStartRef.current
+    const endIdx = dragState.currentIdx
+
+    if (!moved) {
+      const chain = chains.find(c => c.chain_id === chainId)
+      if (chain) {
+        const r = startResSeq
+        if (isInSelectedRange(chainId, r)) {
+          toggleHotspot(chainId, r)
+          setFocusedResidue({ chain: chainId, resSeq: r })
+        }
+      }
+    } else {
+      const chain = chains.find(c => c.chain_id === chainId)
+      if (chain) {
+        const minIdx = Math.min(startIdx, endIdx)
+        const maxIdx = Math.max(startIdx, endIdx)
+        const startR = chain.resSeqs?.[minIdx] ?? (minIdx + 1)
+        const endR = chain.resSeqs?.[maxIdx] ?? (maxIdx + 1)
+        setSelectedRange({ chain: chainId, startResSeq: startR, endResSeq: endR })
+      }
+    }
+
+    setDragState({ chainId: null, startIdx: -1, currentIdx: -1, dragging: false })
+    dragStartRef.current = null
+  }
+
+  const handleMouseLeave = () => {
+    setHoveredResidue(null)
+  }
 
   return (
-    <div className="bg-white rounded-xl border border-gray-200 p-5 flex flex-col" style={{ minHeight: '420px' }}>
-      <div className="flex items-center justify-between mb-3">
+    <div className="bg-white rounded-xl border border-gray-200 p-5 flex flex-col" style={{ minHeight: '420px', maxHeight: '420px' }}
+      onMouseUp={handleMouseUp}
+      onMouseLeave={() => { handleMouseUp(); handleMouseLeave() }}>
+      <div className="flex items-center justify-between mb-3 shrink-0">
         <h3 className="text-sm font-semibold text-gray-700">序列视图</h3>
         <div className="flex gap-1.5">
           <button title="裁剪热点" className="p-1.5 hover:bg-gray-100 rounded text-gray-500 transition-colors"><Link2 size={14} /></button>
           <button title="指定热点" className="p-1.5 hover:bg-gray-100 rounded text-gray-500 transition-colors"><Upload size={14} /></button>
-          <button title="重置" className="p-1.5 hover:bg-gray-100 rounded text-gray-500 transition-colors"><RotateCcw size={14} /></button>
+          <button title="重置" onClick={() => { useAppStore.getState().setSelectedRange(null); useAppStore.getState().setSelectedHotspots([]) }} className="p-1.5 hover:bg-gray-100 rounded text-gray-500 transition-colors"><RotateCcw size={14} /></button>
         </div>
       </div>
 
-      <div className="flex-1 overflow-auto border border-gray-100 rounded-lg p-3 bg-white space-y-4">
+      <div className="flex-1 overflow-y-auto overflow-x-hidden border border-gray-100 rounded-lg p-3 bg-white space-y-4">
         {chains.length === 0 ? (
           <div className="flex items-center justify-center h-full text-gray-400 text-sm">
             请上传目标结构文件
@@ -38,21 +113,45 @@ export function SequenceViewer() {
             <div key={chain.chain_id}>
               <div className="flex items-center gap-2 mb-1.5">
                 <span className="text-xs font-bold text-primary-600 bg-primary-50 px-1.5 py-0.5 rounded">{chain.chain_id}</span>
-                <span className="text-xs text-gray-400">protein</span>
+                <span className="text-xs text-gray-400">{chain.length} residues</span>
+                {selectedRange && selectedRange.chain === chain.chain_id && (
+                  <span className="text-xs font-medium text-green-600 bg-green-50 px-2 py-0.5 rounded">
+                    已选: {selectedRange.startResSeq}-{selectedRange.endResSeq}
+                  </span>
+                )}
               </div>
-              <div className="leading-relaxed font-mono text-sm tracking-wider flex flex-wrap gap-x-[1px]">
+              <div
+                className="leading-relaxed font-mono text-base tracking-wider flex flex-wrap gap-x-[2px]"
+                onMouseMove={(e) => {
+                  const target = e.target as HTMLElement
+                  if (target.dataset.idx !== undefined) {
+                    handleMouseMove(chain.chain_id, parseInt(target.dataset.idx))
+                  }
+                }}
+              >
                 {[...chain.sequence].map((aa, i) => {
-                  const idx = i + 1
-                  const hot = isHotspot(chain.chain_id, idx)
+                  const resSeq = chain.resSeqs?.[i] ?? (i + 1)
+                  const inRange = isInSelectedRange(chain.chain_id, resSeq)
+                  const hot = isHotspot(chain.chain_id, resSeq)
+                  const inDrag = isInDragRange(chain.chain_id, i)
                   return (
                     <span
-                      key={`${chain.chain_id}-${idx}`}
-                      onClick={() => toggleHotspot(chain.chain_id, idx)}
-                      className={hot
-                        ? 'seq-hotspot'
-                        : 'seq-residue'
+                      key={`${chain.chain_id}-${resSeq}`}
+                      data-idx={i}
+                      onMouseDown={(e) => { e.preventDefault(); handleMouseDown(chain.chain_id, i, resSeq) }}
+                      onMouseEnter={() => handleMouseEnter(chain.chain_id, resSeq, i)}
+                      onMouseLeave={handleMouseLeave}
+                      className={
+                        inDrag ? 'seq-residue-drag'
+                        : hot ? 'seq-hotspot'
+                        : inRange ? 'seq-residue-in-range'
+                        : 'seq-residue-disabled'
                       }
-                      style={!hot ? { color: AA_COLORS[aa] ?? '#64748b' } : {}}
+                      title={
+                        inRange
+                          ? `${chain.chain_id}/${resSeq}${hot ? ' ✓ 热点' : ''}`
+                          : `${chain.chain_id}/${resSeq} (先拖拽选择范围)`
+                      }
                     >
                       {aa}
                     </span>
@@ -64,13 +163,8 @@ export function SequenceViewer() {
         )}
       </div>
 
-      <div className="mt-3 pt-3 border-t border-gray-100 flex items-center gap-2">
-        <span className="text-xs font-semibold text-gray-600">热点</span>
-        <input
-          type="text"
-          placeholder="输入残基编号：A/1 表示 A 链上的残基 1（例如：A/1,A/2,A/3）"
-          className="flex-1 text-xs px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-primary-400 focus:ring-1 focus:ring-primary-100"
-        />
+      <div className="mt-2 text-xs text-gray-400 shrink-0">
+        💡 拖拽选择残基范围 → 单击范围内残基选择热点 → 点击上方按钮确认
       </div>
     </div>
   )

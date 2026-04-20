@@ -1,11 +1,13 @@
 """
 RFDiffusion3 调用模块
-跨 conda 环境调用: binder(Python3.10) -> foundry(Python3.12)
+优先使用 foundry Python API (RFD3InferenceEngine)
+回退到 conda_bridge CLI 调用
+最终回退到 mock 模式
 """
 import os
-import subprocess
 import glob
 import json
+import asyncio
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 
@@ -18,28 +20,17 @@ class RFD3Runner:
         self.base_path = Path(__file__).parent.parent.parent
         self.output_dir = self.base_path / "binder-design-system" / "outputs" / "rfd3"
         self.output_dir.mkdir(parents=True, exist_ok=True)
-        self._ckpt_path = self._find_checkpoint()
+        self._api_available = self._check_api()
 
-    def _find_checkpoint(self) -> Optional[str]:
-        search_paths = [
-            self.base_path / "foundry-production" / "checkpoints" / "rfd3_latest.ckpt",
-            self.base_path / "checkpoints" / "rfd3_latest.ckpt",
-            Path(os.path.expanduser("~/.foundry/checkpoints/rfd3_latest.ckpt")),
-            Path("/root/.foundry/checkpoints/rfd3_latest.ckpt"),
-        ]
-        for p in search_paths:
-            if p.exists():
-                return str(p)
-        ckpt_env = os.environ.get("FOUNDRY_CHECKPOINT_DIRS", "")
-        if ckpt_env:
-            for d in ckpt_env.split(os.pathsep):
-                p = Path(d) / "rfd3_latest.ckpt"
-                if p.exists():
-                    return str(p)
-        return None
+    def _check_api(self) -> bool:
+        try:
+            from rfd3.engine import RFD3InferenceEngine
+            return True
+        except ImportError:
+            return False
 
     def is_available(self) -> bool:
-        return is_foundry_available()
+        return self._api_available or is_foundry_available()
 
     def run(
         self,
@@ -49,11 +40,108 @@ class RFD3Runner:
         num_designs: int = 3,
         job_id: str = "default"
     ) -> Dict[str, Any]:
+        if self._api_available:
+            try:
+                return self._run_api(target_pdb, hotspot_residues, binder_length, num_designs, job_id)
+            except Exception as e:
+                print(f"[RFD3] API调用失败，回退CLI: {e}")
+
+        if is_foundry_available():
+            try:
+                return self._run_cli(target_pdb, hotspot_residues, binder_length, num_designs, job_id)
+            except Exception as e:
+                print(f"[RFD3] CLI调用失败，回退mock: {e}")
+
+        job_dir = self.output_dir / job_id
+        job_dir.mkdir(parents=True, exist_ok=True)
+        return self._mock_run(target_pdb, hotspot_residues, binder_length, num_designs, job_dir)
+
+    def _run_api(
+        self,
+        target_pdb: str,
+        hotspot_residues: List[str],
+        binder_length: int,
+        num_designs: int,
+        job_id: str
+    ) -> Dict[str, Any]:
+        from rfd3.engine import RFD3InferenceConfig, RFD3InferenceEngine
+        from lightning.fabric import seed_everything
+
         job_dir = self.output_dir / job_id
         job_dir.mkdir(parents=True, exist_ok=True)
 
-        if not self.is_available():
-            return self._mock_run(target_pdb, hotspot_residues, binder_length, num_designs, job_dir)
+        seed_everything(42)
+
+        chains = self._parse_pdb_chains(target_pdb)
+        contig = self._build_contig(chains, binder_length)
+
+        specification = {
+            'length': binder_length,
+            'extra': {
+                'input': target_pdb,
+                'contig': contig,
+            }
+        }
+
+        if hotspot_residues and chains:
+            hotspot_dict = {}
+            for hs in hotspot_residues:
+                hs_chain, hs_resid = self._parse_hotspot(hs)
+                if hs_chain and hs_resid and hs_chain in chains:
+                    hotspot_dict[f"{hs_chain}{hs_resid}"] = "ALL"
+            if hotspot_dict:
+                specification['extra']['select_hotspots'] = hotspot_dict
+                specification['extra']['infer_ori_strategy'] = 'hotspots'
+
+        config = RFD3InferenceConfig(
+            specification=specification,
+            diffusion_batch_size=num_designs,
+        )
+
+        model = RFD3InferenceEngine(**config)
+        outputs = model.run(
+            inputs=None,
+            out_dir=str(job_dir),
+            n_batches=1,
+        )
+
+        designs = []
+        for idx, data in outputs.items():
+            for i, item in enumerate(data):
+                atom_array = item.atom_array
+                design_name = f"design_{idx}_{i}"
+                pdb_path = job_dir / f"{design_name}.pdb"
+                self._save_atom_array(atom_array, str(pdb_path))
+
+                plddt = self._extract_plddt_from_atom_array(atom_array)
+                designs.append({
+                    "index": len(designs),
+                    "pdb_path": str(pdb_path),
+                    "pdb_name": pdb_path.name,
+                    "plddt": plddt
+                })
+
+        designs = self._rank_and_select_top_k(designs, num_designs)
+
+        return {
+            "success": True,
+            "designs": designs,
+            "num_designs": len(designs),
+            "output_dir": str(job_dir)
+        }
+
+    def _run_cli(
+        self,
+        target_pdb: str,
+        hotspot_residues: List[str],
+        binder_length: int,
+        num_designs: int,
+        job_id: str
+    ) -> Dict[str, Any]:
+        import subprocess
+
+        job_dir = self.output_dir / job_id
+        job_dir.mkdir(parents=True, exist_ok=True)
 
         yaml_path = self._generate_input_yaml(target_pdb, hotspot_residues, binder_length, job_dir)
 
@@ -64,45 +152,25 @@ class RFD3Runner:
             "n_batches=1",
         ]
 
-        if self._ckpt_path:
-            overrides.append(f"ckpt_path={self._ckpt_path}")
+        result = run_foundry_cli(["rfd3", "design"] + overrides, timeout=1800)
 
-        try:
-            result = run_foundry_cli(
-                ["rfd3", "design"] + overrides,
-                timeout=1800
-            )
-
-            if result.returncode != 0:
-                stderr = result.stderr or ""
-                if "Invalid checkpoint" in stderr or "could not find checkpoint" in stderr:
-                    return {
-                        "success": False,
-                        "error": "RFD3模型权重未下载。请在foundry环境下运行:\n  conda activate foundry\n  foundry install rfd3 --checkpoint-dir ./checkpoints",
-                        "designs": []
-                    }
-                return {
-                    "success": False,
-                    "error": stderr[-500:] if stderr else "Unknown error",
-                    "designs": []
-                }
-
-            designs = self._collect_results(job_dir)
-            designs = self._rank_and_select_top_k(designs, num_designs)
-
+        if result.returncode != 0:
+            stderr = result.stderr or ""
             return {
-                "success": True,
-                "designs": designs,
-                "num_designs": len(designs),
-                "output_dir": str(job_dir)
+                "success": False,
+                "error": stderr[-500:] if stderr else "Unknown error",
+                "designs": []
             }
 
-        except subprocess.TimeoutExpired:
-            return {"success": False, "error": "RFD3运行超时(30min)", "designs": []}
-        except RuntimeError:
-            return self._mock_run(target_pdb, hotspot_residues, binder_length, num_designs, job_dir)
-        except Exception as e:
-            return {"success": False, "error": str(e), "designs": []}
+        designs = self._collect_results(job_dir)
+        designs = self._rank_and_select_top_k(designs, num_designs)
+
+        return {
+            "success": True,
+            "designs": designs,
+            "num_designs": len(designs),
+            "output_dir": str(job_dir)
+        }
 
     def _parse_pdb_chains(self, pdb_path: str) -> Dict[str, tuple]:
         chains = {}
@@ -131,6 +199,66 @@ class RFD3Runner:
             print(f"[RFD3] PDB解析失败: {e}")
         return chains
 
+    def _build_contig(self, chains: Dict[str, tuple], binder_length: int) -> str:
+        if not chains:
+            return f"{binder_length},/0,A1-999"
+        chain_parts = []
+        for chain_id in sorted(chains.keys()):
+            res_start, res_end = chains[chain_id]
+            chain_parts.append(f"{chain_id}{res_start}-{res_end}")
+        return f"{binder_length},/0," + ",".join(chain_parts)
+
+    def _parse_hotspot(self, hs: str):
+        hs_chain = None
+        hs_resid = None
+        for i, c in enumerate(hs):
+            if c.isdigit():
+                hs_chain = hs[:i]
+                hs_resid = hs[i:]
+                break
+        return hs_chain, hs_resid
+
+    def _save_atom_array(self, atom_array, pdb_path: str):
+        try:
+            from atomworks.io.utils.io_utils import to_pdb_file
+            to_pdb_file(atom_array, pdb_path)
+        except ImportError:
+            try:
+                from atomworks.io import to_pdb_file
+                to_pdb_file(atom_array, pdb_path)
+            except ImportError:
+                self._write_atom_array_manual(atom_array, pdb_path)
+
+    def _write_atom_array_manual(self, atom_array, pdb_path: str):
+        with open(pdb_path, "w") as f:
+            for i in range(len(atom_array)):
+                atom = atom_array[i]
+                res_name = atom.res_name if hasattr(atom, 'res_name') else 'ALA'
+                atom_name = atom.atom_name if hasattr(atom, 'atom_name') else 'CA'
+                chain_id = atom.chain_id if hasattr(atom, 'chain_id') else 'A'
+                res_id = atom.res_id if hasattr(atom, 'res_id') else i + 1
+                x, y, z = atom.coord
+                bfactor = atom.b_factor if hasattr(atom, 'b_factor') else 50.0
+                element = atom.element if hasattr(atom, 'element') else 'C'
+                f.write(
+                    f"ATOM  {i+1:5d} {atom_name:<4s} {res_name:3s} {chain_id:1s}"
+                    f"{res_id:4d}    {x:8.3f}{y:8.3f}{z:8.3f}"
+                    f"  1.00 {bfactor:5.2f}           {element}\n"
+                )
+            f.write("END\n")
+
+    def _extract_plddt_from_atom_array(self, atom_array) -> float:
+        try:
+            if hasattr(atom_array, 'b_factor'):
+                b_factors = atom_array.b_factor
+                ca_mask = (atom_array.atom_name == 'CA') if hasattr(atom_array, 'atom_name') else None
+                if ca_mask is not None and ca_mask.any():
+                    return float(b_factors[ca_mask].mean())
+                return float(b_factors.mean())
+        except Exception:
+            pass
+        return 0.0
+
     def _generate_input_yaml(
         self,
         target_pdb: str,
@@ -139,40 +267,16 @@ class RFD3Runner:
         job_dir: Path
     ) -> str:
         chains = self._parse_pdb_chains(target_pdb)
-
-        if not chains:
-            print("[RFD3] ⚠️ 无法解析PDB链信息，使用默认contig")
-            contig = f"{binder_length},/0,A1-999"
-        else:
-            chain_parts = []
-            for chain_id in sorted(chains.keys()):
-                res_start, res_end = chains[chain_id]
-                chain_parts.append(f"{chain_id}{res_start}-{res_end}")
-            contig = f"{binder_length},/0," + ",".join(chain_parts)
+        contig = self._build_contig(chains, binder_length)
 
         validated_hotspots = []
         if hotspot_residues and chains:
             for hs in hotspot_residues:
-                hs_chain = None
-                hs_resid = None
-                for c in hs:
-                    if c.isalpha():
-                        hs_chain = c
-                    elif c.isdigit():
-                        idx = hs.index(c)
-                        hs_chain = hs[:idx]
-                        hs_resid = hs[idx:]
-                        break
+                hs_chain, hs_resid = self._parse_hotspot(hs)
                 if hs_chain and hs_resid and hs_chain in chains:
                     res_start, res_end = chains[hs_chain]
                     if res_start <= int(hs_resid) <= res_end:
                         validated_hotspots.append(hs)
-                    else:
-                        print(f"[RFD3] ⚠️ 热点 {hs} 不在链 {hs_chain} 范围({res_start}-{res_end})内，已跳过")
-                elif hs_chain and hs_chain not in chains:
-                    print(f"[RFD3] ⚠️ 热点 {hs} 的链 {hs_chain} 不在PDB中，已跳过")
-                else:
-                    validated_hotspots.append(hs)
 
         yaml_path = job_dir / "rfd3_input.yaml"
         with open(yaml_path, "w") as f:

@@ -12,8 +12,21 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - ./app:/app/app
-      - ./utils:/app/utils
+      - ./outputs:/app/outputs
+      - ./data:/app/data
+      - checkpoints:/opt/checkpoints
     environment:
       - PYTHONPATH=/app
+      - NVIDIA_VISIBLE_DEVICES=all
+      - FOUNDRY_CHECKPOINT_DIRS=/opt/checkpoints
     restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+volumes:
+  checkpoints:

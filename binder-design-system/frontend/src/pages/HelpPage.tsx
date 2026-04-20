@@ -1,5 +1,10 @@
+interface StepSection { title: string; icon: string; steps: string[]; items?: undefined; faqs?: undefined }
+interface ItemSection { title: string; icon: string; items: Array<{ label: string; desc: string }>; steps?: undefined; faqs?: undefined }
+interface FaqSection { title: string; icon: string; faqs: Array<{ q: string; a: string }>; steps?: undefined; items?: undefined }
+type Section = StepSection | ItemSection | FaqSection
+
 export function HelpPage() {
-  const sections = [
+  const sections: Section[] = [
     {
       title: '快速开始',
       icon: '🚀',
@@ -55,7 +60,7 @@ export function HelpPage() {
               <span>{sec.icon}</span>{sec.title}
             </h2>
 
-            {'steps' in sec && (
+            {sec.steps && (
               <ol className="space-y-2.5">
                 {sec.steps.map((step, i) => (
                   <li key={i} className="flex gap-3 text-sm text-gray-700">
@@ -66,7 +71,7 @@ export function HelpPage() {
               </ol>
             )}
 
-            {'items' in sec && (
+            {sec.items && (
               <div className="grid grid-cols-2 gap-4">
                 {sec.items.map((item) => (
                   <div key={item.label} className="bg-gray-50 rounded-lg p-4">
@@ -77,7 +82,7 @@ export function HelpPage() {
               </div>
             )}
 
-            {'faqs' in sec && (
+            {sec.faqs && (
               <div className="space-y-4">
                 {sec.faqs.map((faq, i) => (
                   <div key={i} className="border-l-2 border-primary-200 pl-4">

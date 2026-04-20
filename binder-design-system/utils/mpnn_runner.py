@@ -1,6 +1,8 @@
 """
-ProteinMPNN 调用模块
-跨 conda 环境调用: binder(Python3.10) -> foundry(Python3.12)
+ProteinMPNN / LigandMPNN 调用模块
+优先使用 foundry Python API (MPNNInferenceEngine)
+回退到 conda_bridge CLI 调用
+最终回退到 mock 模式
 """
 import os
 import subprocess
@@ -18,9 +20,17 @@ class MPNNRunner:
         self.base_path = Path(__file__).parent.parent.parent
         self.output_dir = self.base_path / "binder-design-system" / "outputs" / "mpnn"
         self.output_dir.mkdir(parents=True, exist_ok=True)
+        self._api_available = self._check_api()
+
+    def _check_api(self) -> bool:
+        try:
+            from mpnn.inference_engines.mpnn import MPNNInferenceEngine
+            return True
+        except ImportError:
+            return False
 
     def is_available(self) -> bool:
-        return is_foundry_available()
+        return self._api_available or is_foundry_available()
 
     def run(
         self,
@@ -30,11 +40,100 @@ class MPNNRunner:
         job_id: str = "default",
         top_k: int = 3
     ) -> Dict[str, Any]:
+        if self._api_available:
+            try:
+                return self._run_api(backbone_pdb, num_sequences, sampling_temp, job_id, top_k)
+            except Exception as e:
+                print(f"[MPNN] API调用失败，回退CLI: {e}")
+
+        if is_foundry_available():
+            try:
+                return self._run_cli(backbone_pdb, num_sequences, sampling_temp, job_id, top_k)
+            except Exception as e:
+                print(f"[MPNN] CLI调用失败，回退mock: {e}")
+
+        job_dir = self.output_dir / job_id
+        job_dir.mkdir(parents=True, exist_ok=True)
+        return self._mock_run(backbone_pdb, num_sequences, job_dir, top_k)
+
+    def _run_api(
+        self,
+        backbone_pdb: str,
+        num_sequences: int,
+        sampling_temp: float,
+        job_id: str,
+        top_k: int
+    ) -> Dict[str, Any]:
+        from mpnn.inference_engines.mpnn import MPNNInferenceEngine
+        from biotite.structure import from_pdb
+
         job_dir = self.output_dir / job_id
         job_dir.mkdir(parents=True, exist_ok=True)
 
-        if not self.is_available():
-            return self._mock_run(backbone_pdb, num_sequences, job_dir, top_k)
+        atom_array = from_pdb(backbone_pdb)
+
+        engine_config = {
+            "model_type": "ligand_mpnn",
+            "is_legacy_weights": True,
+            "out_directory": str(job_dir),
+            "write_structures": True,
+            "write_fasta": True,
+        }
+
+        input_configs = [
+            {
+                "batch_size": num_sequences,
+                "remove_waters": True,
+            }
+        ]
+
+        model = MPNNInferenceEngine(**engine_config)
+        mpnn_outputs = model.run(input_dicts=input_configs, atom_arrays=[atom_array])
+
+        sequences = []
+        for i, item in enumerate(mpnn_outputs):
+            seq_1letter = self._extract_sequence_from_atom_array(item.atom_array)
+            score = 0.0
+            sequences.append({
+                "header": f"design_{i},score={score}",
+                "sequence": seq_1letter,
+                "score": score,
+                "rank": i + 1
+            })
+
+        sequences = self._rank_and_select_top_k(sequences, top_k)
+
+        return {
+            "success": True,
+            "sequences": sequences,
+            "num_sequences": len(sequences),
+            "output_dir": str(job_dir)
+        }
+
+    def _extract_sequence_from_atom_array(self, atom_array) -> str:
+        try:
+            from biotite.structure import get_residue_starts
+            from biotite.sequence import ProteinSequence
+
+            res_starts = get_residue_starts(atom_array)
+            seq_1letter = ''.join(
+                ProteinSequence.convert_letter_3to1(res_name)
+                for res_name in atom_array.res_name[res_starts]
+            )
+            return seq_1letter
+        except Exception:
+            return ""
+
+    def _run_cli(
+        self,
+        backbone_pdb: str,
+        num_sequences: int,
+        sampling_temp: float,
+        job_id: str,
+        top_k: int
+    ) -> Dict[str, Any]:
+        job_dir = self.output_dir / job_id
+        job_dir.mkdir(parents=True, exist_ok=True)
 
         cmd_args = [
             "mpnn",
@@ -45,32 +144,24 @@ class MPNNRunner:
             "--number_of_batches", "1",
         ]
 
-        try:
-            result = run_foundry_cli(cmd_args, timeout=600)
+        result = run_foundry_cli(cmd_args, timeout=600)
 
-            if result.returncode != 0:
-                return {
-                    "success": False,
-                    "error": result.stderr[-500:] if result.stderr else "Unknown error",
-                    "sequences": []
-                }
-
-            sequences = self._parse_results(job_dir)
-            sequences = self._rank_and_select_top_k(sequences, top_k)
-
+        if result.returncode != 0:
             return {
-                "success": True,
-                "sequences": sequences,
-                "num_sequences": len(sequences),
-                "output_dir": str(job_dir)
+                "success": False,
+                "error": result.stderr[-500:] if result.stderr else "Unknown error",
+                "sequences": []
             }
 
-        except subprocess.TimeoutExpired:
-            return {"success": False, "error": "MPNN运行超时(10min)", "sequences": []}
-        except RuntimeError:
-            return self._mock_run(backbone_pdb, num_sequences, job_dir, top_k)
-        except Exception as e:
-            return {"success": False, "error": str(e), "sequences": []}
+        sequences = self._parse_results(job_dir)
+        sequences = self._rank_and_select_top_k(sequences, top_k)
+
+        return {
+            "success": True,
+            "sequences": sequences,
+            "num_sequences": len(sequences),
+            "output_dir": str(job_dir)
+        }
 
     def _parse_results(self, job_dir: Path) -> List[Dict]:
         sequences = []
@@ -103,23 +194,6 @@ class MPNNRunner:
                     "score": score,
                     "fasta_path": fasta_path
                 })
-
-        json_files = sorted(glob.glob(str(job_dir / "**/*.json"), recursive=True))
-        if not json_files:
-            json_files = sorted(glob.glob(str(job_dir / "*.json")))
-        for json_path in json_files:
-            try:
-                with open(json_path, "r") as f:
-                    data = json.load(f)
-                if isinstance(data, dict) and "sequence" in data:
-                    sequences.append({
-                        "header": data.get("header", ""),
-                        "sequence": data["sequence"],
-                        "score": data.get("score", 0.0),
-                        "json_path": json_path
-                    })
-            except Exception:
-                pass
 
         return sequences
 

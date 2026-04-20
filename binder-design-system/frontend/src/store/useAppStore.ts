@@ -1,6 +1,12 @@
 import { create } from 'zustand'
 import type { ChainInfo, HotspotResidue, RFD3Design, MPNNResult, RF3Result } from '@/types'
 
+export interface ResidueRange {
+  chain: string;
+  startResSeq: number;
+  endResSeq: number;
+}
+
 interface AppState {
   currentPage: string;
   setCurrentPage: (page: string) => void;
@@ -13,17 +19,38 @@ interface AppState {
   chains: ChainInfo[];
   setChains: (chains: ChainInfo[]) => void;
 
+  selectedRange: ResidueRange | null;
+  setSelectedRange: (range: ResidueRange | null) => void;
+
   selectedHotspots: HotspotResidue[];
   setSelectedHotspots: (hotspots: HotspotResidue[]) => void;
   addHotspot: (hotspot: HotspotResidue) => void;
   removeHotspot: (chain: string, residue: number) => void;
   toggleHotspot: (chain: string, residue: number, score?: number) => void;
 
+  focusedResidue: { chain: string; resSeq: number } | null;
+  setFocusedResidue: (residue: { chain: string; resSeq: number } | null) => void;
+
+  hoveredResidue: { chain: string; resSeq: number } | null;
+  setHoveredResidue: (residue: { chain: string; resSeq: number } | null) => void;
+
   hotspotInput: string;
   setHotspotInput: (input: string) => void;
 
   binderLength: number;
   setBinderLength: (len: number) => void;
+
+  rfd3Config: {
+    targetEntityType: string;
+    targetStructure: string;
+    hotspots: string;
+    conditionAtoms: string;
+    lengthMin: number;
+    lengthMax: number;
+    nBatches: number;
+    diffusionBatchSize: number;
+  };
+  setRfd3Config: (config: Partial<AppState['rfd3Config']>) => void;
 
   rfd3Results: RFD3Design[] | null;
   setRfd3Results: (results: RFD3Design[] | null) => void;
@@ -48,9 +75,22 @@ const initialState = {
   targetFile: null,
   pdbContent: '',
   chains: [],
+  selectedRange: null as ResidueRange | null,
   selectedHotspots: [] as HotspotResidue[],
+  focusedResidue: null as { chain: string; resSeq: number } | null,
+  hoveredResidue: null as { chain: string; resSeq: number } | null,
   hotspotInput: '',
   binderLength: 80,
+  rfd3Config: {
+    targetEntityType: '蛋白',
+    targetStructure: '',
+    hotspots: '',
+    conditionAtoms: '',
+    lengthMin: 40,
+    lengthMax: 120,
+    nBatches: 10,
+    diffusionBatchSize: 16,
+  },
   rfd3Results: null,
   mpnnResults: null,
   rf3Results: null,
@@ -65,6 +105,15 @@ export const useAppStore = create<AppState>((set, get) => ({
   setTargetFile: (file) => set({ targetFile: file }),
   setPdbContent: (content) => set({ pdbContent: content }),
   setChains: (chains) => set({ chains }),
+
+  setSelectedRange: (range) => {
+    if (!range) {
+      set({ selectedRange: null, selectedHotspots: [], hotspotInput: '' })
+    } else {
+      const hotspots = get().selectedHotspots.filter(h => h.chain !== range.chain)
+      set({ selectedRange: range, selectedHotspots: hotspots, hotspotInput: hotspots.map(h => `${h.chain}/${h.residue}`).join(', ') })
+    }
+  },
 
   setSelectedHotspots: (hotspots) => {
     const input = hotspots.map(h => `${h.chain}/${h.residue}`).join(', ')
@@ -99,8 +148,12 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ selectedHotspots: updated, hotspotInput: input })
   },
 
+  setFocusedResidue: (residue) => set({ focusedResidue: residue }),
+  setHoveredResidue: (residue) => set({ hoveredResidue: residue }),
+
   setHotspotInput: (input) => set({ hotspotInput: input }),
   setBinderLength: (len) => set({ binderLength: len }),
+  setRfd3Config: (config) => set((state) => ({ rfd3Config: { ...state.rfd3Config, ...config } })),
   setRfd3Results: (results) => set({ rfd3Results: results }),
   setMpnnResults: (results) => set({ mpnnResults: results }),
   setRf3Results: (results) => set({ rf3Results: results }),

@@ -2,6 +2,7 @@ export interface ChainInfo {
   chain_id: string;
   sequence: string;
   length: number;
+  resSeqs: number[];
 }
 
 export interface HotspotResidue {

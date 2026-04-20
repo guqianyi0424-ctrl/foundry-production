@@ -6,7 +6,7 @@ const api = axios.create({
 })
 
 export interface UploadResponse {
-  chains: Array<{ chain_id: string; sequence: string; length: number }>
+  chains: Array<{ chain_id: string; sequence: string; length: number; resSeqs?: number[] }>
   pdb_content: string
 }
 
