@@ -56,9 +56,32 @@ conda activate $CONDA_ENV 2>/dev/null
 PY_VER=$(python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
 echo "  ✅ Python $PY_VER"
 
-# ==================== 3. 安装 foundry 核心模型 ====================
+# ==================== 3. 安装 PyTorch (CUDA) ====================
 echo ""
-echo "[3/8] 安装 foundry 核心模型 (RFD3 + MPNN + RF3)..."
+echo "[3/8] 安装 PyTorch + foundry 核心模型..."
+
+PYTORCH_INSTALLED=false
+python -c "import torch; assert torch.cuda.is_available()" 2>/dev/null && PYTORCH_INSTALLED=true
+
+if [ "$PYTORCH_INSTALLED" = false ]; then
+    echo "  安装 PyTorch (CUDA 12.1)..."
+    pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121 -q 2>/dev/null || {
+        echo "  ⚠️ CUDA 12.1 安装失败，尝试 CUDA 11.8..."
+        pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118 -q 2>/dev/null || {
+            echo "  ⚠️ GPU版安装失败，安装CPU版..."
+            pip install torch torchvision torchaudio -q 2>/dev/null || true
+        }
+    }
+fi
+
+python -c "
+import torch
+if torch.cuda.is_available():
+    print(f'  ✅ PyTorch {torch.__version__} + CUDA {torch.version.cuda}')
+    print(f'  GPU: {torch.cuda.get_device_name(0)}')
+else:
+    print('  ⚠️ PyTorch已安装但CUDA不可用，模型将使用CPU')
+" 2>/dev/null || echo "  ❌ PyTorch 安装失败"
 
 cd "$PROJECT_DIR/foundry-production" 2>/dev/null || {
     echo "  ⚠️ foundry-production 子目录不存在，尝试从 PyPI 安装..."
@@ -116,9 +139,10 @@ if torch.cuda.is_available():
     print(f'  ✅ GPU: {torch.cuda.get_device_name(0)}')
     print(f'  显存: {torch.cuda.get_device_properties(0).total_mem / 1024**3:.1f} GB')
     print(f'  CUDA: {torch.version.cuda}')
+    print(f'  PyTorch: {torch.__version__}')
 else:
-    print('  ⚠️ CUDA 不可用，将使用 mock 模式')
-    print('  RFD3 和 RF3 需要 GPU 才能运行')
+    print('  ⚠️ CUDA 不可用，将使用 CPU 模式')
+    print('  RFD3 和 RF3 需要 GPU 才能正常运行')
 " 2>/dev/null || echo "  ⚠️ PyTorch 未安装"
 
 # ==================== 6. 安装后端依赖 ====================
