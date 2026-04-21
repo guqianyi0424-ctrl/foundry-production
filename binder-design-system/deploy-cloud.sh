@@ -171,7 +171,7 @@ echo "[8/8] 启动服务..."
 cd "$BINDER_DIR"
 
 # 停止旧进程
-pkill -f "uvicorn backend.main:app" 2>/dev/null || true
+pkill -f "uvicorn main:app" 2>/dev/null || true
 pkill -f "nginx" 2>/dev/null || true
 sleep 1
 
@@ -203,9 +203,9 @@ sudo rm -f /etc/nginx/sites-enabled/default 2>/dev/null || true
 sudo nginx -t 2>/dev/null && sudo nginx 2>/dev/null || true
 
 # 启动后端
-export PYTHONPATH="$BINDER_DIR"
+export PYTHONPATH="$BINDER_DIR/backend:$BINDER_DIR"
 export FOUNDRY_CHECKPOINT_DIRS="$CHECKPOINT_DIR"
-nohup conda run --no-banner -n foundry uvicorn backend.main:app \
+nohup conda run --no-banner -n foundry uvicorn main:app \
     --host 0.0.0.0 \
     --port $BACKEND_PORT \
     --timeout-keep-alive 3600 \
@@ -249,5 +249,5 @@ echo "    MPNN: $([ "$MPNN_OK" = true ] && echo '✅ 可用' || echo '❌ 不可
 echo "    RF3:  $([ "$RF3_OK" = true ] && echo '✅ 可用' || echo '❌ 不可用')"
 echo "    Hotspot: $([ "$HOTSPOT_OK" = true ] && echo '✅ 可用' || echo '❌ 不可用')"
 echo ""
-echo "  停止服务: pkill -f 'uvicorn backend.main:app'"
+echo "  停止服务: pkill -f 'uvicorn main:app'"
 echo "=========================================="
