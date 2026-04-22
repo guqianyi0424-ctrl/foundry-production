@@ -2,7 +2,7 @@ import axios from 'axios'
 
 const api = axios.create({
   baseURL: '/api',
-  timeout: 300000,
+  timeout: 600000,
 })
 
 export interface UploadResponse {
@@ -18,20 +18,53 @@ export interface PredictHotspotResponse {
   total_residues: number
 }
 
+export interface RFD3Design {
+  index: number
+  batch: number
+  design_in_batch: number
+  name: string
+  pdb_path: string
+  pdb_content: string
+  plddt: number
+  mock?: boolean
+}
+
+export interface RFD3Response {
+  success: boolean
+  designs: RFD3Design[]
+  batches: Array<{ batch_idx: number; num_structures: number; designs: RFD3Design[] }>
+  num_batches: number
+  num_designs: number
+  first_backbone_pdb: string
+  output_dir: string
+  mock?: boolean
+}
+
+export interface MPNNSequence {
+  index: number
+  name: string
+  sequence: string
+  pdb_path: string
+  pdb_content: string
+  score: number
+  mock?: boolean
+}
+
+export interface MPNNResponse {
+  success: boolean
+  sequences: MPNNSequence[]
+  num_sequences: number
+  first_sequence_pdb: string
+  output_dir: string
+  mock?: boolean
+}
+
 export interface RunPipelineResponse {
   job_id: string
   status: string
-  rfd3_results?: {
-    success: boolean
-    designs: Array<{ index: number; rank: number; plddt: number; pdb_path: string }>
-    mock?: boolean
-  }
-  mpnn_results?: Array<{ design_idx: number; sequence: string; score: number; seq_idx: number }>
-  rf3_results?: Array<{
-    design_idx: number; sequence: string; rmsd: number;
-    avg_plddt: number; passed: boolean; plddt?: number[];
-    pae?: number[][]; per_res_rmsd?: number[]; mock?: boolean
-  }>
+  rfd3_results?: RFD3Response
+  mpnn_results?: MPNNResponse
+  rf3_results?: any
 }
 
 export const uploadPdb = async (file: File): Promise<UploadResponse> => {
@@ -43,6 +76,31 @@ export const uploadPdb = async (file: File): Promise<UploadResponse> => {
 
 export const predictHotspot = async (pdbContent: string): Promise<PredictHotspotResponse> => {
   const res = await api.post('/predict-hotspot', { pdb_content: pdbContent })
+  return res.data
+}
+
+export const runRFD3 = async (params: {
+  pdb_content: string
+  target?: string
+  hotspots?: string[]
+  binder_length?: number
+  length_min?: number
+  length_max?: number
+  diffusion_batch_size?: number
+  n_batches?: number
+}): Promise<RFD3Response> => {
+  const res = await api.post('/run-rfd3', params)
+  return res.data
+}
+
+export const runMPNN = async (params: {
+  backbone_pdb_content?: string
+  backbone_pdb_path?: string
+  batch_size?: number
+  fixed_chains?: string[]
+  model_type?: string
+}): Promise<MPNNResponse> => {
+  const res = await api.post('/run-mpnn', params)
   return res.data
 }
 

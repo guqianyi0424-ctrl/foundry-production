@@ -13,17 +13,23 @@ export interface HotspotResidue {
 
 export interface RFD3Design {
   index: number;
-  rank: number;
+  batch: number;
+  design_in_batch: number;
+  name: string;
+  pdb_path: string;
+  pdb_content: string;
   plddt: number;
-  pdb_path?: string;
-  pdb_content?: string;
+  mock?: boolean;
 }
 
 export interface MPNNResult {
-  design_idx: number;
+  index: number;
+  name: string;
   sequence: string;
+  pdb_path: string;
+  pdb_content: string;
   score: number;
-  seq_idx: number;
+  mock?: boolean;
 }
 
 export interface RF3Result {
@@ -36,19 +42,4 @@ export interface RF3Result {
   pae?: number[][];
   per_res_rmsd?: number[];
   mock?: boolean;
-}
-
-export interface DesignJob {
-  id: string;
-  target_name: string;
-  status: 'pending' | 'running' | 'completed' | 'failed';
-  created_at: string;
-  rfd3_results?: {
-    success: boolean;
-    designs: RFD3Design[];
-    mock?: boolean;
-    error?: string;
-  };
-  mpnn_results?: MPNNResult[];
-  rf3_results?: RF3Result[];
 }

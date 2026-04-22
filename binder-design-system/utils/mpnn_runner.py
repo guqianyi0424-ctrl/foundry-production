@@ -1,17 +1,15 @@
 """
 ProteinMPNN / LigandMPNN 调用模块
-优先使用 foundry Python API (MPNNInferenceEngine)
-回退到 conda_bridge CLI 调用
-最终回退到 mock 模式
+完全对齐官方 all.ipynb API 用法
+支持 fixed_chains 固定受体链 + atom_array 直接输入
 """
 import os
-import subprocess
+import io
 import json
-import glob
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 
-from utils.conda_bridge import is_foundry_available, run_foundry_cli
+import numpy as np
 
 
 class MPNNRunner:
@@ -30,87 +28,112 @@ class MPNNRunner:
             return False
 
     def is_available(self) -> bool:
-        return self._api_available or is_foundry_available()
+        return self._api_available
 
-    def run(
+    def run_mpnn(
         self,
-        backbone_pdb: str,
-        num_sequences: int = 3,
-        sampling_temp: float = 0.1,
-        job_id: str = "default",
-        top_k: int = 3
+        backbone_pdb_content: str = None,
+        backbone_pdb_path: str = None,
+        batch_size: int = 10,
+        fixed_chains: List[str] = None,
+        model_type: str = "ligand_mpnn",
+        job_id: str = "default"
     ) -> Dict[str, Any]:
         if self._api_available:
             try:
-                return self._run_api(backbone_pdb, num_sequences, sampling_temp, job_id, top_k)
+                return self._run_api(
+                    backbone_pdb_content, backbone_pdb_path, batch_size,
+                    fixed_chains, model_type, job_id
+                )
             except Exception as e:
-                print(f"[MPNN] API调用失败，回退CLI: {e}")
+                print(f"[MPNN] API调用失败: {e}")
+                import traceback
+                traceback.print_exc()
 
-        if is_foundry_available():
-            try:
-                return self._run_cli(backbone_pdb, num_sequences, sampling_temp, job_id, top_k)
-            except Exception as e:
-                print(f"[MPNN] CLI调用失败，回退mock: {e}")
-
-        job_dir = self.output_dir / job_id
-        job_dir.mkdir(parents=True, exist_ok=True)
-        return self._mock_run(backbone_pdb, num_sequences, job_dir, top_k)
+        return self._mock_run(
+            backbone_pdb_content, backbone_pdb_path, batch_size,
+            fixed_chains, job_id
+        )
 
     def _run_api(
         self,
-        backbone_pdb: str,
-        num_sequences: int,
-        sampling_temp: float,
-        job_id: str,
-        top_k: int
+        backbone_pdb_content: str,
+        backbone_pdb_path: str,
+        batch_size: int,
+        fixed_chains: List[str],
+        model_type: str,
+        job_id: str
     ) -> Dict[str, Any]:
         from mpnn.inference_engines.mpnn import MPNNInferenceEngine
-        from biotite.structure import from_pdb
+        from biotite.structure.io.pdb import PDBFile
+        import biotite.structure as bs
 
         job_dir = self.output_dir / job_id
         job_dir.mkdir(parents=True, exist_ok=True)
 
-        atom_array = from_pdb(backbone_pdb)
+        if backbone_pdb_content:
+            pdb_file = PDBFile.read(io.StringIO(backbone_pdb_content))
+            atom_array = pdb_file.get_structure(model=1)
+            atom_array = atom_array[bs.filter_amino_acids(atom_array)]
+        elif backbone_pdb_path:
+            pdb_file = PDBFile.read(backbone_pdb_path)
+            atom_array = pdb_file.get_structure(model=1)
+            atom_array = atom_array[bs.filter_amino_acids(atom_array)]
+        else:
+            return {"success": False, "error": "No backbone input provided", "sequences": []}
 
         engine_config = {
-            "model_type": "ligand_mpnn",
+            "model_type": model_type,
             "is_legacy_weights": True,
-            "out_directory": str(job_dir),
-            "write_structures": True,
-            "write_fasta": True,
+            "out_directory": None,
+            "write_structures": False,
+            "write_fasta": False,
         }
 
-        input_configs = [
-            {
-                "batch_size": num_sequences,
-                "remove_waters": True,
-            }
-        ]
+        input_config = {
+            "batch_size": batch_size,
+            "remove_waters": True,
+        }
+
+        if fixed_chains:
+            input_config["fixed_chains"] = fixed_chains
+
+        input_configs = [input_config]
+
+        print(f"[MPNN] model={model_type} | batch_size={batch_size} | fixed_chains={fixed_chains}")
 
         model = MPNNInferenceEngine(**engine_config)
         mpnn_outputs = model.run(input_dicts=input_configs, atom_arrays=[atom_array])
 
         sequences = []
         for i, item in enumerate(mpnn_outputs):
-            seq_1letter = self._extract_sequence_from_atom_array(item.atom_array)
-            score = 0.0
+            seq_1letter = self._extract_sequence(item.atom_array)
+            pdb_str = self._atom_array_to_pdb(item.atom_array)
+            design_name = f"seq_{i}"
+            pdb_path = job_dir / f"{design_name}.pdb"
+            with open(pdb_path, "w") as f:
+                f.write(pdb_str)
+
             sequences.append({
-                "header": f"design_{i},score={score}",
+                "index": i,
+                "name": design_name,
                 "sequence": seq_1letter,
-                "score": score,
-                "rank": i + 1
+                "pdb_path": str(pdb_path),
+                "pdb_content": pdb_str,
+                "score": 0.0,
             })
 
-        sequences = self._rank_and_select_top_k(sequences, top_k)
+        first_pdb = sequences[0]["pdb_content"] if sequences else ""
 
         return {
             "success": True,
             "sequences": sequences,
             "num_sequences": len(sequences),
-            "output_dir": str(job_dir)
+            "first_sequence_pdb": first_pdb,
+            "output_dir": str(job_dir),
         }
 
-    def _extract_sequence_from_atom_array(self, atom_array) -> str:
+    def _extract_sequence(self, atom_array) -> str:
         try:
             from biotite.structure import get_residue_starts
             from biotite.sequence import ProteinSequence
@@ -121,133 +144,93 @@ class MPNNRunner:
                 for res_name in atom_array.res_name[res_starts]
             )
             return seq_1letter
-        except Exception:
+        except Exception as e:
+            print(f"[MPNN] 序列提取失败: {e}")
             return ""
 
-    def _run_cli(
+    def _atom_array_to_pdb(self, atom_array) -> str:
+        try:
+            from atomworks.io.utils.io_utils import to_pdb_file
+            buf = io.StringIO()
+            to_pdb_file(atom_array, buf)
+            return buf.getvalue()
+        except ImportError:
+            pass
+
+        try:
+            import biotite.structure.io.pdb as bpdb
+            buf = io.StringIO()
+            pdb_file = bpdb.PDBFile()
+            pdb_file.set_structure(atom_array)
+            pdb_file.write(buf)
+            return buf.getvalue()
+        except Exception:
+            pass
+
+        return self._write_atom_array_manual(atom_array)
+
+    def _write_atom_array_manual(self, atom_array) -> str:
+        lines = []
+        for i in range(len(atom_array)):
+            atom = atom_array[i]
+            res_name = getattr(atom, 'res_name', 'ALA')
+            atom_name = getattr(atom, 'atom_name', 'CA')
+            chain_id = getattr(atom, 'chain_id', 'A')
+            res_id = getattr(atom, 'res_id', i + 1)
+            x, y, z = atom.coord
+            bfactor = getattr(atom, 'b_factor', 50.0)
+            element = getattr(atom, 'element', 'C')
+            lines.append(
+                f"ATOM  {i+1:5d} {atom_name:<4s} {res_name:3s} {chain_id:1s}"
+                f"{res_id:4d}    {x:8.3f}{y:8.3f}{z:8.3f}"
+                f"  1.00 {bfactor:5.2f}           {element}"
+            )
+        lines.append("END")
+        return "\n".join(lines) + "\n"
+
+    def _mock_run(
         self,
-        backbone_pdb: str,
-        num_sequences: int,
-        sampling_temp: float,
-        job_id: str,
-        top_k: int
+        backbone_pdb_content: str,
+        backbone_pdb_path: str,
+        batch_size: int,
+        fixed_chains: List[str],
+        job_id: str
     ) -> Dict[str, Any]:
+        import random
+
         job_dir = self.output_dir / job_id
         job_dir.mkdir(parents=True, exist_ok=True)
 
-        cmd_args = [
-            "mpnn",
-            "--structure_path", backbone_pdb,
-            "--out_directory", str(job_dir),
-            "--model_type", "ligand_mpnn",
-            "--batch_size", str(num_sequences),
-            "--number_of_batches", "1",
-        ]
+        aa_list = "ACDEFGHIKLMNPQRSTVWY"
+        n_residues = 80
 
-        result = run_foundry_cli(cmd_args, timeout=600)
+        if backbone_pdb_content:
+            n_residues = max(backbone_pdb_content.count("ATOM") // 4, 30)
+        elif backbone_pdb_path:
+            try:
+                with open(backbone_pdb_path, "r") as f:
+                    n_residues = max(f.read().count("ATOM") // 4, 30)
+            except Exception:
+                pass
 
-        if result.returncode != 0:
-            return {
-                "success": False,
-                "error": result.stderr[-500:] if result.stderr else "Unknown error",
-                "sequences": []
-            }
+        sequences = []
+        for i in range(batch_size):
+            seq = "".join(random.choices(aa_list, k=n_residues))
+            score = round(random.uniform(-30, -15), 2)
+            sequences.append({
+                "index": i,
+                "name": f"seq_{i}",
+                "sequence": seq,
+                "score": score,
+                "mock": True,
+            })
 
-        sequences = self._parse_results(job_dir)
-        sequences = self._rank_and_select_top_k(sequences, top_k)
-
+        first_pdb = ""
         return {
             "success": True,
             "sequences": sequences,
             "num_sequences": len(sequences),
-            "output_dir": str(job_dir)
-        }
-
-    def _parse_results(self, job_dir: Path) -> List[Dict]:
-        sequences = []
-
-        fasta_files = sorted(glob.glob(str(job_dir / "**/*.fa"), recursive=True))
-        if not fasta_files:
-            fasta_files = sorted(glob.glob(str(job_dir / "*.fa")))
-        for fasta_path in fasta_files:
-            with open(fasta_path, "r") as f:
-                content = f.read()
-
-            entries = content.split(">")
-            for entry in entries:
-                if not entry.strip():
-                    continue
-                lines = entry.strip().split("\n")
-                header = lines[0]
-                seq = "".join(lines[1:])
-
-                score = 0.0
-                if "score=" in header:
-                    try:
-                        score = float(header.split("score=")[1].split(",")[0].strip())
-                    except (ValueError, IndexError):
-                        pass
-
-                sequences.append({
-                    "header": header,
-                    "sequence": seq,
-                    "score": score,
-                    "fasta_path": fasta_path
-                })
-
-        return sequences
-
-    def _rank_and_select_top_k(self, sequences: List[Dict], top_k: int) -> List[Dict]:
-        sequences.sort(key=lambda x: x.get("score", 0))
-        selected = sequences[:top_k]
-        for i, s in enumerate(selected):
-            s["rank"] = i + 1
-        return selected
-
-    def _mock_run(
-        self,
-        backbone_pdb: str,
-        num_sequences: int,
-        job_dir: Path,
-        top_k: int = 3
-    ) -> Dict[str, Any]:
-        import random
-
-        aa_list = "ACDEFGHIKLMNPQRSTVWY"
-
-        try:
-            with open(backbone_pdb, "r") as f:
-                pdb_content = f.read()
-            n_residues = pdb_content.count("ATOM")
-        except Exception:
-            n_residues = 60
-
-        sequences = []
-        for i in range(num_sequences):
-            seq = "".join(random.choices(aa_list, k=n_residues))
-            score = round(random.uniform(-30, -15), 2)
-
-            sequences.append({
-                "header": f"design_{i},score={score}",
-                "sequence": seq,
-                "score": score,
-                "mock": True,
-                "rank": i + 1
-            })
-
-            fa_path = job_dir / f"design_{i}.fa"
-            with open(fa_path, "w") as f:
-                f.write(f">design_{i},score={score}\n{seq}\n")
-
-        sequences.sort(key=lambda x: x.get("score", 0))
-        selected = sequences[:top_k]
-        for i, s in enumerate(selected):
-            s["rank"] = i + 1
-
-        return {
-            "success": True,
-            "sequences": selected,
-            "num_sequences": len(selected),
+            "first_sequence_pdb": first_pdb,
             "output_dir": str(job_dir),
-            "mock": True
+            "mock": True,
         }

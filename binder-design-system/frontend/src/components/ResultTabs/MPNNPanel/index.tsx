@@ -11,7 +11,7 @@ const AA_COLORS: Record<string, string> = {
 export function MPNNPanel() {
   const mpnnResults = useAppStore((s) => s.mpnnResults)
 
-  if (!mpnnResults || mpnnResults.length === 0) {
+  if (!mpnnResults || !mpnnResults.sequences || mpnnResults.sequences.length === 0) {
     return (
       <div className="flex items-center justify-center h-64 text-gray-400 text-sm">
         暂无MPNN结果
@@ -19,22 +19,20 @@ export function MPNNPanel() {
     )
   }
 
+  const sequences = mpnnResults.sequences
+
   return (
     <div className="space-y-5">
       <div className="space-y-2">
-        {mpnnResults.map((m, i) => {
-          const scoreColor = m.score > 0.8 ? '#059669' : m.score > 0.5 ? '#d97706' : '#dc2626'
+        {sequences.map((m, i) => {
           const seqDisplay = m.sequence.length > 80 ? m.sequence.slice(0, 77) + '...' : m.sequence
 
           return (
             <div key={i} className="design-card">
               <div className="flex justify-between items-center mb-2.5">
-                <span className="text-sm font-bold text-gray-900">Design {m.design_idx + 1} - Seq {m.seq_idx + 1}</span>
-                <span
-                  className="text-xs font-semibold px-2.5 py-1 rounded-full"
-                  style={{ color: scoreColor, backgroundColor: scoreColor + '18' }}
-                >
-                  得分: {m.score.toFixed(3)}
+                <span className="text-sm font-bold text-gray-900">Sequence {m.index + 1}</span>
+                <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-blue-50 text-blue-700">
+                  {m.sequence.length} aa
                 </span>
               </div>
               <div className="leading-relaxed font-mono text-[13px] tracking-wide break-all">
@@ -48,7 +46,7 @@ export function MPNNPanel() {
         })}
       </div>
 
-      <MPNNScoreChart results={mpnnResults} />
+      <MPNNScoreChart results={sequences} />
       <MPNNLegend />
     </div>
   )
@@ -66,11 +64,8 @@ function MPNNScoreChart({ results }: { results: Array<{ sequence: string; score:
           return (
             <div key={i} className="flex flex-col items-center gap-1 flex-1">
               <span className="text-[10px] font-semibold" style={{ color }}>{r.score.toFixed(2)}</span>
-              <div
-                className="w-full rounded-t-md transition-all"
-                style={{ height: `${pct}%`, backgroundColor: color }}
-              />
-              <span className="text-[10px] text-gray-500">D{r.sequence ? '1' : i + 1}</span>
+              <div className="w-full rounded-t-md transition-all" style={{ height: `${pct}%`, backgroundColor: color }} />
+              <span className="text-[10px] text-gray-500">S{i + 1}</span>
             </div>
           )
         })}
