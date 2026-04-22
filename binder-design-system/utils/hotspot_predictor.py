@@ -1,6 +1,7 @@
 """
 热点残基预测工具
-方案: ESM-2 (GPU) + 纯 PyTorch MLP (无需DGL)
+方案: ESM-2 (CPU推理) + 纯 PyTorch MLP (无需DGL)
+GPU留给RFD3/MPNN/RF3大模型使用
 支持 Top-K 选择策略
 """
 import os
@@ -88,7 +89,7 @@ class HotspotPredictor:
             esm_features = self._get_esm_features(sequence)
 
             if esm_features is not None and len(esm_features) == len(residues):
-                device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+                device = torch.device('cpu')
 
                 mlp_models = self._load_mlp_models(esm_features.shape[1], device)
 
@@ -103,7 +104,7 @@ class HotspotPredictor:
 
                     scores = np.mean(all_probs, axis=0)
                     n_models = len(mlp_models)
-                    print(f"[DL] ESM-2+MLP预测完成 ({n_models}折集成, GPU加速)")
+                    print(f"[DL] ESM-2+MLP预测完成 ({n_models}折集成, CPU推理)")
                     return {"scores": scores, "method": "dl", "model_loaded": True}
                 else:
                     print("[DL] 无MLP模型权重，使用ESM-2注意力分数")
@@ -150,7 +151,7 @@ class HotspotPredictor:
                             scores = (cls_attn - min_a) / (max_a - min_a)
                         else:
                             scores = np.ones(len(residues)) * 0.5
-                        print(f"[DL] ESM-2注意力分数预测完成 (GPU)")
+                        print(f"[DL] ESM-2注意力分数预测完成 (CPU)")
                         return scores
 
             return None
@@ -305,10 +306,9 @@ class HotspotPredictor:
             from transformers import AutoModel, AutoTokenizer
 
             model_name = "facebook/esm2_t33_650M_UR50D"
-            print(f"[ESM] 正在加载: {model_name}...")
+            print(f"[ESM] 正在加载: {model_name} (CPU推理)...")
 
-            has_cuda = torch.cuda.is_available()
-            device = torch.device('cuda' if has_cuda else 'cpu')
+            device = torch.device('cpu')
 
             tokenizer = AutoTokenizer.from_pretrained(model_name)
             model = AutoModel.from_pretrained(model_name).to(device)
