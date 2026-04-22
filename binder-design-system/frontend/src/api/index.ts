@@ -93,6 +93,43 @@ export const runRFD3 = async (params: {
   return res.data
 }
 
+export interface RF3Summary {
+  chain_ptm: number[]
+  overall_plddt: number
+  overall_pde: number
+  overall_pae: number
+  ptm: number
+  iptm: number
+  has_clash: boolean
+  ranking_score: number
+}
+
+export interface RF3Response {
+  success: boolean
+  predicted_pdb: string
+  predicted_pdb_path: string
+  num_models: number
+  summary: RF3Summary
+  pae: number[][] | null
+  plddt: number[]
+  avg_plddt: number
+  rmsd: number
+  rmsd_interpretation: string
+  per_res_rmsd: number[]
+  passed: boolean
+  output_dir: string
+  mock?: boolean
+}
+
+export const runRF3 = async (params: {
+  mpnn_pdb_content: string
+  rfd3_pdb_content?: string
+  example_id?: string
+}): Promise<RF3Response> => {
+  const res = await api.post('/run-rf3', params)
+  return res.data
+}
+
 export const runMPNN = async (params: {
   backbone_pdb_content?: string
   backbone_pdb_path?: string

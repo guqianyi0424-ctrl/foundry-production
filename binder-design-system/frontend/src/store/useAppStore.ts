@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import type { ChainInfo, HotspotResidue, RFD3Design, MPNNResult, RF3Result } from '@/types'
-import type { RFD3Response, MPNNResponse } from '@/api'
+import type { RFD3Response, MPNNResponse, RF3Response } from '@/api'
 
 export interface ResidueRange {
   chain: string;
@@ -59,8 +59,8 @@ interface AppState {
   mpnnResults: MPNNResponse | null;
   setMpnnResults: (results: MPNNResponse | null) => void;
 
-  rf3Results: RF3Result[] | null;
-  setRf3Results: (results: RF3Result[] | null) => void;
+  rf3Results: RF3Response | null;
+  setRf3Results: (results: RF3Response | null) => void;
 
   isRunning: boolean;
   setIsRunning: (running: boolean) => void;
@@ -94,7 +94,7 @@ const initialState = {
   },
   rfd3Results: null as RFD3Response | null,
   mpnnResults: null as MPNNResponse | null,
-  rf3Results: null as RF3Result[] | null,
+  rf3Results: null as RF3Response | null,
   isRunning: false,
   jobHistory: [] as Array<{id: string; name: string; status: string; time: string}>,
 }

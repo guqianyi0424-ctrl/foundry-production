@@ -42,7 +42,8 @@ class MPNNRequest(BaseModel):
 
 
 class RF3Request(BaseModel):
-    pdb_content: str
+    mpnn_pdb_content: str
+    rfd3_pdb_content: Optional[str] = None
     example_id: str = "binder_design"
 
 
@@ -121,9 +122,9 @@ async def run_rf3(req: RF3Request):
     try:
         runner = RF3Runner()
         job_id = f"rf3_{int(time.time())}"
-        result = runner.run(
-            sequence=None,
-            pdb_content=req.pdb_content,
+        result = runner.run_rf3(
+            mpnn_pdb_content=req.mpnn_pdb_content,
+            rfd3_pdb_content=req.rfd3_pdb_content,
             example_id=req.example_id,
             job_id=job_id,
         )

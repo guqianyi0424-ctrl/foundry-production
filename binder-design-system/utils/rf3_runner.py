@@ -1,17 +1,15 @@
 """
 RoseTTAFold3 调用模块
-优先使用 foundry Python API (RF3InferenceEngine)
-回退到 conda_bridge CLI 调用
-最终回退到 mock 模式
+完全对齐官方 all.ipynb API 用法
+支持 from_atom_array 输入 + RMSD 骨架对比 + 置信度指标
 """
 import os
-import subprocess
-import glob
+import io
 import json
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 
-from utils.conda_bridge import is_foundry_available, run_foundry_cli
+import numpy as np
 
 
 class RF3Runner:
@@ -30,32 +28,32 @@ class RF3Runner:
             return False
 
     def is_available(self) -> bool:
-        return self._api_available or is_foundry_available()
+        return self._api_available
 
-    def run(
+    def run_rf3(
         self,
-        sequence: str,
+        mpnn_pdb_content: str = None,
+        rfd3_pdb_content: str = None,
+        example_id: str = "binder_design",
         job_id: str = "default"
     ) -> Dict[str, Any]:
         if self._api_available:
             try:
-                return self._run_api(sequence, job_id)
+                return self._run_api(
+                    mpnn_pdb_content, rfd3_pdb_content, example_id, job_id
+                )
             except Exception as e:
-                print(f"[RF3] API调用失败，回退CLI: {e}")
+                print(f"[RF3] API调用失败: {e}")
+                import traceback
+                traceback.print_exc()
 
-        if is_foundry_available():
-            try:
-                return self._run_cli(sequence, job_id)
-            except Exception as e:
-                print(f"[RF3] CLI调用失败，回退mock: {e}")
-
-        job_dir = self.output_dir / job_id
-        job_dir.mkdir(parents=True, exist_ok=True)
-        return self._mock_run(sequence, job_dir)
+        return self._mock_run(mpnn_pdb_content, rfd3_pdb_content, example_id, job_id)
 
     def _run_api(
         self,
-        sequence: str,
+        mpnn_pdb_content: str,
+        rfd3_pdb_content: str,
+        example_id: str,
         job_id: str
     ) -> Dict[str, Any]:
         from rf3.inference_engines.rf3 import RF3InferenceEngine
@@ -66,255 +64,150 @@ class RF3Runner:
 
         inference_engine = RF3InferenceEngine(ckpt_path='rf3', verbose=False)
 
-        input_structure = InferenceInput.from_sequence(
-            sequence=sequence,
-            example_id=f"binder_{job_id}"
-        )
+        if mpnn_pdb_content:
+            atom_array = self._pdb_to_atom_array(mpnn_pdb_content)
+            if atom_array is not None:
+                input_structure = InferenceInput.from_atom_array(
+                    atom_array, example_id=example_id
+                )
+            else:
+                return {"success": False, "error": "无法解析MPNN PDB"}
+        else:
+            return {"success": False, "error": "需要MPNN结构作为输入"}
+
+        print(f"[RF3] example_id={example_id} | 输入: MPNN atom_array")
+
         rf3_outputs = inference_engine.run(inputs=input_structure)
 
         output_key = next(iter(rf3_outputs.keys()))
+        num_models = len(rf3_outputs[output_key])
         rf3_output = rf3_outputs[output_key][0]
 
-        atom_array = rf3_output.atom_array
-        pdb_path = job_dir / "rf3_predicted.pdb"
-        self._save_atom_array(atom_array, str(pdb_path))
+        predicted_pdb = self._atom_array_to_pdb(rf3_output.atom_array)
+        predicted_path = job_dir / "rf3_predicted.pdb"
+        with open(predicted_path, "w") as f:
+            f.write(predicted_pdb)
 
         summary = rf3_output.summary_confidences
         conf = rf3_output.confidences
 
-        avg_plddt = summary.get('overall_plddt', 0.0)
         plddt_list = []
         if conf and 'atom_plddts' in conf:
-            import numpy as np
             plddt_list = np.round(conf['atom_plddts'], 2).tolist()
 
         pae_data = None
         if conf and 'pae' in conf:
             pae_data = conf['pae']
 
+        rmsd_value = -1.0
+        rmsd_interpretation = "N/A"
+        per_res_rmsd = []
+        if rfd3_pdb_content:
+            rmsd_value = self._calculate_rmsd_pdb(rfd3_pdb_content, predicted_pdb)
+            if rmsd_value >= 0:
+                if rmsd_value < 1.0:
+                    rmsd_interpretation = "Excellent"
+                elif rmsd_value < 2.0:
+                    rmsd_interpretation = "Good"
+                else:
+                    rmsd_interpretation = "Moderate"
+                per_res_rmsd = self._calculate_per_res_rmsd_pdb(rfd3_pdb_content, predicted_pdb)
+
+        try:
+            from atomworks.io.utils.io_utils import to_cif_file
+            generated_cif = job_dir / "generated.cif"
+            refolded_cif = job_dir / "refolded.cif"
+            if rfd3_pdb_content:
+                rfd3_aa = self._pdb_to_atom_array(rfd3_pdb_content)
+                if rfd3_aa is not None:
+                    to_cif_file(rfd3_aa, str(generated_cif))
+            to_cif_file(rf3_output.atom_array, str(refolded_cif))
+        except Exception:
+            pass
+
         return {
             "success": True,
-            "pdb_path": str(pdb_path),
+            "predicted_pdb": predicted_pdb,
+            "predicted_pdb_path": str(predicted_path),
+            "num_models": num_models,
+            "summary": {
+                "chain_ptm": summary.get("chain_ptm", []),
+                "overall_plddt": summary.get("overall_plddt", 0.0),
+                "overall_pde": summary.get("overall_pde", 0.0),
+                "overall_pae": summary.get("overall_pae", 0.0),
+                "ptm": summary.get("ptm", 0.0),
+                "iptm": summary.get("iptm", 0.0),
+                "has_clash": summary.get("has_clash", False),
+                "ranking_score": summary.get("ranking_score", 0.0),
+            },
             "pae": pae_data,
             "plddt": plddt_list,
-            "avg_plddt": round(float(avg_plddt), 1),
-            "ptm": summary.get('ptm', 0.0),
-            "ranking_score": summary.get('ranking_score', 0.0),
-            "output_dir": str(job_dir)
+            "avg_plddt": round(float(summary.get("overall_plddt", 0.0)), 1),
+            "rmsd": round(rmsd_value, 2),
+            "rmsd_interpretation": rmsd_interpretation,
+            "per_res_rmsd": per_res_rmsd,
+            "passed": rmsd_value >= 0 and rmsd_value < 2.0,
+            "output_dir": str(job_dir),
         }
 
-    def _run_cli(
-        self,
-        sequence: str,
-        job_id: str
-    ) -> Dict[str, Any]:
-        job_dir = self.output_dir / job_id
-        job_dir.mkdir(parents=True, exist_ok=True)
+    def _pdb_to_atom_array(self, pdb_content: str):
+        try:
+            import biotite.structure.io.pdb as bpdb
+            import biotite.structure as bs
+            pdb_file = bpdb.PDBFile.read(io.StringIO(pdb_content))
+            atom_array = pdb_file.get_structure(model=1)
+            atom_array = atom_array[bs.filter_amino_acids(atom_array)]
+            return atom_array
+        except Exception as e:
+            print(f"[RF3] PDB解析失败: {e}")
+            return None
 
-        fasta_path = job_dir / "input.fasta"
-        with open(fasta_path, "w") as f:
-            f.write(f">binder\n{sequence}\n")
-
-        result = run_foundry_cli(
-            ["rf3", "fold", f"inputs={fasta_path}", f"out_dir={job_dir}"],
-            timeout=3600
-        )
-
-        if result.returncode != 0:
-            return {
-                "success": False,
-                "error": result.stderr[-500:] if result.stderr else "Unknown error",
-                "pdb_path": None
-            }
-
-        pdb_files = sorted(glob.glob(str(job_dir / "**/*.pdb"), recursive=True))
-        if not pdb_files:
-            pdb_files = sorted(glob.glob(str(job_dir / "*.pdb")))
-        if not pdb_files:
-            return {"success": False, "error": "未生成PDB文件", "pdb_path": None}
-
-        pae_data = self._parse_pae(job_dir)
-        plddt = self._parse_plddt(job_dir)
-        avg_plddt = sum(plddt) / len(plddt) if plddt else 0.0
-
-        return {
-            "success": True,
-            "pdb_path": pdb_files[0],
-            "pae": pae_data,
-            "plddt": plddt,
-            "avg_plddt": round(avg_plddt, 1),
-            "output_dir": str(job_dir)
-        }
-
-    def _save_atom_array(self, atom_array, pdb_path: str):
+    def _atom_array_to_pdb(self, atom_array) -> str:
         try:
             from atomworks.io.utils.io_utils import to_pdb_file
-            to_pdb_file(atom_array, pdb_path)
+            buf = io.StringIO()
+            to_pdb_file(atom_array, buf)
+            return buf.getvalue()
         except ImportError:
-            try:
-                from atomworks.io.utils.io_utils import to_cif_file
-                cif_path = pdb_path.replace('.pdb', '.cif')
-                to_cif_file(atom_array, cif_path)
-            except ImportError:
-                self._write_atom_array_manual(atom_array, pdb_path)
+            pass
 
-    def _write_atom_array_manual(self, atom_array, pdb_path: str):
-        with open(pdb_path, "w") as f:
-            for i in range(len(atom_array)):
-                atom = atom_array[i]
-                res_name = atom.res_name if hasattr(atom, 'res_name') else 'ALA'
-                atom_name = atom.atom_name if hasattr(atom, 'atom_name') else 'CA'
-                chain_id = atom.chain_id if hasattr(atom, 'chain_id') else 'A'
-                res_id = atom.res_id if hasattr(atom, 'res_id') else i + 1
-                x, y, z = atom.coord
-                bfactor = atom.b_factor if hasattr(atom, 'b_factor') else 50.0
-                element = atom.element if hasattr(atom, 'element') else 'C'
-                f.write(
-                    f"ATOM  {i+1:5d} {atom_name:<4s} {res_name:3s} {chain_id:1s}"
-                    f"{res_id:4d}    {x:8.3f}{y:8.3f}{z:8.3f}"
-                    f"  1.00 {bfactor:5.2f}           {element}\n"
-                )
-            f.write("END\n")
-
-    def _parse_pae(self, job_dir: Path) -> Optional[List[List[float]]]:
-        json_files = glob.glob(str(job_dir / "**/*pae*.json"), recursive=True)
-        if not json_files:
-            json_files = glob.glob(str(job_dir / "*pae*.json"))
-        if json_files:
-            try:
-                with open(json_files[0], "r") as f:
-                    return json.load(f)
-            except Exception:
-                pass
-        return None
-
-    def _parse_plddt(self, job_dir: Path) -> Optional[List[float]]:
-        json_files = glob.glob(str(job_dir / "**/*plddt*.json"), recursive=True)
-        if not json_files:
-            json_files = glob.glob(str(job_dir / "*plddt*.json"))
-        if json_files:
-            try:
-                with open(json_files[0], "r") as f:
-                    return json.load(f)
-            except Exception:
-                pass
-        return None
-
-    def _mock_run(self, sequence: str, job_dir: Path) -> Dict[str, Any]:
-        import numpy as np
-
-        n_res = len(sequence)
-        np.random.seed(42)
-
-        coords = np.zeros((n_res, 3))
-        for i in range(1, n_res):
-            angle = np.random.uniform(-0.2, 0.2)
-            step = 3.8
-            coords[i] = coords[i - 1] + [
-                step * np.cos(angle),
-                step * np.sin(angle),
-                np.random.uniform(-0.3, 0.3)
-            ]
-
-        pdb_path = job_dir / "rf3_predicted.pdb"
-        with open(pdb_path, "w") as f:
-            for i, (aa, (x, y, z)) in enumerate(zip(sequence, coords)):
-                res_name = self._aa1to3(aa)
-                bfactor = round(np.random.uniform(70, 95), 1)
-                f.write(f"ATOM  {i * 3 + 1:5d}  CA  {res_name:3s} A{i + 1:4d}    {x:8.3f}{y:8.3f}{z:8.3f}  1.00 {bfactor:5.1f}           C\n")
-            f.write("END\n")
-
-        plddt = [round(np.random.uniform(70, 95), 1) for _ in range(n_res)]
-        avg_plddt = round(sum(plddt) / len(plddt), 1)
-        pae = [[round(np.random.uniform(1, 15), 1) for _ in range(n_res)] for _ in range(n_res)]
-
-        return {
-            "success": True,
-            "pdb_path": str(pdb_path),
-            "pae": pae,
-            "plddt": plddt,
-            "avg_plddt": avg_plddt,
-            "output_dir": str(job_dir),
-            "mock": True
-        }
-
-    @staticmethod
-    def _aa1to3(aa: str) -> str:
-        mapping = {
-            'A': 'ALA', 'R': 'ARG', 'N': 'ASN', 'D': 'ASP', 'C': 'CYS',
-            'Q': 'GLN', 'E': 'GLU', 'G': 'GLY', 'H': 'HIS', 'I': 'ILE',
-            'L': 'LEU', 'K': 'LYS', 'M': 'MET', 'F': 'PHE', 'P': 'PRO',
-            'S': 'SER', 'T': 'THR', 'W': 'TRP', 'Y': 'TYR', 'V': 'VAL'
-        }
-        return mapping.get(aa, 'ALA')
-
-    @staticmethod
-    def calculate_rmsd(pdb1_path: str, pdb2_path: str) -> float:
         try:
-            import numpy as np
+            import biotite.structure.io.pdb as bpdb
+            buf = io.StringIO()
+            pdb_file = bpdb.PDBFile()
+            pdb_file.set_structure(atom_array)
+            pdb_file.write(buf)
+            return buf.getvalue()
+        except Exception:
+            pass
 
-            def read_ca_coords(pdb_path):
-                coords = []
-                with open(pdb_path, "r") as f:
-                    for line in f:
-                        if line.startswith("ATOM") and "CA" in line[12:16]:
-                            x = float(line[30:38])
-                            y = float(line[38:46])
-                            z = float(line[46:54])
-                            coords.append([x, y, z])
-                return np.array(coords)
+        return self._write_atom_array_manual(atom_array)
 
-            coords1 = read_ca_coords(pdb1_path)
-            coords2 = read_ca_coords(pdb2_path)
+    def _write_atom_array_manual(self, atom_array) -> str:
+        lines = []
+        for i in range(len(atom_array)):
+            atom = atom_array[i]
+            res_name = getattr(atom, 'res_name', 'ALA')
+            atom_name = getattr(atom, 'atom_name', 'CA')
+            chain_id = getattr(atom, 'chain_id', 'A')
+            res_id = getattr(atom, 'res_id', i + 1)
+            x, y, z = atom.coord
+            bfactor = getattr(atom, 'b_factor', 50.0)
+            element = getattr(atom, 'element', 'C')
+            lines.append(
+                f"ATOM  {i+1:5d} {atom_name:<4s} {res_name:3s} {chain_id:1s}"
+                f"{res_id:4d}    {x:8.3f}{y:8.3f}{z:8.3f}"
+                f"  1.00 {bfactor:5.2f}           {element}"
+            )
+        lines.append("END")
+        return "\n".join(lines) + "\n"
 
-            if len(coords1) != len(coords2):
-                min_len = min(len(coords1), len(coords2))
-                coords1 = coords1[:min_len]
-                coords2 = coords2[:min_len]
-
-            centroid1 = coords1.mean(axis=0)
-            centroid2 = coords2.mean(axis=0)
-            coords1 -= centroid1
-            coords2 -= centroid2
-
-            H = coords1.T @ coords2
-            U, S, Vt = np.linalg.svd(H)
-            R = Vt.T @ U.T
-
-            if np.linalg.det(R) < 0:
-                Vt[-1, :] *= -1
-                R = Vt.T @ U.T
-
-            coords2_aligned = (R @ coords2.T).T
-
-            diff = coords1 - coords2_aligned
-            rmsd = np.sqrt(np.mean(np.sum(diff ** 2, axis=1)))
-
-            return round(float(rmsd), 3)
-
-        except Exception as e:
-            print(f"RMSD计算失败: {e}")
-            return -1.0
-
-    @staticmethod
-    def calculate_per_residue_rmsd(pdb1_path: str, pdb2_path: str) -> List[float]:
+    def _calculate_rmsd_pdb(self, pdb1_content: str, pdb2_content: str) -> float:
         try:
-            import numpy as np
-
-            def read_ca_coords(pdb_path):
-                coords = []
-                with open(pdb_path, "r") as f:
-                    for line in f:
-                        if line.startswith("ATOM") and "CA" in line[12:16]:
-                            x = float(line[30:38])
-                            y = float(line[38:46])
-                            z = float(line[46:54])
-                            coords.append([x, y, z])
-                return np.array(coords)
-
-            coords1 = read_ca_coords(pdb1_path)
-            coords2 = read_ca_coords(pdb2_path)
-
+            coords1 = self._read_ca_coords(pdb1_content)
+            coords2 = self._read_ca_coords(pdb2_content)
+            if len(coords1) == 0 or len(coords2) == 0:
+                return -1.0
             min_len = min(len(coords1), len(coords2))
             coords1 = coords1[:min_len]
             coords2 = coords2[:min_len]
@@ -332,46 +225,127 @@ class RF3Runner:
                 R = Vt.T @ U.T
 
             coords2_aligned = (R @ coords2.T).T
-
             diff = coords1 - coords2_aligned
-            per_res_rmsd = np.sqrt(np.sum(diff ** 2, axis=1))
+            rmsd = np.sqrt(np.mean(np.sum(diff ** 2, axis=1)))
+            return round(float(rmsd), 3)
+        except Exception as e:
+            print(f"[RF3] RMSD计算失败: {e}")
+            return -1.0
 
-            return [round(float(r), 3) for r in per_res_rmsd]
+    def _calculate_per_res_rmsd_pdb(self, pdb1_content: str, pdb2_content: str) -> List[float]:
+        try:
+            coords1 = self._read_ca_coords(pdb1_content)
+            coords2 = self._read_ca_coords(pdb2_content)
+            min_len = min(len(coords1), len(coords2))
+            coords1 = coords1[:min_len]
+            coords2 = coords2[:min_len]
 
+            centroid1 = coords1.mean(axis=0)
+            centroid2 = coords2.mean(axis=0)
+            coords1 -= centroid1
+            coords2 -= centroid2
+
+            H = coords1.T @ coords2
+            U, S, Vt = np.linalg.svd(H)
+            R = Vt.T @ U.T
+            if np.linalg.det(R) < 0:
+                Vt[-1, :] *= -1
+                R = Vt.T @ U.T
+
+            coords2_aligned = (R @ coords2.T).T
+            diff = coords1 - coords2_aligned
+            per_res = np.sqrt(np.sum(diff ** 2, axis=1))
+            return [round(float(r), 3) for r in per_res]
         except Exception:
             return []
 
-    def validate_design(
+    def _read_ca_coords(self, pdb_content: str) -> np.ndarray:
+        coords = []
+        for line in pdb_content.split('\n'):
+            if line.startswith("ATOM") and line[12:16].strip() == "CA":
+                x = float(line[30:38])
+                y = float(line[38:46])
+                z = float(line[46:54])
+                coords.append([x, y, z])
+        return np.array(coords)
+
+    def _mock_run(
         self,
-        backbone_pdb: str,
-        sequence: str,
-        job_id: str = "default",
-        rmsd_threshold: float = 2.0
+        mpnn_pdb_content: str,
+        rfd3_pdb_content: str,
+        example_id: str,
+        job_id: str
     ) -> Dict[str, Any]:
-        rf3_result = self.run(sequence, job_id)
+        job_dir = self.output_dir / job_id
+        job_dir.mkdir(parents=True, exist_ok=True)
 
-        if not rf3_result["success"]:
-            return {
-                "success": False,
-                "error": rf3_result.get("error", "RF3预测失败"),
-                "rmsd": -1.0,
-                "passed": False
-            }
+        n_res = 80
+        if mpnn_pdb_content:
+            ca_count = sum(1 for line in mpnn_pdb_content.split('\n')
+                          if line.startswith("ATOM") and "CA" in line[12:16])
+            if ca_count > 0:
+                n_res = ca_count
 
-        rmsd_val = -1.0
-        per_res_rmsd = []
-        if rf3_result.get("pdb_path") and os.path.exists(rf3_result["pdb_path"]):
-            rmsd_val = self.calculate_rmsd(backbone_pdb, rf3_result["pdb_path"])
-            per_res_rmsd = self.calculate_per_residue_rmsd(backbone_pdb, rf3_result["pdb_path"])
+        np.random.seed(42)
+        coords = np.zeros((n_res, 3))
+        for i in range(1, n_res):
+            angle = np.random.uniform(-0.2, 0.2)
+            step = 3.8
+            coords[i] = coords[i - 1] + [
+                step * np.cos(angle),
+                step * np.sin(angle),
+                np.random.uniform(-0.3, 0.3)
+            ]
+
+        plddt = [round(np.random.uniform(70, 95), 1) for _ in range(n_res)]
+        avg_plddt = round(sum(plddt) / len(plddt), 1)
+
+        predicted_pdb_lines = []
+        for i in range(n_res):
+            x, y, z = coords[i]
+            bfactor = plddt[i]
+            predicted_pdb_lines.append(
+                f"ATOM  {i*3+1:5d}  CA  ALA A{i+1:4d}    {x:8.3f}{y:8.3f}{z:8.3f}  1.00 {bfactor:5.1f}           C"
+            )
+        predicted_pdb_lines.append("END")
+        predicted_pdb = "\n".join(predicted_pdb_lines) + "\n"
+
+        predicted_path = job_dir / "rf3_predicted.pdb"
+        with open(predicted_path, "w") as f:
+            f.write(predicted_pdb)
+
+        rmsd_value = round(np.random.uniform(1.5, 5.0), 2)
+        if rmsd_value < 1.0:
+            rmsd_interpretation = "Excellent"
+        elif rmsd_value < 2.0:
+            rmsd_interpretation = "Good"
+        else:
+            rmsd_interpretation = "Moderate"
+
+        per_res_rmsd = [round(np.random.uniform(0.5, 4.0), 2) for _ in range(n_res)]
 
         return {
             "success": True,
-            "rf3_pdb": rf3_result.get("pdb_path"),
-            "rmsd": rmsd_val,
+            "predicted_pdb": predicted_pdb,
+            "predicted_pdb_path": str(predicted_path),
+            "num_models": 1,
+            "summary": {
+                "chain_ptm": [0.8, 0.69],
+                "overall_plddt": avg_plddt / 100.0,
+                "overall_pde": round(np.random.uniform(5, 10), 2),
+                "overall_pae": round(np.random.uniform(10, 25), 2),
+                "ptm": round(np.random.uniform(0.3, 0.6), 4),
+                "iptm": round(np.random.uniform(0.1, 0.4), 4),
+                "has_clash": False,
+                "ranking_score": round(np.random.uniform(0.2, 0.5), 4),
+            },
+            "pae": None,
+            "plddt": plddt,
+            "avg_plddt": avg_plddt,
+            "rmsd": rmsd_value,
+            "rmsd_interpretation": rmsd_interpretation,
             "per_res_rmsd": per_res_rmsd,
-            "plddt": rf3_result.get("plddt"),
-            "avg_plddt": rf3_result.get("avg_plddt", 0),
-            "pae": rf3_result.get("pae"),
-            "passed": rmsd_val >= 0 and rmsd_val < rmsd_threshold,
-            "mock": rf3_result.get("mock", False)
+            "passed": rmsd_value < 2.0,
+            "output_dir": str(job_dir),
+            "mock": True,
         }

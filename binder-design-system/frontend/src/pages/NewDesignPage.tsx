@@ -3,10 +3,10 @@ import { useAppStore } from '@/store/useAppStore'
 import { SequenceViewer } from '@/components/SequenceViewer'
 import { MolstarViewer } from '@/components/MolstarViewer'
 import { DesignPanel } from '@/components/DesignPanel'
-import { uploadPdb, predictHotspot, runRFD3, runMPNN } from '@/api'
-import type { PredictHotspotResponse, RFD3Design, MPNNSequence } from '@/api'
+import { uploadPdb, predictHotspot, runRFD3, runMPNN, runRF3 } from '@/api'
+import type { PredictHotspotResponse, RFD3Design, MPNNSequence, RF3Response } from '@/api'
 import { parseStructureFile } from '@/utils/pdbParser'
-import { Upload, Play, RotateCcw, Sparkles, Scissors, Target, RefreshCw, X, CheckCircle2, Dna, FlaskConical, ChevronRight } from 'lucide-react'
+import { Upload, Play, RotateCcw, Sparkles, Scissors, Target, RefreshCw, X, CheckCircle2, Dna, FlaskConical, ChevronRight, Shield, TrendingUp, AlertTriangle } from 'lucide-react'
 
 interface HotspotPredictionModalProps {
   open: boolean
@@ -156,6 +156,8 @@ export function NewDesignPage() {
   const setRfd3Results = useAppStore((s) => s.setRfd3Results)
   const mpnnResults = useAppStore((s) => s.mpnnResults)
   const setMpnnResults = useAppStore((s) => s.setMpnnResults)
+  const rf3Results = useAppStore((s) => s.rf3Results)
+  const setRf3Results = useAppStore((s) => s.setRf3Results)
   const isRunning = useAppStore((s) => s.isRunning)
   const setIsRunning = useAppStore((s) => s.setIsRunning)
   const addJob = useAppStore((s) => s.addJob)
@@ -167,6 +169,7 @@ export function NewDesignPage() {
   const [showRFD3Modal, setShowRFD3Modal] = useState(false)
   const [isRFD3Running, setIsRFD3Running] = useState(false)
   const [isMPNNRunning, setIsMPNNRunning] = useState(false)
+  const [isRF3Running, setIsRF3Running] = useState(false)
   const [selectedRFD3Design, setSelectedRFD3Design] = useState<RFD3Design | null>(null)
   const [selectedMPNNSeq, setSelectedMPNNSeq] = useState<MPNNSequence | null>(null)
   const [activeStep, setActiveStep] = useState(0)
@@ -259,6 +262,21 @@ export function NewDesignPage() {
     } catch (err) { alert('MPNN运行失败: ' + String(err)) }
     finally { setIsMPNNRunning(false) }
   }, [selectedHotspots, setMpnnResults])
+
+  const handleRunRF3 = useCallback(async (mpnnPdb: string) => {
+    setIsRF3Running(true)
+    try {
+      const rfd3Pdb = selectedRFD3Design?.pdb_content || undefined
+      const res = await runRF3({
+        mpnn_pdb_content: mpnnPdb,
+        rfd3_pdb_content: rfd3Pdb,
+        example_id: 'binder_design',
+      })
+      setRf3Results(res)
+      setActiveStep(2)
+    } catch (err) { alert('RF3运行失败: ' + String(err)) }
+    finally { setIsRF3Running(false) }
+  }, [selectedRFD3Design, setRf3Results])
 
   return (
     <div className="p-6 max-w-[1400px] mx-auto space-y-5">
@@ -430,6 +448,13 @@ export function NewDesignPage() {
                           <iframe srcDoc={`<!DOCTYPE html><html><head><script src="https://cdn.jsdelivr.net/npm/molstar@4.4.0/build/viewer/molstar.js"></script><style>body{margin:0;padding:0;overflow:hidden}#app{width:100%;height:100%}</style></head><body><div id="app"></div><script>molstar.Viewer.create('app',{layoutIsExpanded:false}).then(v=>{const pdbData=\`${seq.pdb_content.replace(/`/g, '\\`').replace(/\$/g, '\\$')}\`;v.loadStructureFromData(pdbData,'pdb')})</script></body></html>`} className="w-full h-full border-0" title={`Sequence ${seq.index + 1}`} />
                         </div>
                       )}
+                      {seq.pdb_content && selectedMPNNSeq?.index === seq.index && (
+                        <div className="mt-2 flex justify-end">
+                          <button onClick={() => handleRunRF3(seq.pdb_content)} disabled={isRF3Running} className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs bg-orange-50 text-orange-700 hover:bg-orange-100 transition-all disabled:opacity-50">
+                            <Shield size={12} />{isRF3Running ? 'RF3验证中...' : '送入RF3验证'}
+                          </button>
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -446,8 +471,165 @@ export function NewDesignPage() {
 
         {/* RF3 Results */}
         {activeStep === 2 && (
-          <div className="text-center py-12 text-gray-400">
-            <p>RF3 结构验证步骤待实现</p>
+          <div>
+            {isRF3Running && (
+              <div className="flex items-center justify-center py-12">
+                <div className="animate-spin w-8 h-8 border-3 border-orange-500 border-t-transparent rounded-full mr-3" />
+                <span className="text-gray-600">RF3 正在验证结构...</span>
+              </div>
+            )}
+            {rf3Results && !isRF3Running && (
+              <div className="space-y-5">
+                {/* Summary Cards */}
+                <div className="grid grid-cols-4 gap-4">
+                  <div className="p-4 rounded-xl border border-gray-100 bg-white">
+                    <div className="text-xs text-gray-500 mb-1">Backbone RMSD</div>
+                    <div className="flex items-baseline gap-1">
+                      <span className={`text-2xl font-bold ${rf3Results.rmsd < 2 ? 'text-green-600' : rf3Results.rmsd < 5 ? 'text-amber-600' : 'text-red-600'}`}>{rf3Results.rmsd.toFixed(2)}</span>
+                      <span className="text-xs text-gray-400">Å</span>
+                    </div>
+                    <span className={`text-xs px-2 py-0.5 rounded-full ${rf3Results.rmsd_interpretation === 'Excellent' ? 'bg-green-100 text-green-700' : rf3Results.rmsd_interpretation === 'Good' ? 'bg-blue-100 text-blue-700' : 'bg-amber-100 text-amber-700'}`}>
+                      {rf3Results.rmsd_interpretation}
+                    </span>
+                  </div>
+                  <div className="p-4 rounded-xl border border-gray-100 bg-white">
+                    <div className="text-xs text-gray-500 mb-1">pLDDT</div>
+                    <div className="flex items-baseline gap-1">
+                      <span className={`text-2xl font-bold ${rf3Results.avg_plddt > 80 ? 'text-green-600' : rf3Results.avg_plddt > 60 ? 'text-amber-600' : 'text-red-600'}`}>{rf3Results.avg_plddt.toFixed(1)}</span>
+                    </div>
+                    <span className="text-xs text-gray-400">平均置信度</span>
+                  </div>
+                  <div className="p-4 rounded-xl border border-gray-100 bg-white">
+                    <div className="text-xs text-gray-500 mb-1">pTM / ipTM</div>
+                    <div className="flex items-baseline gap-2">
+                      <span className="text-lg font-bold text-blue-600">{(rf3Results.summary?.ptm ?? 0).toFixed(3)}</span>
+                      <span className="text-xs text-gray-300">/</span>
+                      <span className="text-lg font-bold text-purple-600">{(rf3Results.summary?.iptm ?? 0).toFixed(3)}</span>
+                    </div>
+                  </div>
+                  <div className="p-4 rounded-xl border border-gray-100 bg-white">
+                    <div className="text-xs text-gray-500 mb-1">Ranking Score</div>
+                    <div className="text-2xl font-bold text-gray-900">{(rf3Results.summary?.ranking_score ?? 0).toFixed(3)}</div>
+                    <div className="flex items-center gap-1 mt-1">
+                      {rf3Results.summary?.has_clash ? (
+                        <span className="text-xs text-red-600 flex items-center gap-0.5"><AlertTriangle size={10} />Clash</span>
+                      ) : (
+                        <span className="text-xs text-green-600">No Clash</span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Pass/Fail Banner */}
+                <div className={`p-4 rounded-xl flex items-center gap-3 ${rf3Results.passed ? 'bg-green-50 border border-green-200' : 'bg-amber-50 border border-amber-200'}`}>
+                  {rf3Results.passed ? (
+                    <CheckCircle2 size={24} className="text-green-600 shrink-0" />
+                  ) : (
+                    <AlertTriangle size={24} className="text-amber-600 shrink-0" />
+                  )}
+                  <div>
+                    <span className={`font-semibold ${rf3Results.passed ? 'text-green-800' : 'text-amber-800'}`}>
+                      {rf3Results.passed ? '验证通过 ✅' : '需要优化 ⚠️'}
+                    </span>
+                    <p className="text-sm text-gray-600 mt-0.5">
+                      {rf3Results.passed
+                        ? `RMSD ${rf3Results.rmsd.toFixed(2)} Å < 2.0 Å，设计序列很可能折叠成预期结构`
+                        : `RMSD ${rf3Results.rmsd.toFixed(2)} Å ≥ 2.0 Å，建议调整参数重新设计`}
+                    </p>
+                  </div>
+                </div>
+
+                {/* 3D Structure Comparison */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="border border-gray-100 rounded-xl overflow-hidden">
+                    <div className="px-4 py-2 border-b border-gray-100 bg-gray-50">
+                      <span className="text-sm font-semibold text-gray-700">RFD3 生成骨架</span>
+                    </div>
+                    {selectedRFD3Design?.pdb_content ? (
+                      <div className="h-64">
+                        <iframe srcDoc={`<!DOCTYPE html><html><head><script src="https://cdn.jsdelivr.net/npm/molstar@4.4.0/build/viewer/molstar.js"></script><style>body{margin:0;padding:0;overflow:hidden}#app{width:100%;height:100%}</style></head><body><div id="app"></div><script>molstar.Viewer.create('app',{layoutIsExpanded:false}).then(v=>{const pdbData=\`${selectedRFD3Design.pdb_content.replace(/`/g, '\\`').replace(/\$/g, '\\$')}\`;v.loadStructureFromData(pdbData,'pdb')})</script></body></html>`} className="w-full h-full border-0" title="RFD3 Backbone" />
+                      </div>
+                    ) : (
+                      <div className="h-64 flex items-center justify-center text-gray-400 text-sm">无RFD3骨架数据</div>
+                    )}
+                  </div>
+                  <div className="border border-gray-100 rounded-xl overflow-hidden">
+                    <div className="px-4 py-2 border-b border-gray-100 bg-gray-50">
+                      <span className="text-sm font-semibold text-gray-700">RF3 预测结构</span>
+                    </div>
+                    {rf3Results.predicted_pdb ? (
+                      <div className="h-64">
+                        <iframe srcDoc={`<!DOCTYPE html><html><head><script src="https://cdn.jsdelivr.net/npm/molstar@4.4.0/build/viewer/molstar.js"></script><style>body{margin:0;padding:0;overflow:hidden}#app{width:100%;height:100%}</style></head><body><div id="app"></div><script>molstar.Viewer.create('app',{layoutIsExpanded:false}).then(v=>{const pdbData=\`${rf3Results.predicted_pdb.replace(/`/g, '\\`').replace(/\$/g, '\\$')}\`;v.loadStructureFromData(pdbData,'pdb')})</script></body></html>`} className="w-full h-full border-0" title="RF3 Predicted" />
+                      </div>
+                    ) : (
+                      <div className="h-64 flex items-center justify-center text-gray-400 text-sm">无RF3预测数据</div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Per-residue RMSD Chart */}
+                {rf3Results.per_res_rmsd && rf3Results.per_res_rmsd.length > 0 && (
+                  <div className="bg-white border border-gray-200 rounded-xl p-5">
+                    <div className="flex justify-between items-center mb-4">
+                      <span className="text-sm font-semibold text-gray-700">逐残基 RMSD</span>
+                      <span className="text-xs text-gray-400">阈值: 2.0 Å</span>
+                    </div>
+                    <div className="flex items-end gap-[1px] h-[100px] pb-1 border-b border-gray-200">
+                      {rf3Results.per_res_rmsd.map((val, i) => {
+                        const color = val < 1 ? '#059669' : val < 2 ? '#3b82f6' : val < 4 ? '#d97706' : '#dc2626'
+                        const height = Math.min(val / 8 * 100, 100)
+                        return (
+                          <div key={i} title={`Res ${i + 1}: ${val.toFixed(2)} Å`} style={{ width: `${Math.max(2, 600 / rf3Results.per_res_rmsd.length)}px`, height: `${height}%`, backgroundColor: color, borderRadius: '1px 1px 0 0', minHeight: '1px' }} />
+                        )
+                      })}
+                    </div>
+                    <div className="flex justify-between mt-1 text-[10px] text-gray-400">
+                      <span>N-term</span><span>C-term</span>
+                    </div>
+                    <div className="flex gap-4 mt-3 text-[11px] text-gray-500">
+                      <span><span className="inline-block w-2 h-2 rounded-sm mr-1" style={{ background: '#059669' }} />&lt;1 Å</span>
+                      <span><span className="inline-block w-2 h-2 rounded-sm mr-1" style={{ background: '#3b82f6' }} />1-2 Å</span>
+                      <span><span className="inline-block w-2 h-2 rounded-sm mr-1" style={{ background: '#d97706' }} />2-4 Å</span>
+                      <span><span className="inline-block w-2 h-2 rounded-sm mr-1" style={{ background: '#dc2626' }} />&gt;4 Å</span>
+                    </div>
+                  </div>
+                )}
+
+                {/* Confidence Details */}
+                <div className="bg-white border border-gray-200 rounded-xl p-5">
+                  <h4 className="text-sm font-semibold text-gray-700 mb-3">置信度详情</h4>
+                  <div className="grid grid-cols-2 gap-3">
+                    {[
+                      { label: 'Overall pLDDT', value: (rf3Results.summary?.overall_plddt ?? 0).toFixed(3) },
+                      { label: 'Overall PAE', value: (rf3Results.summary?.overall_pae ?? 0).toFixed(2) },
+                      { label: 'Overall PDE', value: (rf3Results.summary?.overall_pde ?? 0).toFixed(2) },
+                      { label: 'pTM', value: (rf3Results.summary?.ptm ?? 0).toFixed(4) },
+                      { label: 'ipTM', value: (rf3Results.summary?.iptm ?? 0).toFixed(4) },
+                      { label: 'Ranking Score', value: (rf3Results.summary?.ranking_score ?? 0).toFixed(4) },
+                      { label: 'Chain pTM', value: (rf3Results.summary?.chain_ptm ?? []).map((v: number) => v.toFixed(2)).join(', ') || 'N/A' },
+                      { label: 'Has Clash', value: rf3Results.summary?.has_clash ? 'Yes ⚠️' : 'No ✅' },
+                    ].map(({ label, value }) => (
+                      <div key={label} className="flex justify-between p-2.5 bg-gray-50 rounded-lg">
+                        <span className="text-xs text-gray-500">{label}</span>
+                        <span className="text-xs font-mono font-medium text-gray-900">{value}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {rf3Results.mock && (
+                  <div className="p-3 bg-amber-50 rounded-xl text-xs text-amber-700">
+                    ⚠️ 当前为 mock 模式，数据为模拟生成。安装 RF3 模型后可获取真实预测结果。
+                  </div>
+                )}
+              </div>
+            )}
+            {!rf3Results && !isRF3Running && (
+              <div className="text-center py-12 text-gray-400">
+                <Shield size={48} className="mx-auto mb-3 opacity-30" />
+                <p>请先在 MPNN 步骤中选择一条序列，点击「送入RF3验证」</p>
+              </div>
+            )}
           </div>
         )}
       </div>
