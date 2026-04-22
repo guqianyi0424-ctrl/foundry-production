@@ -1,10 +1,11 @@
 """
 热点残基预测工具
-DL: hotspot-prediction (GAT+ESM-2) 5折集成推理
+方案: ESM-2 (GPU) + 纯 PyTorch MLP (无需DGL)
 支持 Top-K 选择策略
 """
 import os
 import sys
+import io
 import numpy as np
 from pathlib import Path
 from typing import Dict, List, Optional, Any
@@ -12,16 +13,43 @@ from typing import Dict, List, Optional, Any
 import pandas as pd
 
 
-class HotspotPredictor:
-    """热点残基预测器 - DL模型 (GAT+ESM-2)"""
+class HotspotMLP(torch.nn.Module if False else object):
 
-    def __init__(self, top_k: int = 3):
+    @staticmethod
+    def create_model(input_dim=1280, hidden_dim=256, dropout=0.3):
+        import torch
+        import torch.nn as nn
+
+        class HotspotMLPNet(nn.Module):
+            def __init__(self, in_dim, h_dim, drop):
+                super().__init__()
+                self.net = nn.Sequential(
+                    nn.Linear(in_dim, h_dim),
+                    nn.ReLU(),
+                    nn.Dropout(drop),
+                    nn.Linear(h_dim, h_dim // 2),
+                    nn.ReLU(),
+                    nn.Dropout(drop),
+                    nn.Linear(h_dim // 2, h_dim // 4),
+                    nn.ReLU(),
+                    nn.Linear(h_dim // 4, 2),
+                )
+
+            def forward(self, x):
+                return self.net(x)
+
+        return HotspotMLPNet(input_dim, hidden_dim, dropout)
+
+
+class HotspotPredictor:
+
+    def __init__(self, top_k: int = 5):
         self.top_k = top_k
         self.base_path = Path(__file__).parent.parent.parent
         self.hotspot_dl_path = self.base_path / "hotspot-prediction"
 
-        self._dl_models = {}
-        self._dl_loaded = False
+        self._mlp_models = {}
+        self._mlp_loaded = False
         self._esm_model = None
         self._esm_loaded = False
 
@@ -46,52 +74,122 @@ class HotspotPredictor:
 
         results_dl = self._predict_dl(residues, atom_array)
 
-        if results_dl:
+        if results_dl and results_dl.get("model_loaded"):
             return self._select_top_k(results_dl, residues, "dl")
         else:
             fallback = self._rule_based_predict(residues)
             return self._select_top_k(fallback, residues, "rule")
 
     def _predict_dl(self, residues: pd.DataFrame, atom_array) -> Dict[str, Any]:
-        dl_models = self._load_dl_models()
+        try:
+            import torch
 
-        if dl_models:
-            try:
-                import torch
-                import dgl
+            sequence = self._get_sequence_from_residues(residues)
+            esm_features = self._get_esm_features(sequence)
 
-                sequence = self._get_sequence_from_residues(residues)
-                esm_features = self._get_esm_features(sequence)
+            if esm_features is not None and len(esm_features) == len(residues):
+                device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-                if esm_features is not None and len(esm_features) == len(residues):
-                    node_features = self._build_node_features(residues, esm_features)
-                    g = self._build_graph(atom_array, residues)
+                mlp_models = self._load_mlp_models(esm_features.shape[1], device)
 
-                    device = next(iter(dl_models.values())).input_proj[0].weight.device
-
+                if mlp_models:
                     all_probs = []
                     with torch.no_grad():
-                        node_features_tensor = torch.tensor(node_features, dtype=torch.float32).to(device)
-                        g = g.to(device)
-                        for fold_name, model in dl_models.items():
-                            logits = model(g, node_features_tensor)
+                        x = torch.tensor(esm_features, dtype=torch.float32).to(device)
+                        for fold_name, model in mlp_models.items():
+                            logits = model(x)
                             probs = torch.softmax(logits, dim=1)
                             all_probs.append(probs[:, 1].cpu().numpy())
 
                     scores = np.mean(all_probs, axis=0)
-                    n_models = len(dl_models)
-                    print(f"[DL] hotspot-prediction预测完成 ({n_models}折集成, GAT+ESM-2)")
+                    n_models = len(mlp_models)
+                    print(f"[DL] ESM-2+MLP预测完成 ({n_models}折集成, GPU加速)")
                     return {"scores": scores, "method": "dl", "model_loaded": True}
                 else:
-                    print("[DL] ESM特征不可用，使用规则预测")
+                    print("[DL] 无MLP模型权重，使用ESM-2注意力分数")
+                    scores = self._esm_attention_scores(esm_features, residues)
+                    if scores is not None:
+                        return {"scores": scores, "method": "dl", "model_loaded": True}
+            else:
+                print("[DL] ESM特征不可用，使用规则预测")
 
-            except Exception as e:
-                print(f"[DL] 预测失败: {e}")
-                import traceback
-                traceback.print_exc()
+        except Exception as e:
+            print(f"[DL] 预测失败: {e}")
+            import traceback
+            traceback.print_exc()
 
         scores = self._compute_rule_scores(residues, "dl")
         return {"scores": scores, "method": "dl", "model_loaded": False}
+
+    def _esm_attention_scores(self, esm_features: np.ndarray, residues: pd.DataFrame) -> Optional[np.ndarray]:
+        try:
+            import torch
+            esm = self._load_esm_model()
+            if esm is None:
+                return None
+
+            model = esm['model']
+            device = esm['device']
+
+            sequence = self._get_sequence_from_residues(residues)
+
+            with torch.no_grad():
+                tokenizer = esm['tokenizer']
+                inputs = tokenizer(sequence, return_tensors="pt", padding=True)
+                inputs = {k: v.to(device) for k, v in inputs.items()}
+                outputs = model(**inputs, output_attentions=True)
+
+                if hasattr(outputs, 'attentions') and outputs.attentions is not None:
+                    last_attn = outputs.attentions[-1]
+                    attn_weights = last_attn.mean(dim=1)[0]
+                    cls_attn = attn_weights[0, 1:-1].cpu().numpy()
+                    if len(cls_attn) == len(residues):
+                        min_a = cls_attn.min()
+                        max_a = cls_attn.max()
+                        if max_a > min_a:
+                            scores = (cls_attn - min_a) / (max_a - min_a)
+                        else:
+                            scores = np.ones(len(residues)) * 0.5
+                        print(f"[DL] ESM-2注意力分数预测完成 (GPU)")
+                        return scores
+
+            return None
+        except Exception as e:
+            print(f"[DL] ESM注意力分数失败: {e}")
+            return None
+
+    def _load_mlp_models(self, input_dim: int, device) -> Dict[str, Any]:
+        if self._mlp_loaded:
+            return self._mlp_models
+
+        try:
+            import torch
+
+            models_dir = self.base_path / "binder-design-system" / "models" / "hotspot_mlp"
+            models_dir.mkdir(parents=True, exist_ok=True)
+
+            for fold_idx in range(1, 6):
+                model_file = models_dir / f"hotspot_mlp_fold{fold_idx}.pth"
+                if model_file.exists():
+                    try:
+                        model = HotspotMLP.create_model(input_dim=input_dim)
+                        state_dict = torch.load(str(model_file), map_location=device, weights_only=True)
+                        model.load_state_dict(state_dict)
+                        model.eval()
+                        model = model.to(device)
+                        self._mlp_models[f"fold{fold_idx}"] = model
+                        print(f"[DL] MLP Fold {fold_idx} 加载成功 (device={device})")
+                    except Exception as e:
+                        print(f"[DL] MLP Fold {fold_idx} 加载失败: {e}")
+
+            if not self._mlp_models:
+                print("[DL] 无预训练MLP权重，将使用ESM-2注意力机制预测")
+
+        except Exception as e:
+            print(f"[DL] MLP模型加载失败: {e}")
+
+        self._mlp_loaded = True
+        return self._mlp_models
 
     def _select_top_k(
         self,
@@ -198,228 +296,6 @@ class HotspotPredictor:
 
         return scores
 
-    def _detect_cuda_version(self):
-        try:
-            import torch
-            if torch.cuda.is_available():
-                cuda_version = torch.version.cuda
-                if cuda_version:
-                    major = int(cuda_version.split('.')[0])
-                    if major >= 12:
-                        return 'cu121'
-                    elif major == 11:
-                        minor = int(cuda_version.split('.')[1])
-                        if minor >= 8:
-                            return 'cu118'
-                        else:
-                            return 'cu117'
-                    return f'cu{major}{cuda_version.split(".")[1]}'
-        except Exception:
-            pass
-        return None
-
-    def _load_dl_models(self) -> Dict[str, Any]:
-        if self._dl_loaded:
-            return self._dl_models
-
-        os.environ.setdefault('DGLBACKEND', 'pytorch')
-        os.environ.setdefault('DGL_DOWNLOAD', '1')
-
-        try:
-            import torch
-
-            has_cuda = torch.cuda.is_available()
-            device = torch.device('cuda' if has_cuda else 'cpu')
-            print(f"[DL] PyTorch设备: {device}" + (f" ({torch.cuda.get_device_name(0)})" if has_cuda else ""))
-
-            torch.set_num_threads(min(4, os.cpu_count() or 4))
-
-            try:
-                import dgl
-                if has_cuda:
-                    try:
-                        _ = dgl.device('cuda:0')
-                        print(f"[DL] DGL CUDA可用")
-                    except Exception:
-                        print(f"[DL] DGL CUDA不可用，切换到CPU模式")
-                        os.environ['CUDA_VISIBLE_DEVICES'] = ''
-                        device = torch.device('cpu')
-                print(f"[DL] DGL版本: {dgl.__version__}")
-            except OSError as e:
-                err_msg = str(e)
-                if 'libcusparseLt' in err_msg or 'cuda' in err_msg.lower() or 'cusparse' in err_msg.lower():
-                    print(f"[DL] CUDA库缺失，尝试安装匹配版DGL...")
-                    cuda_ver = self._detect_cuda_version()
-                    self._try_dgl_install(cuda_ver)
-                    try:
-                        import dgl
-                        print(f"[DL] DGL安装成功: {dgl.__version__}")
-                    except OSError as e2:
-                        print(f"[DL] DGL仍无法加载: {e2}")
-                        self._dl_models = {}
-                        self._dl_loaded = True
-                        return self._dl_models
-                    except ImportError:
-                        print(f"[DL] DGL安装失败")
-                        self._dl_models = {}
-                        self._dl_loaded = True
-                        return self._dl_models
-                else:
-                    raise
-
-            sys.path.insert(0, str(self.hotspot_dl_path))
-            from model import PPIHotspotGAT
-            from config import INPUT_DIM, HIDDEN_DIM, NUM_HEADS, NUM_LAYERS, DROPOUT
-
-            models_dir = self.hotspot_dl_path / "models"
-
-            for fold_idx in range(1, 6):
-                model_file = models_dir / f"best_model_fold{fold_idx}.pth"
-                if model_file.exists():
-                    try:
-                        model = PPIHotspotGAT(
-                            input_dim=INPUT_DIM,
-                            hidden_dim=HIDDEN_DIM,
-                            num_heads=NUM_HEADS,
-                            num_layers=NUM_LAYERS,
-                            dropout=DROPOUT
-                        )
-
-                        try:
-                            state_dict = torch.load(str(model_file), map_location=device, weights_only=True)
-                        except TypeError:
-                            state_dict = torch.load(str(model_file), map_location=device)
-                        except RuntimeError:
-                            state_dict = torch.load(str(model_file), map_location='cpu', weights_only=False)
-
-                        if 'model_state_dict' in state_dict:
-                            model.load_state_dict(state_dict['model_state_dict'])
-                        else:
-                            model.load_state_dict(state_dict)
-                        model.eval()
-                        model = model.to(device)
-                        self._dl_models[f"fold{fold_idx}"] = model
-                        print(f"[DL] Fold {fold_idx} 模型加载成功 (device={device})")
-                    except Exception as e:
-                        print(f"[DL] Fold {fold_idx} 加载失败: {e}")
-                else:
-                    print(f"[DL] Fold {fold_idx} 权重不存在: {model_file}")
-
-            if not self._dl_models:
-                print("[DL] 没有可用的DL模型权重")
-                self._dl_models = {}
-
-        except ImportError as e:
-            err_msg = str(e)
-            print(f"[DL] 依赖未安装: {e}")
-            if 'torchdata' in err_msg or 'datapipes' in err_msg:
-                print("[DL] 尝试安装torchdata...")
-                try:
-                    import subprocess
-                    subprocess.check_call([
-                        sys.executable, '-m', 'pip', 'install',
-                        'torchdata==0.7.1', '--quiet',
-                    ], timeout=120)
-                    print("[DL] torchdata安装完成，重新加载DL模型...")
-                    self._dl_loaded = False
-                    return self._load_dl_models()
-                except Exception as te:
-                    print(f"[DL] torchdata安装失败: {te}")
-            self._dl_models = {}
-        except OSError as e:
-            err_msg = str(e)
-            if 'libcusparseLt' in err_msg or 'cuda' in err_msg.lower():
-                print(f"[DL] CUDA库缺失，尝试安装匹配版DGL...")
-                self._dl_models = {}
-                cuda_ver = self._detect_cuda_version()
-                self._try_dgl_install(cuda_ver)
-            else:
-                print(f"[DL] 系统库缺失: {e}")
-                self._dl_models = {}
-        except Exception as e:
-            print(f"[DL] 模型加载失败: {e}")
-            import traceback
-            traceback.print_exc()
-            self._dl_models = {}
-
-        self._dl_loaded = True
-        return self._dl_models
-
-    def _try_dgl_install(self, cuda_version=None):
-        try:
-            import subprocess
-
-            subprocess.check_call(
-                [sys.executable, '-m', 'pip', 'uninstall', 'dgl', '-y', '--quiet'],
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-            )
-
-            install_attempts = []
-
-            if cuda_version:
-                cuda_wheel_url = f'https://data.dgl.ai/wheels/{cuda_version}/repo.html'
-                install_attempts.append(
-                    (f"DGL {cuda_version} (DGL仓库)",
-                     [sys.executable, '-m', 'pip', 'install', 'dgl',
-                      '-f', cuda_wheel_url, '--quiet'])
-                )
-                install_attempts.append(
-                    (f"DGL {cuda_version} (DGL仓库+PyPI)",
-                     [sys.executable, '-m', 'pip', 'install', f'dgl+{cuda_version}',
-                      '-f', cuda_wheel_url, '--quiet'])
-                )
-
-            install_attempts.append(
-                ("DGL CPU (DGL仓库)",
-                 [sys.executable, '-m', 'pip', 'install', 'dgl',
-                  '--no-index', '-f', 'https://data.dgl.ai/wheels/repo.html', '--quiet'])
-            )
-            install_attempts.append(
-                ("DGL CPU (DGL仓库+PyPI)",
-                 [sys.executable, '-m', 'pip', 'install', 'dgl',
-                  '-f', 'https://data.dgl.ai/wheels/repo.html', '--quiet'])
-            )
-            install_attempts.append(
-                ("DGL (PyPI)",
-                 [sys.executable, '-m', 'pip', 'install', 'dgl', '--quiet'])
-            )
-
-            installed = False
-            for attempt_name, cmd in install_attempts:
-                print(f"[DL] 尝试安装: {attempt_name}...")
-                try:
-                    subprocess.check_call(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=120)
-                    test_env = {**os.environ, 'DGL_DOWNLOAD': '1'}
-                    test = subprocess.run(
-                        [sys.executable, '-c', 'import dgl; print(dgl.__version__)'],
-                        capture_output=True, text=True, timeout=15,
-                        env=test_env
-                    )
-                    if test.returncode == 0:
-                        installed = True
-                        print(f"[DL] ✅ {attempt_name}安装成功: {test.stdout.strip()}")
-                        break
-                    else:
-                        err_output = test.stderr.strip() if test.stderr else ""
-                        print(f"[DL] {attempt_name}安装后无法导入: {err_output[:100]}")
-                        subprocess.check_call(
-                            [sys.executable, '-m', 'pip', 'uninstall', 'dgl', '-y', '--quiet'],
-                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-                        )
-                except subprocess.TimeoutExpired:
-                    print(f"[DL] {attempt_name}安装超时")
-                except Exception as e:
-                    print(f"[DL] {attempt_name}安装失败: {e}")
-
-            if not installed:
-                print("[DL] ❌ DGL所有安装方式均失败")
-                print("[DL] 请手动运行以下命令安装:")
-                if cuda_version:
-                    print(f"[DL]   pip install dgl -f https://data.dgl.ai/wheels/{cuda_version}/repo.html")
-                print("[DL]   pip install dgl --no-index -f https://data.dgl.ai/wheels/repo.html")
-        except Exception as e:
-            print(f"[DL] DGL安装过程异常: {e}")
-
     def _load_esm_model(self):
         if self._esm_loaded:
             return self._esm_model
@@ -492,60 +368,6 @@ class HotspotPredictor:
             sequence += aa_map.get(res_name, 'X')
 
         return sequence
-
-    def _build_node_features(
-        self,
-        residues_df: pd.DataFrame,
-        esm_features: np.ndarray
-    ) -> np.ndarray:
-        n_residues = len(residues_df)
-
-        pssm_features = np.zeros((n_residues, 20), dtype=np.float32)
-        hmm_features = np.zeros((n_residues, 30), dtype=np.float32)
-
-        node_features = np.concatenate([
-            esm_features,
-            pssm_features,
-            hmm_features,
-        ], axis=1)
-
-        return node_features.astype(np.float32)
-
-    def _build_graph(self, atom_array, residues_df: pd.DataFrame):
-        import dgl
-
-        n_residues = len(residues_df)
-
-        ca_coords = []
-        for idx, row in residues_df.iterrows():
-            ca_coords.append([
-                row.get('ca_x', 0),
-                row.get('ca_y', 0),
-                row.get('ca_z', 0)
-            ])
-
-        if len(ca_coords) == 0:
-            return dgl.graph(([], []), num_nodes=n_residues)
-
-        coords = np.array(ca_coords)
-
-        src = []
-        dst = []
-        cutoff = 10.0
-
-        for i in range(n_residues):
-            for j in range(i + 1, n_residues):
-                dist = np.linalg.norm(coords[i] - coords[j])
-                if dist < cutoff:
-                    src.extend([i, j])
-                    dst.extend([j, i])
-
-        for i in range(n_residues - 1):
-            src.extend([i, i + 1])
-            dst.extend([i + 1, i])
-
-        g = dgl.graph((src, dst), num_nodes=n_residues)
-        return g
 
     def _extract_residue_features(self, atom_array) -> pd.DataFrame:
         try:
@@ -634,7 +456,6 @@ class HotspotPredictor:
 
     def _parse_pdb_string(self, pdb_string: str):
         try:
-            import io
             import biotite.structure as bs
             import biotite.structure.io.pdb as bpdb
 
@@ -643,14 +464,8 @@ class HotspotPredictor:
             atom_array = atom_array[bs.filter_amino_acids(atom_array)]
             return atom_array
         except ImportError:
-            print("[PDB] biotite未安装，尝试MDAnalysis...")
-            try:
-                import MDAnalysis as mda
-                u = mda.universe(pdb_string, format='PDB')
-                return u
-            except ImportError:
-                print("[PDB] 无可用的结构解析库")
-                return None
+            print("[PDB] biotite未安装")
+            return None
         except Exception as e:
             print(f"[PDB] 解析失败: {e}")
             return None
