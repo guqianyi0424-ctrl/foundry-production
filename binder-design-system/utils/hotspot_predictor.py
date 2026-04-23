@@ -1,8 +1,9 @@
 """
 热点残基预测工具
-方案: ESM-2 (CPU推理) + 纯 PyTorch MLP (无需DGL)
+方案1: ESM-2 + DGL GAT 5折集成 (CPU推理，使用已有模型权重)
+方案2: ESM-2 注意力分数 (CPU推理，无需权重)
+方案3: 规则预测 (兜底)
 GPU留给RFD3/MPNN/RF3大模型使用
-支持 Top-K 选择策略
 """
 import os
 import sys
@@ -14,34 +15,6 @@ from typing import Dict, List, Optional, Any
 import pandas as pd
 
 
-class HotspotMLP(torch.nn.Module if False else object):
-
-    @staticmethod
-    def create_model(input_dim=1280, hidden_dim=256, dropout=0.3):
-        import torch
-        import torch.nn as nn
-
-        class HotspotMLPNet(nn.Module):
-            def __init__(self, in_dim, h_dim, drop):
-                super().__init__()
-                self.net = nn.Sequential(
-                    nn.Linear(in_dim, h_dim),
-                    nn.ReLU(),
-                    nn.Dropout(drop),
-                    nn.Linear(h_dim, h_dim // 2),
-                    nn.ReLU(),
-                    nn.Dropout(drop),
-                    nn.Linear(h_dim // 2, h_dim // 4),
-                    nn.ReLU(),
-                    nn.Linear(h_dim // 4, 2),
-                )
-
-            def forward(self, x):
-                return self.net(x)
-
-        return HotspotMLPNet(input_dim, hidden_dim, dropout)
-
-
 class HotspotPredictor:
 
     def __init__(self, top_k: int = 5):
@@ -49,8 +22,8 @@ class HotspotPredictor:
         self.base_path = Path(__file__).parent.parent.parent
         self.hotspot_dl_path = self.base_path / "hotspot-prediction"
 
-        self._mlp_models = {}
-        self._mlp_loaded = False
+        self._dl_models = {}
+        self._dl_loaded = False
         self._esm_model = None
         self._esm_loaded = False
 
@@ -82,47 +55,61 @@ class HotspotPredictor:
             return self._select_top_k(fallback, residues, "rule")
 
     def _predict_dl(self, residues: pd.DataFrame, atom_array) -> Dict[str, Any]:
-        try:
-            import torch
+        dl_models = self._load_dl_models()
 
-            sequence = self._get_sequence_from_residues(residues)
-            esm_features = self._get_esm_features(sequence)
+        if dl_models:
+            try:
+                import torch
 
-            if esm_features is not None and len(esm_features) == len(residues):
-                device = torch.device('cpu')
+                sequence = self._get_sequence_from_residues(residues)
+                esm_features = self._get_esm_features(sequence)
 
-                mlp_models = self._load_mlp_models(esm_features.shape[1], device)
+                if esm_features is not None and len(esm_features) == len(residues):
+                    try:
+                        import dgl
 
-                if mlp_models:
-                    all_probs = []
-                    with torch.no_grad():
-                        x = torch.tensor(esm_features, dtype=torch.float32).to(device)
-                        for fold_name, model in mlp_models.items():
-                            logits = model(x)
-                            probs = torch.softmax(logits, dim=1)
-                            all_probs.append(probs[:, 1].cpu().numpy())
+                        node_features = self._build_node_features(residues, esm_features)
+                        g = self._build_graph(atom_array, residues)
 
-                    scores = np.mean(all_probs, axis=0)
-                    n_models = len(mlp_models)
-                    print(f"[DL] ESM-2+MLP预测完成 ({n_models}折集成, CPU推理)")
-                    return {"scores": scores, "method": "dl", "model_loaded": True}
-                else:
-                    print("[DL] 无MLP模型权重，使用ESM-2注意力分数")
-                    scores = self._esm_attention_scores(esm_features, residues)
-                    if scores is not None:
+                        device = torch.device('cpu')
+
+                        all_probs = []
+                        with torch.no_grad():
+                            node_features_tensor = torch.tensor(node_features, dtype=torch.float32).to(device)
+                            g = g.to(device)
+                            for fold_name, model in dl_models.items():
+                                logits = model(g, node_features_tensor)
+                                probs = torch.softmax(logits, dim=1)
+                                all_probs.append(probs[:, 1].cpu().numpy())
+
+                        scores = np.mean(all_probs, axis=0)
+                        n_models = len(dl_models)
+                        print(f"[DL] GAT+ESM-2预测完成 ({n_models}折集成, CPU推理)")
                         return {"scores": scores, "method": "dl", "model_loaded": True}
-            else:
-                print("[DL] ESM特征不可用，使用规则预测")
 
-        except Exception as e:
-            print(f"[DL] 预测失败: {e}")
-            import traceback
-            traceback.print_exc()
+                    except ImportError:
+                        print("[DL] DGL不可用，尝试ESM-2注意力分数预测")
+                    except Exception as e:
+                        print(f"[DL] GAT推理失败: {e}，尝试ESM-2注意力分数预测")
+
+                scores = self._esm_attention_scores(residues)
+                if scores is not None:
+                    return {"scores": scores, "method": "dl", "model_loaded": True}
+
+            except Exception as e:
+                print(f"[DL] 预测失败: {e}")
+                import traceback
+                traceback.print_exc()
+
+        else:
+            scores = self._esm_attention_scores(residues)
+            if scores is not None:
+                return {"scores": scores, "method": "dl", "model_loaded": True}
 
         scores = self._compute_rule_scores(residues, "dl")
         return {"scores": scores, "method": "dl", "model_loaded": False}
 
-    def _esm_attention_scores(self, esm_features: np.ndarray, residues: pd.DataFrame) -> Optional[np.ndarray]:
+    def _esm_attention_scores(self, residues: pd.DataFrame) -> Optional[np.ndarray]:
         try:
             import torch
             esm = self._load_esm_model()
@@ -131,7 +118,6 @@ class HotspotPredictor:
 
             model = esm['model']
             device = esm['device']
-
             sequence = self._get_sequence_from_residues(residues)
 
             with torch.no_grad():
@@ -159,38 +145,252 @@ class HotspotPredictor:
             print(f"[DL] ESM注意力分数失败: {e}")
             return None
 
-    def _load_mlp_models(self, input_dim: int, device) -> Dict[str, Any]:
-        if self._mlp_loaded:
-            return self._mlp_models
+    def _load_dl_models(self) -> Dict[str, Any]:
+        if self._dl_loaded:
+            return self._dl_models
 
         try:
             import torch
 
-            models_dir = self.base_path / "binder-design-system" / "models" / "hotspot_mlp"
-            models_dir.mkdir(parents=True, exist_ok=True)
+            device = torch.device('cpu')
+            print(f"[DL] PyTorch设备: {device}")
+
+            try:
+                import dgl
+                print(f"[DL] DGL版本: {dgl.__version__}")
+            except ImportError:
+                print("[DL] DGL未安装，GAT模型不可用")
+                self._dl_models = {}
+                self._dl_loaded = True
+                return self._dl_models
+            except OSError as e:
+                print(f"[DL] DGL加载失败: {e}")
+                print("[DL] 尝试CPU版DGL安装...")
+                self._try_install_dgl_cpu()
+                try:
+                    import dgl
+                    print(f"[DL] DGL安装成功: {dgl.__version__}")
+                except Exception:
+                    print("[DL] DGL仍不可用，GAT模型不可用")
+                    self._dl_models = {}
+                    self._dl_loaded = True
+                    return self._dl_models
+
+            sys.path.insert(0, str(self.hotspot_dl_path))
+            from model import PPIHotspotGAT
+            from config import INPUT_DIM, HIDDEN_DIM, NUM_HEADS, NUM_LAYERS, DROPOUT
+
+            models_dir = self.hotspot_dl_path / "models"
 
             for fold_idx in range(1, 6):
-                model_file = models_dir / f"hotspot_mlp_fold{fold_idx}.pth"
+                model_file = models_dir / f"best_model_fold{fold_idx}.pth"
                 if model_file.exists():
                     try:
-                        model = HotspotMLP.create_model(input_dim=input_dim)
-                        state_dict = torch.load(str(model_file), map_location=device, weights_only=True)
-                        model.load_state_dict(state_dict)
+                        model = PPIHotspotGAT(
+                            input_dim=INPUT_DIM,
+                            hidden_dim=HIDDEN_DIM,
+                            num_heads=NUM_HEADS,
+                            num_layers=NUM_LAYERS,
+                            dropout=DROPOUT
+                        )
+
+                        try:
+                            state_dict = torch.load(str(model_file), map_location=device, weights_only=True)
+                        except TypeError:
+                            state_dict = torch.load(str(model_file), map_location=device)
+                        except RuntimeError:
+                            state_dict = torch.load(str(model_file), map_location='cpu', weights_only=False)
+
+                        if 'model_state_dict' in state_dict:
+                            model.load_state_dict(state_dict['model_state_dict'])
+                        else:
+                            model.load_state_dict(state_dict)
                         model.eval()
                         model = model.to(device)
-                        self._mlp_models[f"fold{fold_idx}"] = model
-                        print(f"[DL] MLP Fold {fold_idx} 加载成功 (device={device})")
+                        self._dl_models[f"fold{fold_idx}"] = model
+                        print(f"[DL] Fold {fold_idx} 模型加载成功 (device={device})")
                     except Exception as e:
-                        print(f"[DL] MLP Fold {fold_idx} 加载失败: {e}")
+                        print(f"[DL] Fold {fold_idx} 加载失败: {e}")
+                else:
+                    print(f"[DL] Fold {fold_idx} 权重不存在: {model_file}")
 
-            if not self._mlp_models:
-                print("[DL] 无预训练MLP权重，将使用ESM-2注意力机制预测")
+            if not self._dl_models:
+                print("[DL] 没有可用的DL模型权重")
 
+        except ImportError as e:
+            print(f"[DL] 依赖未安装: {e}")
+            self._dl_models = {}
         except Exception as e:
-            print(f"[DL] MLP模型加载失败: {e}")
+            print(f"[DL] 模型加载失败: {e}")
+            import traceback
+            traceback.print_exc()
+            self._dl_models = {}
 
-        self._mlp_loaded = True
-        return self._mlp_models
+        self._dl_loaded = True
+        return self._dl_models
+
+    def _try_install_dgl_cpu(self):
+        try:
+            import subprocess
+            subprocess.check_call(
+                [sys.executable, '-m', 'pip', 'uninstall', 'dgl', '-y', '--quiet'],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+            )
+
+            attempts = [
+                ("DGL CPU (DGL仓库)", [sys.executable, '-m', 'pip', 'install', 'dgl',
+                  '--no-index', '-f', 'https://data.dgl.ai/wheels/repo.html', '--quiet']),
+                ("DGL (PyPI)", [sys.executable, '-m', 'pip', 'install', 'dgl', '--quiet']),
+            ]
+
+            for name, cmd in attempts:
+                print(f"[DL] 尝试安装: {name}...")
+                try:
+                    subprocess.check_call(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=120)
+                    test = subprocess.run(
+                        [sys.executable, '-c', 'import dgl; print(dgl.__version__)'],
+                        capture_output=True, text=True, timeout=15
+                    )
+                    if test.returncode == 0:
+                        print(f"[DL] ✅ {name}安装成功: {test.stdout.strip()}")
+                        return
+                    else:
+                        subprocess.check_call(
+                            [sys.executable, '-m', 'pip', 'uninstall', 'dgl', '-y', '--quiet'],
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                        )
+                except Exception as e:
+                    print(f"[DL] {name}安装失败: {e}")
+
+            print("[DL] ❌ DGL CPU版安装失败，请手动: pip install dgl")
+        except Exception as e:
+            print(f"[DL] DGL安装异常: {e}")
+
+    def _load_esm_model(self):
+        if self._esm_loaded:
+            return self._esm_model
+
+        try:
+            import torch
+            from transformers import AutoModel, AutoTokenizer
+
+            model_name = "facebook/esm2_t33_650M_UR50D"
+            print(f"[ESM] 正在加载: {model_name} (CPU推理)...")
+
+            device = torch.device('cpu')
+
+            tokenizer = AutoTokenizer.from_pretrained(model_name)
+            model = AutoModel.from_pretrained(model_name).to(device)
+            model.eval()
+
+            self._esm_model = {
+                'tokenizer': tokenizer,
+                'model': model,
+                'device': device,
+            }
+            print(f"[ESM] 模型加载成功 (device={device})")
+        except ImportError:
+            print("[ESM] transformers未安装，跳过ESM特征")
+            self._esm_model = None
+        except Exception as e:
+            print(f"[ESM] 模型加载失败: {e}")
+            self._esm_model = None
+
+        self._esm_loaded = True
+        return self._esm_model
+
+    def _get_esm_features(self, sequence: str) -> Optional[np.ndarray]:
+        import torch
+
+        esm = self._load_esm_model()
+        if esm is None:
+            return None
+
+        try:
+            tokenizer = esm['tokenizer']
+            model = esm['model']
+            device = esm['device']
+
+            with torch.no_grad():
+                inputs = tokenizer(sequence, return_tensors="pt", padding=True)
+                inputs = {k: v.to(device) for k, v in inputs.items()}
+                outputs = model(**inputs)
+                embeddings = outputs.last_hidden_state[0, 1:-1].cpu().numpy()
+
+            return embeddings
+        except Exception as e:
+            print(f"[ESM] 特征提取失败: {e}")
+            return None
+
+    def _get_sequence_from_residues(self, residues_df: pd.DataFrame) -> str:
+        aa_map = {
+            'ALA': 'A', 'CYS': 'C', 'ASP': 'D', 'GLU': 'E',
+            'PHE': 'F', 'GLY': 'G', 'HIS': 'H', 'ILE': 'I',
+            'LYS': 'K', 'LEU': 'L', 'MET': 'M', 'ASN': 'N',
+            'PRO': 'P', 'GLN': 'Q', 'ARG': 'R', 'SER': 'S',
+            'THR': 'T', 'VAL': 'V', 'TRP': 'W', 'TYR': 'Y'
+        }
+
+        sequence = ""
+        for _, row in residues_df.iterrows():
+            res_name = row.get('res_name', '')
+            sequence += aa_map.get(res_name, 'X')
+
+        return sequence
+
+    def _build_node_features(
+        self,
+        residues_df: pd.DataFrame,
+        esm_features: np.ndarray
+    ) -> np.ndarray:
+        n_residues = len(residues_df)
+
+        pssm_features = np.zeros((n_residues, 20), dtype=np.float32)
+        hmm_features = np.zeros((n_residues, 30), dtype=np.float32)
+
+        node_features = np.concatenate([
+            esm_features,
+            pssm_features,
+            hmm_features,
+        ], axis=1)
+
+        return node_features.astype(np.float32)
+
+    def _build_graph(self, atom_array, residues_df: pd.DataFrame):
+        import dgl
+
+        n_residues = len(residues_df)
+
+        ca_coords = []
+        for idx, row in residues_df.iterrows():
+            ca_coords.append([
+                row.get('ca_x', 0),
+                row.get('ca_y', 0),
+                row.get('ca_z', 0)
+            ])
+
+        if len(ca_coords) == 0:
+            return dgl.graph(([], []), num_nodes=n_residues)
+
+        coords = np.array(ca_coords)
+
+        src = []
+        dst = []
+        cutoff = 10.0
+
+        for i in range(n_residues):
+            for j in range(i + 1, n_residues):
+                dist = np.linalg.norm(coords[i] - coords[j])
+                if dist < cutoff:
+                    src.extend([i, j])
+                    dst.extend([j, i])
+
+        for i in range(n_residues - 1):
+            src.extend([i, i + 1])
+            dst.extend([i + 1, i])
+
+        g = dgl.graph((src, dst), num_nodes=n_residues)
+        return g
 
     def _select_top_k(
         self,
@@ -296,78 +496,6 @@ class HotspotPredictor:
             scores[idx] = min(s, 1.0)
 
         return scores
-
-    def _load_esm_model(self):
-        if self._esm_loaded:
-            return self._esm_model
-
-        try:
-            import torch
-            from transformers import AutoModel, AutoTokenizer
-
-            model_name = "facebook/esm2_t33_650M_UR50D"
-            print(f"[ESM] 正在加载: {model_name} (CPU推理)...")
-
-            device = torch.device('cpu')
-
-            tokenizer = AutoTokenizer.from_pretrained(model_name)
-            model = AutoModel.from_pretrained(model_name).to(device)
-            model.eval()
-
-            self._esm_model = {
-                'tokenizer': tokenizer,
-                'model': model,
-                'device': device,
-            }
-            print(f"[ESM] 模型加载成功 (device={device})")
-        except ImportError:
-            print("[ESM] transformers未安装，跳过ESM特征")
-            self._esm_model = None
-        except Exception as e:
-            print(f"[ESM] 模型加载失败: {e}")
-            self._esm_model = None
-
-        self._esm_loaded = True
-        return self._esm_model
-
-    def _get_esm_features(self, sequence: str) -> Optional[np.ndarray]:
-        import torch
-
-        esm = self._load_esm_model()
-        if esm is None:
-            return None
-
-        try:
-            tokenizer = esm['tokenizer']
-            model = esm['model']
-            device = esm['device']
-
-            with torch.no_grad():
-                inputs = tokenizer(sequence, return_tensors="pt", padding=True)
-                inputs = {k: v.to(device) for k, v in inputs.items()}
-                outputs = model(**inputs)
-                embeddings = outputs.last_hidden_state[0, 1:-1].cpu().numpy()
-
-            return embeddings
-        except Exception as e:
-            print(f"[ESM] 特征提取失败: {e}")
-            return None
-
-    def _get_sequence_from_residues(self, residues_df: pd.DataFrame) -> str:
-        aa_map = {
-            'ALA': 'A', 'CYS': 'C', 'ASP': 'D', 'GLU': 'E',
-            'PHE': 'F', 'GLY': 'G', 'HIS': 'H', 'ILE': 'I',
-            'LYS': 'K', 'LEU': 'L', 'MET': 'M', 'ASN': 'N',
-            'PRO': 'P', 'GLN': 'Q', 'ARG': 'R', 'SER': 'S',
-            'THR': 'T', 'VAL': 'V', 'TRP': 'W', 'TYR': 'Y'
-        }
-
-        sequence = ""
-        for _, row in residues_df.iterrows():
-            res_name = row.get('res_name', '')
-            sequence += aa_map.get(res_name, 'X')
-
-        return sequence
 
     def _extract_residue_features(self, atom_array) -> pd.DataFrame:
         try:
