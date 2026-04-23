@@ -8,11 +8,31 @@ GPU留给RFD3/MPNN/RF3大模型使用
 import os
 import sys
 import io
+import types
 import numpy as np
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 
 import pandas as pd
+
+
+def _patch_torchdata():
+    try:
+        import torchdata
+    except ImportError:
+        torchdata = types.ModuleType('torchdata')
+        sys.modules['torchdata'] = torchdata
+
+    if not hasattr(torchdata, 'datapipes'):
+        datapipes = types.ModuleType('torchdata.datapipes')
+        datapipes.iter = types.ModuleType('torchdata.datapipes.iter')
+        datapipes.iter.IterDataPipe = type('IterDataPipe', (), {})
+        sys.modules['torchdata.datapipes'] = datapipes
+        sys.modules['torchdata.datapipes.iter'] = datapipes.iter
+        torchdata.datapipes = datapipes
+
+
+_patch_torchdata()
 
 
 class HotspotPredictor:
