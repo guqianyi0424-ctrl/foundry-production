@@ -1,7 +1,5 @@
 """
-论文测试集数据生成脚本
-功能：
-1. 独立测试集评估（类似DeepHotResi Table 3）
+1. 测试集评估指标（Table 3）
 2. 测试集ROC/PR曲线
 3. 测试集混淆矩阵
 4. 生成论文所需的所有数据
@@ -518,7 +516,10 @@ def find_optimal_threshold_youden(y_true, y_prob, n_samples=50):
 def calculate_metrics(y_true, y_pred, y_prob):
     """计算评估指标"""
     cm = confusion_matrix(y_true, y_pred)
-    tn, fp, fn, tp = cm[0, 0], cm[0, 1], cm[1, 0], cm[1, 1] if cm.shape == (2, 2) else (0, 0, 0, 0)
+    if cm.shape == (2, 2):
+        tn, fp, fn, tp = cm[0, 0], cm[0, 1], cm[1, 0], cm[1, 1]
+    else:
+        tn, fp, fn, tp = 0, 0, 0, 0
     
     return {
         'TP': tp, 'FN': fn, 'TN': tn, 'FP': fp,

@@ -5,6 +5,25 @@ const api = axios.create({
   timeout: 600000,
 })
 
+api.interceptors.request.use((config) => {
+  const token = localStorage.getItem('odesign_token')
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`
+  }
+  return config
+})
+
+api.interceptors.response.use(
+  (res) => res,
+  (err) => {
+    if (err.response?.status === 401) {
+      localStorage.removeItem('odesign_token')
+      localStorage.removeItem('odesign_user')
+    }
+    return Promise.reject(err)
+  }
+)
+
 export interface UploadResponse {
   chains: Array<{ chain_id: string; sequence: string; length: number; resSeqs?: number[] }>
   pdb_content: string
@@ -88,6 +107,7 @@ export const runRFD3 = async (params: {
   length_max?: number
   diffusion_batch_size?: number
   n_batches?: number
+  experiment_id?: string
 }): Promise<RFD3Response> => {
   const res = await api.post('/run-rfd3', params)
   return res.data
@@ -125,6 +145,7 @@ export const runRF3 = async (params: {
   mpnn_pdb_content: string
   rfd3_pdb_content?: string
   example_id?: string
+  experiment_id?: string
 }): Promise<RF3Response> => {
   const res = await api.post('/run-rf3', params)
   return res.data
@@ -136,6 +157,7 @@ export const runMPNN = async (params: {
   batch_size?: number
   fixed_chains?: string[]
   model_type?: string
+  experiment_id?: string
 }): Promise<MPNNResponse> => {
   const res = await api.post('/run-mpnn', params)
   return res.data
@@ -147,6 +169,109 @@ export const runPipeline = async (params: {
   binder_length: number
 }): Promise<RunPipelineResponse> => {
   const res = await api.post('/run-pipeline', params)
+  return res.data
+}
+
+export interface AuthResponse {
+  access_token: string
+  token_type: string
+  user: { id: string; username: string; email: string | null; role: string }
+}
+
+export const authLogin = async (username: string, password: string): Promise<AuthResponse> => {
+  const formData = new URLSearchParams()
+  formData.append('username', username)
+  formData.append('password', password)
+  const res = await api.post('/auth/login', formData)
+  return res.data
+}
+
+export const authRegister = async (username: string, password: string, email?: string) => {
+  const res = await api.post('/auth/register', { username, password, email })
+  return res.data
+}
+
+export const authMe = async () => {
+  const res = await api.get('/auth/me')
+  return res.data
+}
+
+export interface ExperimentItem {
+  id: string
+  name: string
+  status: string
+  created_at: string | null
+  updated_at: string | null
+  target: string | null
+  hotspots: any[] | null
+  duration_seconds: number | null
+  gpu_info: string | null
+  user_id: string | null
+  num_designs: number
+}
+
+export interface ExperimentDetail extends ExperimentItem {
+  input_pdb: string | null
+  rfd3_config: any
+  mpnn_config: any
+  rf3_config: any
+  rfd3_results: any
+  mpnn_results: any
+  rf3_results: any
+  designs: Array<{
+    id: string
+    design_name: string | null
+    sequence: string | null
+    pdb_content: string | null
+    plddt: number | null
+    rmsd: number | null
+    ranking_score: number | null
+    passed_validation: boolean
+  }>
+}
+
+export const getExperiments = async (params?: { page?: number; page_size?: number; status?: string; keyword?: string }) => {
+  const res = await api.get('/experiments', { params })
+  return res.data
+}
+
+export const getExperiment = async (id: string): Promise<ExperimentDetail> => {
+  const res = await api.get(`/experiments/${id}`)
+  return res.data
+}
+
+export const createExperiment = async (data: { name: string; input_pdb?: string; target?: string; hotspots?: any[]; rfd3_config?: any; mpnn_config?: any; rf3_config?: any }) => {
+  const res = await api.post('/experiments', data)
+  return res.data
+}
+
+export const updateExperiment = async (id: string, data: any) => {
+  const res = await api.put(`/experiments/${id}`, data)
+  return res.data
+}
+
+export const deleteExperiment = async (id: string) => {
+  const res = await api.delete(`/experiments/${id}`)
+  return res.data
+}
+
+export const exportExperiment = async (id: string) => {
+  const res = await api.get(`/experiments/${id}/export`)
+  return res.data
+}
+
+export const compareExperiments = async (ids: string[]) => {
+  const res = await api.post('/experiments/compare', ids)
+  return res.data
+}
+
+export const getMonitorStatus = async () => {
+  const res = await api.get('/monitor/status')
+  return res.data
+}
+
+export const getMonitorTasks = async () => {
+  const res = await api.get('/monitor/tasks')
   return res.data
 }
 

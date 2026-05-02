@@ -8,9 +8,21 @@ export interface ResidueRange {
   endResSeq: number;
 }
 
+interface AuthState {
+  token: string | null;
+  user: { id: string; username: string; email: string | null; role: string } | null;
+  setAuth: (token: string, user: { id: string; username: string; email: string | null; role: string }) => void;
+  clearAuth: () => void;
+}
+
 interface AppState {
   currentPage: string;
   setCurrentPage: (page: string) => void;
+
+  token: string | null;
+  user: { id: string; username: string; email: string | null; role: string } | null;
+  setAuth: (token: string, user: { id: string; username: string; email: string | null; role: string }) => void;
+  clearAuth: () => void;
 
   targetFile: File | null;
   setTargetFile: (file: File | null) => void;
@@ -53,6 +65,9 @@ interface AppState {
   };
   setRfd3Config: (config: Partial<AppState['rfd3Config']>) => void;
 
+  currentExperimentId: string | null;
+  setCurrentExperimentId: (id: string | null) => void;
+
   rfd3Results: RFD3Response | null;
   setRfd3Results: (results: RFD3Response | null) => void;
 
@@ -71,8 +86,24 @@ interface AppState {
   resetAll: () => void;
 }
 
+const getInitialAuth = () => {
+  try {
+    const token = localStorage.getItem('odesign_token')
+    const user = localStorage.getItem('odesign_user')
+    return {
+      token: token || null,
+      user: user ? JSON.parse(user) : null,
+    }
+  } catch {
+    return { token: null, user: null }
+  }
+}
+
+const initialAuth = getInitialAuth()
+
 const initialState = {
   currentPage: '新建设计',
+  ...initialAuth,
   targetFile: null,
   pdbContent: '',
   chains: [],
@@ -92,6 +123,7 @@ const initialState = {
     nBatches: 2,
     diffusionBatchSize: 2,
   },
+  currentExperimentId: null as string | null,
   rfd3Results: null as RFD3Response | null,
   mpnnResults: null as MPNNResponse | null,
   rf3Results: null as RF3Response | null,
@@ -103,6 +135,18 @@ export const useAppStore = create<AppState>((set, get) => ({
   ...initialState,
 
   setCurrentPage: (page) => set({ currentPage: page }),
+
+  setAuth: (token, user) => {
+    localStorage.setItem('odesign_token', token)
+    localStorage.setItem('odesign_user', JSON.stringify(user))
+    set({ token, user })
+  },
+  clearAuth: () => {
+    localStorage.removeItem('odesign_token')
+    localStorage.removeItem('odesign_user')
+    set({ token: null, user: null })
+  },
+
   setTargetFile: (file) => set({ targetFile: file }),
   setPdbContent: (content) => set({ pdbContent: content }),
   setChains: (chains) => set({ chains }),
@@ -155,6 +199,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   setHotspotInput: (input) => set({ hotspotInput: input }),
   setBinderLength: (len) => set({ binderLength: len }),
   setRfd3Config: (config) => set((state) => ({ rfd3Config: { ...state.rfd3Config, ...config } })),
+  setCurrentExperimentId: (id) => set({ currentExperimentId: id }),
   setRfd3Results: (results) => set({ rfd3Results: results }),
   setMpnnResults: (results) => set({ mpnnResults: results }),
   setRf3Results: (results) => set({ rf3Results: results }),
@@ -162,5 +207,5 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   addJob: (job) => set((state) => ({ jobHistory: [job, ...state.jobHistory].slice(0, 20) })),
 
-  resetAll: () => set(initialState),
+  resetAll: () => set({ ...initialState, ...getInitialAuth() }),
 }))
