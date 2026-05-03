@@ -24,8 +24,10 @@ class RFD3Runner:
     def _check_api(self) -> bool:
         try:
             from rfd3.engine import RFD3InferenceEngine
+            print("[RFD3] ✅ API可用 (foundry)")
             return True
-        except ImportError:
+        except ImportError as e:
+            print(f"[RFD3] ❌ API不可用，将使用Mock模式: {e}")
             return False
 
     def is_available(self) -> bool:

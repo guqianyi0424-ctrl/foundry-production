@@ -23,8 +23,10 @@ class RF3Runner:
     def _check_api(self) -> bool:
         try:
             from rf3.inference_engines.rf3 import RF3InferenceEngine
+            print("[RF3] ✅ API可用 (foundry)")
             return True
-        except ImportError:
+        except ImportError as e:
+            print(f"[RF3] ❌ API不可用，将使用Mock模式: {e}")
             return False
 
     def is_available(self) -> bool:

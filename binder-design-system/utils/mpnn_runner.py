@@ -23,8 +23,10 @@ class MPNNRunner:
     def _check_api(self) -> bool:
         try:
             from mpnn.inference_engines.mpnn import MPNNInferenceEngine
+            print("[MPNN] ✅ API可用 (foundry)")
             return True
-        except ImportError:
+        except ImportError as e:
+            print(f"[MPNN] ❌ API不可用，将使用Mock模式: {e}")
             return False
 
     def is_available(self) -> bool:
