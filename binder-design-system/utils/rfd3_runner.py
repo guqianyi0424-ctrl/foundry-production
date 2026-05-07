@@ -83,7 +83,7 @@ class RFD3Runner:
 
         specification = {
             'length': binder_length,
-            'extra': {}
+            'extra': {},
         }
 
         if pdb_content and target:
@@ -94,8 +94,10 @@ class RFD3Runner:
             chains_info = self._parse_target(target)
             contig = self._build_binder_contig(chains_info, binder_length)
 
-            specification['extra']['input'] = str(input_pdb_path)
-            specification['extra']['contig'] = contig
+            specification['input'] = str(input_pdb_path)
+            specification['contig'] = contig
+            # Fix target coordinates by default
+            specification['select_fixed_atoms'] = True
 
             if hotspots:
                 hotspot_dict = {}
@@ -103,8 +105,8 @@ class RFD3Runner:
                     hs_clean = hs.replace("/", "").strip()
                     hotspot_dict[hs_clean] = "ALL"
                 if hotspot_dict:
-                    specification['extra']['select_hotspots'] = hotspot_dict
-                    specification['extra']['infer_ori_strategy'] = 'hotspots'
+                    specification['select_hotspots'] = hotspot_dict
+                    specification['infer_ori_strategy'] = 'hotspots'
 
         config = RFD3InferenceConfig(
             specification=specification,
