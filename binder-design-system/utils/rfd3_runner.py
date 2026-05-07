@@ -126,7 +126,13 @@ class RFD3Runner:
             batch_designs = []
             for i, item in enumerate(data):
                 atom_array = item.atom_array
+                # Debug: check chains in RFD3 output
+                rfd3_chains = sorted(set(str(c) for c in atom_array.chain_id))
+                print(f"[RFD3] output atom_array chains: {rfd3_chains}")
                 pdb_str = self._atom_array_to_pdb(atom_array)
+                # Debug: check chains in PDB string
+                pdb_chains = sorted(set(line[21:22] for line in pdb_str.split('\n') if line.startswith('ATOM')))
+                print(f"[RFD3] output PDB chains: {pdb_chains}")
                 design_name = f"batch{idx}_design{i}"
                 pdb_path = job_dir / f"{design_name}.pdb"
                 with open(pdb_path, "w") as f:
