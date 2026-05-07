@@ -104,6 +104,11 @@ test_outputs/
 .cache/
 *.cache
 
+# Superpowers local planning artifacts
+docs/superpowers/specs/
+docs/superpowers/plans/
+.worktrees/
+
 # Large media files
 *.mp4
 *.avi
