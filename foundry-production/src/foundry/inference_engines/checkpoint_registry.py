@@ -7,7 +7,8 @@ from typing import Iterable, List
 
 import dotenv
 
-DEFAULT_CHECKPOINT_DIR = Path.home() / ".foundry" / "checkpoints"
+_project_checkpoints = Path(__file__).resolve().parents[3] / "checkpoints"
+DEFAULT_CHECKPOINT_DIR = _project_checkpoints if _project_checkpoints.exists() else Path.home() / ".foundry" / "checkpoints"
 
 
 def _normalize_paths(paths: Iterable[Path]) -> list[Path]:
@@ -25,9 +26,8 @@ def _normalize_paths(paths: Iterable[Path]) -> list[Path]:
 def get_default_checkpoint_dirs() -> list[Path]:
     """Return checkpoint search paths.
 
-    Always starts with the default ~/.foundry/checkpoints directory and then
-    appends any additional directories from the colon-separated
-    FOUNDRY_CHECKPOINT_DIRS environment variable.
+    Priority: FOUNDRY_CHECKPOINT_DIRS env var, then project-root checkpoints/
+    (if detectable), then ~/.foundry/checkpoints as legacy fallback.
     """
     env_dirs = os.environ.get("FOUNDRY_CHECKPOINT_DIRS", "")
 
