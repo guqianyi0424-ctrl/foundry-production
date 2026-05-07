@@ -81,11 +81,6 @@ class RFD3Runner:
 
         seed_everything(42)
 
-        specification = {
-            'length': binder_length,
-            'extra': {},
-        }
-
         if pdb_content and target:
             input_pdb_path = job_dir / "input_target.pdb"
             with open(input_pdb_path, "w") as f:
@@ -94,10 +89,17 @@ class RFD3Runner:
             chains_info = self._parse_target(target)
             contig = self._build_binder_contig(chains_info, binder_length)
 
-            specification['input'] = str(input_pdb_path)
-            specification['contig'] = contig
-            # Fix target coordinates by default
-            specification['select_fixed_atoms'] = True
+            # Total length = binder + all target residues
+            target_residues = sum(end - start + 1 for start, end in chains_info.values())
+            total_length = binder_length + target_residues
+
+            specification = {
+                'length': str(total_length),
+                'extra': {},
+                'input': str(input_pdb_path),
+                'contig': contig,
+                'select_fixed_atoms': True,
+            }
 
             if hotspots:
                 hotspot_dict = {}
@@ -107,13 +109,18 @@ class RFD3Runner:
                 if hotspot_dict:
                     specification['select_hotspots'] = hotspot_dict
                     specification['infer_ori_strategy'] = 'hotspots'
+        else:
+            specification = {
+                'length': str(binder_length),
+                'extra': {},
+            }
 
         config = RFD3InferenceConfig(
             specification=specification,
             diffusion_batch_size=diffusion_batch_size,
         )
 
-        print(f"[RFD3] target={target} | hotspots={hotspots} | length={binder_length} | batches={n_batches}x{diffusion_batch_size}")
+        print(f"[RFD3] target={target} | hotspots={hotspots} | binder_length={binder_length} | total_length={specification.get('length')} | contig={specification.get('contig')} | batches={n_batches}x{diffusion_batch_size}")
 
         model = RFD3InferenceEngine(**config)
         outputs = model.run(
