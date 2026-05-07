@@ -6,8 +6,16 @@ ProteinMPNN / LigandMPNN 调用模块
 import os
 import io
 import json
+import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Any
+
+# Ensure foundry model paths are importable
+_base = Path(__file__).resolve().parent.parent.parent
+for _model in ["mpnn", "rfd3", "rf3"]:
+    _mp = str(_base / "foundry-production" / "models" / _model / "src")
+    if _mp not in sys.path:
+        sys.path.insert(0, _mp)
 
 import numpy as np
 
