@@ -1,8 +1,13 @@
 import { useEffect } from 'react'
 import { useAppStore } from '@/store/useAppStore'
-import { HelpCircle } from 'lucide-react'
+import { HelpCircle, Dna } from 'lucide-react'
 
-export function DesignPanel() {
+interface DesignPanelProps {
+  onOpenRFD3?: () => void
+  isRFD3Running?: boolean
+}
+
+export function DesignPanel({ onOpenRFD3, isRFD3Running }: DesignPanelProps) {
   const rfd3Config = useAppStore((s) => s.rfd3Config)
   const setRfd3Config = useAppStore((s) => s.setRfd3Config)
   const selectedRange = useAppStore((s) => s.selectedRange)
@@ -96,7 +101,12 @@ export function DesignPanel() {
         </div>
 
         <div></div>
-        <div className="pt-2">
+        <div className="pt-2 flex items-center gap-3">
+          {onOpenRFD3 && (
+            <button onClick={onOpenRFD3} disabled={!rfd3Config.targetStructure || isRFD3Running} className={`flex items-center gap-2 px-5 py-2 rounded-lg text-white text-sm font-medium transition-all ${!rfd3Config.targetStructure || isRFD3Running ? 'bg-gray-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700 shadow-sm'}`}>
+              <Dna size={16} />{isRFD3Running ? 'RFD3生成中...' : 'RFD3 骨架生成'}
+            </button>
+          )}
           <button onClick={() => {
             configSummary()
             alert(`当前配置已记录到控制台，请按 F12 查看\n\n目标实体: ${rfd3Config.targetEntityType} / ${rfd3Config.targetStructure || '(未填)'}\n热点: ${rfd3Config.hotspots || '(未填)'}\n条件原子: ${rfd3Config.conditionAtoms || '(未填)'}\n长度: ${rfd3Config.lengthMin}-${rfd3Config.lengthMax}\nn_batches: ${rfd3Config.nBatches}\ndiffusion_batch_size: ${rfd3Config.diffusionBatchSize}\n\n总生成数: ${rfd3Config.nBatches * rfd3Config.diffusionBatchSize} 个`)

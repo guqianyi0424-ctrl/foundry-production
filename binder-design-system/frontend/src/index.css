@@ -21,40 +21,48 @@ body {
 
 @layer components {
   .seq-hotspot {
-    @apply bg-blue-500 text-white rounded px-1 cursor-pointer transition-all hover:bg-blue-600;
+    @apply bg-blue-500 text-white rounded cursor-pointer transition-colors hover:bg-blue-600;
     font-family: 'JetBrains Mono', 'Fira Code', monospace;
     font-size: 16px;
-    font-weight: 600;
     letter-spacing: 1px;
+    padding: 0 2px;
+    margin: 0 1px;
   }
 
   .seq-residue {
-    @apply text-gray-900 cursor-pointer transition-all hover:bg-blue-100 rounded px-0.5;
+    @apply text-gray-900 cursor-pointer transition-colors hover:bg-blue-100 rounded;
     font-family: 'JetBrains Mono', 'Fira Code', monospace;
     font-size: 16px;
     letter-spacing: 1px;
+    padding: 0 2px;
+    margin: 0 1px;
   }
 
   .seq-residue-drag {
-    @apply bg-blue-300 text-white rounded px-1 cursor-pointer transition-all;
+    @apply bg-blue-300 text-white cursor-pointer transition-colors;
     font-family: 'JetBrains Mono', 'Fira Code', monospace;
     font-size: 16px;
-    font-weight: 600;
     letter-spacing: 1px;
+    padding: 0 2px;
+    margin: 0 1px;
   }
 
   .seq-residue-in-range {
-    @apply text-gray-900 cursor-pointer transition-all hover:bg-blue-100 rounded px-0.5;
+    @apply bg-blue-50 text-blue-700 cursor-pointer transition-colors rounded;
     font-family: 'JetBrains Mono', 'Fira Code', monospace;
     font-size: 16px;
     letter-spacing: 1px;
+    padding: 0 2px;
+    margin: 0 1px;
   }
 
   .seq-residue-disabled {
-    @apply text-gray-300 cursor-default transition-all;
+    @apply text-gray-400 cursor-default transition-colors;
     font-family: 'JetBrains Mono', 'Fira Code', monospace;
     font-size: 16px;
     letter-spacing: 1px;
+    padding: 0 2px;
+    margin: 0 1px;
   }
 
   .design-card {

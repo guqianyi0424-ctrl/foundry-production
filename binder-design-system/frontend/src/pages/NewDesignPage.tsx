@@ -295,9 +295,6 @@ export function NewDesignPage() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <button onClick={() => setShowRFD3Modal(true)} disabled={!pdbContent || isRFD3Running} className={`flex items-center gap-2 px-5 py-2 rounded-lg text-white text-sm font-medium transition-all ${!pdbContent || isRFD3Running ? 'bg-gray-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700 shadow-sm'}`}>
-            <Dna size={16} />{isRFD3Running ? 'RFD3生成中...' : 'RFD3 骨架生成'}
-          </button>
           <button onClick={handleResetView} className="flex items-center gap-2 px-4 py-2 rounded-lg border border-gray-200 text-gray-700 text-sm hover:bg-gray-50 transition-all">
             <RotateCcw size={16} />重置
           </button>
@@ -350,7 +347,7 @@ export function NewDesignPage() {
         </div>
       </div>
 
-      <DesignPanel />
+      <DesignPanel onOpenRFD3={() => setShowRFD3Modal(true)} isRFD3Running={isRFD3Running} />
 
       {/* Step Pipeline: RFD3 → MPNN → RF3 */}
       <div className="bg-white rounded-xl border border-gray-200 p-5">
@@ -392,11 +389,11 @@ export function NewDesignPage() {
                         <div key={design.index} onClick={() => setSelectedRFD3Design(design)} className={`p-3 rounded-xl border cursor-pointer transition-all ${selectedRFD3Design?.index === design.index ? 'border-blue-400 bg-blue-50 ring-1 ring-blue-200' : 'border-gray-100 hover:border-gray-200 hover:bg-gray-50'}`}>
                           <div className="flex items-center justify-between mb-2">
                             <span className="text-sm font-medium text-gray-900">{design.name}</span>
-                            <span className="text-xs px-2 py-0.5 rounded-full bg-green-100 text-green-700">pLDDT: {design.plddt?.toFixed(1) || 'N/A'}</span>
+                            <span className="text-xs px-2 py-0.5 rounded-full bg-blue-100 text-blue-700">Design #{design.index + 1}</span>
                           </div>
                           {design.pdb_content && (
                             <div className="h-32 rounded-lg overflow-hidden border border-gray-100 bg-gray-50">
-                              <iframe srcDoc={`<!DOCTYPE html><html><head><script src="https://cdn.jsdelivr.net/npm/molstar@4.4.0/build/viewer/molstar.js"></script><style>body{margin:0;padding:0;overflow:hidden}#app{width:100%;height:100%}</style></head><body><div id="app"></div><script>molstar.Viewer.create('app',{layoutIsExpanded:false}).then(v=>{const pdbData=\`${design.pdb_content.replace(/`/g, '\\`').replace(/\$/g, '\\$')}\`;v.loadStructureFromData(pdbData,'pdb')})</script></body></html>`} className="w-full h-full border-0" title={design.name} />
+                              <iframe srcDoc={`<!DOCTYPE html><html><head><script src="https://cdn.jsdelivr.net/npm/molstar@4.4.0/build/viewer/molstar.js"></script><style>body{margin:0;padding:0;overflow:hidden}#app{width:100%;height:100%}</style></head><body><div id="app"></div><script>var noop=function(){};console.log=noop;console.warn=noop;console.info=noop;console.debug=noop;molstar.Viewer.create('app',{layoutIsExpanded:false}).then(v=>{const pdbData=\`${design.pdb_content.replace(/`/g, '\\`').replace(/\$/g, '\\$')}\`;v.loadStructureFromData(pdbData,'pdb')})</script></body></html>`} className="w-full h-full border-0" title={design.name} />
                             </div>
                           )}
                           <div className="mt-2 flex justify-end">
@@ -447,7 +444,7 @@ export function NewDesignPage() {
                       </div>
                       {seq.pdb_content && selectedMPNNSeq?.index === seq.index && (
                         <div className="mt-3 h-48 rounded-lg overflow-hidden border border-gray-100">
-                          <iframe srcDoc={`<!DOCTYPE html><html><head><script src="https://cdn.jsdelivr.net/npm/molstar@4.4.0/build/viewer/molstar.js"></script><style>body{margin:0;padding:0;overflow:hidden}#app{width:100%;height:100%}</style></head><body><div id="app"></div><script>molstar.Viewer.create('app',{layoutIsExpanded:false}).then(v=>{const pdbData=\`${seq.pdb_content.replace(/`/g, '\\`').replace(/\$/g, '\\$')}\`;v.loadStructureFromData(pdbData,'pdb')})</script></body></html>`} className="w-full h-full border-0" title={`Sequence ${seq.index + 1}`} />
+                          <iframe srcDoc={`<!DOCTYPE html><html><head><script src="https://cdn.jsdelivr.net/npm/molstar@4.4.0/build/viewer/molstar.js"></script><style>body{margin:0;padding:0;overflow:hidden}#app{width:100%;height:100%}</style></head><body><div id="app"></div><script>var noop=function(){};console.log=noop;console.warn=noop;console.info=noop;console.debug=noop;molstar.Viewer.create('app',{layoutIsExpanded:false}).then(v=>{const pdbData=\`${seq.pdb_content.replace(/`/g, '\\`').replace(/\$/g, '\\$')}\`;v.loadStructureFromData(pdbData,'pdb')})</script></body></html>`} className="w-full h-full border-0" title={`Sequence ${seq.index + 1}`} />
                         </div>
                       )}
                       {seq.pdb_content && selectedMPNNSeq?.index === seq.index && (
@@ -542,31 +539,23 @@ export function NewDesignPage() {
                 </div>
 
                 {/* 3D Structure Comparison */}
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="border border-gray-100 rounded-xl overflow-hidden">
-                    <div className="px-4 py-2 border-b border-gray-100 bg-gray-50">
-                      <span className="text-sm font-semibold text-gray-700">RFD3 生成骨架</span>
+                <div className="border border-gray-100 rounded-xl overflow-hidden">
+                  <div className="px-4 py-2 border-b border-gray-100 bg-gray-50 flex items-center justify-between">
+                    <span className="text-sm font-semibold text-gray-700">RFD3 vs RF3 结构叠合对比</span>
+                    <div className="flex items-center gap-3 text-xs">
+                      <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-sm inline-block" style={{background:'#f59e0b'}} />RFD3 骨架</span>
+                      <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-sm inline-block" style={{background:'#3b82f6'}} />RF3 预测</span>
                     </div>
-                    {selectedRFD3Design?.pdb_content ? (
-                      <div className="h-64">
-                        <iframe srcDoc={`<!DOCTYPE html><html><head><script src="https://cdn.jsdelivr.net/npm/molstar@4.4.0/build/viewer/molstar.js"></script><style>body{margin:0;padding:0;overflow:hidden}#app{width:100%;height:100%}</style></head><body><div id="app"></div><script>molstar.Viewer.create('app',{layoutIsExpanded:false}).then(v=>{const pdbData=\`${selectedRFD3Design.pdb_content.replace(/`/g, '\\`').replace(/\$/g, '\\$')}\`;v.loadStructureFromData(pdbData,'pdb')})</script></body></html>`} className="w-full h-full border-0" title="RFD3 Backbone" />
-                      </div>
-                    ) : (
-                      <div className="h-64 flex items-center justify-center text-gray-400 text-sm">无RFD3骨架数据</div>
-                    )}
                   </div>
-                  <div className="border border-gray-100 rounded-xl overflow-hidden">
-                    <div className="px-4 py-2 border-b border-gray-100 bg-gray-50">
-                      <span className="text-sm font-semibold text-gray-700">RF3 预测结构</span>
+                  {selectedRFD3Design?.pdb_content && rf3Results.predicted_pdb ? (
+                    <div className="h-96">
+                      <iframe srcDoc={`<!DOCTYPE html><html><head><script src="https://cdn.jsdelivr.net/npm/molstar@4.4.0/build/viewer/molstar.js"></script><style>body{margin:0;padding:0;overflow:hidden}#app{width:100%;height:100%}.legend{position:absolute;bottom:12px;left:12px;z-index:100;background:rgba(0,0,0,0.75);color:#fff;padding:8px 12px;border-radius:6px;font-family:sans-serif;font-size:12px;display:flex;gap:12px}</style></head><body><div id="app"></div><script>var noop=function(){};console.log=noop;console.warn=noop;console.info=noop;console.debug=noop;molstar.Viewer.create('app',{layoutIsExpanded:false,layoutShowControls:false}).then(v=>{const pdb1=\`${selectedRFD3Design.pdb_content.replace(/`/g,'\\\\`').replace(/\$/g,'\\\\$')}\`;const pdb2=\`${rf3Results.predicted_pdb.replace(/`/g,'\\\\`').replace(/\$/g,'\\\\$')}\`;Promise.all([v.loadStructureFromData(pdb1,'pdb'),v.loadStructureFromData(pdb2,'pdb')]).then(([s1,s2])=>{v.visual.update({structure:s1},{type:'cartoon',color:{r:245,g:158,b:11},opacity:0.7});v.visual.update({structure:s2},{type:'cartoon',color:{r:59,g:130,b:246},opacity:0.7})})})</script></body></html>`} className="w-full h-full border-0" title="RFD3 vs RF3 Comparison" />
                     </div>
-                    {rf3Results.predicted_pdb ? (
-                      <div className="h-64">
-                        <iframe srcDoc={`<!DOCTYPE html><html><head><script src="https://cdn.jsdelivr.net/npm/molstar@4.4.0/build/viewer/molstar.js"></script><style>body{margin:0;padding:0;overflow:hidden}#app{width:100%;height:100%}</style></head><body><div id="app"></div><script>molstar.Viewer.create('app',{layoutIsExpanded:false}).then(v=>{const pdbData=\`${rf3Results.predicted_pdb.replace(/`/g, '\\`').replace(/\$/g, '\\$')}\`;v.loadStructureFromData(pdbData,'pdb')})</script></body></html>`} className="w-full h-full border-0" title="RF3 Predicted" />
-                      </div>
-                    ) : (
-                      <div className="h-64 flex items-center justify-center text-gray-400 text-sm">无RF3预测数据</div>
-                    )}
-                  </div>
+                  ) : (
+                    <div className="h-64 flex items-center justify-center text-gray-400 text-sm">
+                      {!selectedRFD3Design?.pdb_content ? '请先在RFD3结果中选择一个设计' : '请先运行RF3验证'}
+                    </div>
+                  )}
                 </div>
 
                 {/* Per-residue RMSD Chart */}
