@@ -84,6 +84,34 @@ class MPNNRunner:
         else:
             return {"success": False, "error": "No backbone input provided", "sequences": []}
 
+        # Auto-detect actual chains in the structure
+        actual_chains = sorted(set(str(c) for c in atom_array.chain_id))
+        print(f"[MPNN] detected chains: {actual_chains}")
+
+        # Validate fixed_chains against actual chains
+        valid_fixed_chains = None
+        if fixed_chains:
+            matched = [c for c in fixed_chains if c in actual_chains]
+            if matched:
+                valid_fixed_chains = matched
+            else:
+                print(f"[MPNN] WARNING: fixed_chains={fixed_chains} not found in structure chains={actual_chains}")
+                # Auto-detect: fix the chain with fewer residues (target) or chains that appear first
+                from biotite.structure import get_residue_starts
+                chain_lengths = {}
+                for c in actual_chains:
+                    chain_mask = atom_array.chain_id == c
+                    chain_atoms = atom_array[chain_mask]
+                    chain_lengths[c] = len(get_residue_starts(chain_atoms))
+                # Fix all chains except the longest one (binder is typically longer or equal)
+                if len(chain_lengths) > 1:
+                    # Fix the shortest chain (target), design the rest
+                    sorted_chains = sorted(chain_lengths, key=chain_lengths.get)
+                    valid_fixed_chains = [sorted_chains[0]]  # fix shortest chain
+                    print(f"[MPNN] auto-detected fixed_chains={valid_fixed_chains} (chain lengths: {chain_lengths})")
+                else:
+                    valid_fixed_chains = fixed_chains  # fall through to error
+
         engine_config = {
             "model_type": model_type,
             "is_legacy_weights": True,
@@ -97,8 +125,8 @@ class MPNNRunner:
             "remove_waters": True,
         }
 
-        if fixed_chains:
-            input_config["fixed_chains"] = fixed_chains
+        if valid_fixed_chains:
+            input_config["fixed_chains"] = valid_fixed_chains
 
         input_configs = [input_config]
 
