@@ -110,7 +110,9 @@ class MPNNRunner:
                     valid_fixed_chains = [sorted_chains[0]]  # fix shortest chain
                     print(f"[MPNN] auto-detected fixed_chains={valid_fixed_chains} (chain lengths: {chain_lengths})")
                 else:
-                    valid_fixed_chains = fixed_chains  # fall through to error
+                    # Only one chain: design all residues (no fixed chains)
+                    print("[MPNN] only one chain detected, designing all residues")
+                    valid_fixed_chains = None
 
         engine_config = {
             "model_type": model_type,

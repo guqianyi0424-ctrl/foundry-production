@@ -169,6 +169,7 @@ export function NewDesignPage() {
   const [showRFD3Modal, setShowRFD3Modal] = useState(false)
   const [isRFD3Running, setIsRFD3Running] = useState(false)
   const [isMPNNRunning, setIsMPNNRunning] = useState(false)
+  const [runningMPNNDesignIdx, setRunningMPNNDesignIdx] = useState<number | null>(null)
   const [isRF3Running, setIsRF3Running] = useState(false)
   const [selectedRFD3Design, setSelectedRFD3Design] = useState<RFD3Design | null>(null)
   const [selectedMPNNSeq, setSelectedMPNNSeq] = useState<MPNNSequence | null>(null)
@@ -248,8 +249,9 @@ export function NewDesignPage() {
     finally { setIsRFD3Running(false) }
   }, [pdbContent, rfd3Config, selectedHotspots, setRfd3Results])
 
-  const handleRunMPNN = useCallback(async (backbonePdb: string) => {
+  const handleRunMPNN = useCallback(async (backbonePdb: string, designIdx: number) => {
     setIsMPNNRunning(true)
+    setRunningMPNNDesignIdx(designIdx)
     try {
       const targetChains = [...new Set(selectedHotspots.map(h => h.chain))]
       const res = await runMPNN({
@@ -260,7 +262,7 @@ export function NewDesignPage() {
       setMpnnResults(res)
       setActiveStep(2)
     } catch (err) { alert('MPNN运行失败: ' + String(err)) }
-    finally { setIsMPNNRunning(false) }
+    finally { setIsMPNNRunning(false); setRunningMPNNDesignIdx(null) }
   }, [selectedHotspots, setMpnnResults])
 
   const handleRunRF3 = useCallback(async (mpnnPdb: string) => {
@@ -398,8 +400,8 @@ export function NewDesignPage() {
                             </div>
                           )}
                           <div className="mt-2 flex justify-end">
-                            <button onClick={(e) => { e.stopPropagation(); handleRunMPNN(design.pdb_content) }} disabled={isMPNNRunning} className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs bg-green-50 text-green-700 hover:bg-green-100 transition-all disabled:opacity-50">
-                              <FlaskConical size={12} />{isMPNNRunning ? 'MPNN运行中...' : '送入MPNN'}
+                            <button onClick={(e) => { e.stopPropagation(); handleRunMPNN(design.pdb_content, design.index) }} disabled={isMPNNRunning} className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs bg-green-50 text-green-700 hover:bg-green-100 transition-all disabled:opacity-50">
+                              <FlaskConical size={12} />{isMPNNRunning && runningMPNNDesignIdx === design.index ? 'MPNN运行中...' : '送入MPNN'}
                             </button>
                           </div>
                         </div>
