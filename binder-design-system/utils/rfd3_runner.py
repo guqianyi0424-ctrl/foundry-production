@@ -6,17 +6,17 @@ RFDiffusion3 调用模块
 import os
 import json
 import io
-import sys
 import tempfile
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 
-# Ensure foundry model paths are importable
-_base = Path(__file__).resolve().parent.parent.parent
-for _model in ["rfd3", "mpnn", "rf3"]:
-    _mp = str(_base / "foundry-production" / "models" / _model / "src")
-    if _mp not in sys.path:
-        sys.path.insert(0, _mp)
+try:
+    from adapters.foundry_bootstrap import FoundryBootstrap
+    from config.settings import get_settings
+
+    FoundryBootstrap(get_settings()).ensure_available()
+except Exception as exc:
+    print(f"[RFD3] Foundry bootstrap unavailable: {exc}")
 
 import numpy as np
 

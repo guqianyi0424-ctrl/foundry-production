@@ -1,8 +1,4 @@
 from fastapi import APIRouter, UploadFile, File, HTTPException
-import os
-import sys
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "app"))
 
 from utils.structure_parser import StructureParser
 
