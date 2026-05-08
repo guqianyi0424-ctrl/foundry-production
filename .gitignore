@@ -108,6 +108,8 @@ test_outputs/
 docs/superpowers/specs/
 docs/superpowers/plans/
 .worktrees/
+.tools/
+.uv-cache/
 
 # Large media files
 *.mp4
