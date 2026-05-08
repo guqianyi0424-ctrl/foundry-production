@@ -63,7 +63,7 @@ function HotspotPredictionModal({ open, onClose, onConfirm, prediction }: Hotspo
             ))}
           </div>
           <div className="mt-4 p-3 bg-amber-50 rounded-xl text-xs text-amber-700">
-            💡 预测的热点残基已同步到3D结构中高亮显示，点击「确认」将自动填入热点框
+            预测的热点残基已在序列下方以红点标记，并同步到3D结构中高亮显示；点击「确认」将写入热点参数框。
           </div>
         </div>
         <div className="p-4 border-t border-gray-100 flex justify-end gap-3">
@@ -199,6 +199,8 @@ export function NewDesignPage() {
     setIsPredicting(true)
     try {
       const res = await predictHotspot(pdbContent)
+      const hotspots = res.hotspots.map(h => ({ chain: h.chain, residue: h.residue, score: h.score }))
+      setSelectedHotspots(hotspots)
       setPredictionResult(res)
       setShowPredictionModal(true)
     } catch { alert('热点预测失败') }
@@ -207,10 +209,9 @@ export function NewDesignPage() {
 
   const handleConfirmPrediction = useCallback(() => {
     if (!predictionResult) return
-    setSelectedHotspots(predictionResult.hotspots.map(h => ({ chain: h.chain, residue: h.residue, score: h.score })))
     setRfd3Config({ hotspots: predictionResult.hotspots.map(h => `${h.chain}/${h.residue}`).join(', ') })
     setShowPredictionModal(false)
-  }, [predictionResult, setSelectedHotspots, setRfd3Config])
+  }, [predictionResult, setRfd3Config])
 
   const handleTrimTarget = () => {
     if (!selectedRange) { alert('请先选择残基范围'); return }

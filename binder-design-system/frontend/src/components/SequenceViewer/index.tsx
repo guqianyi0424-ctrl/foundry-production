@@ -134,6 +134,12 @@ export function SequenceViewer() {
                   const inRange = isInSelectedRange(chain.chain_id, resSeq)
                   const hot = isHotspot(chain.chain_id, resSeq)
                   const inDrag = isInDragRange(chain.chain_id, i)
+                  const residueClassName = [
+                    'seq-residue relative inline-flex h-7 w-[1.15rem] items-center justify-center rounded px-0.5 pb-2 pt-1 select-none cursor-pointer transition-colors',
+                    inDrag ? 'bg-amber-100 text-amber-800 ring-1 ring-amber-300' : '',
+                    inRange ? 'bg-green-50 text-green-700 hover:bg-green-100' : 'text-gray-400 hover:bg-gray-50',
+                    hot ? 'font-semibold text-red-700' : '',
+                  ].filter(Boolean).join(' ')
                   return (
                     <span
                       key={`${chain.chain_id}-${resSeq}`}
@@ -141,19 +147,15 @@ export function SequenceViewer() {
                       onMouseDown={(e) => { e.preventDefault(); handleMouseDown(chain.chain_id, i, resSeq) }}
                       onMouseEnter={() => handleMouseEnter(chain.chain_id, resSeq, i)}
                       onMouseLeave={handleMouseLeave}
-                      className={
-                        inDrag ? 'seq-residue-drag'
-                        : hot ? 'seq-hotspot'
-                        : inRange ? 'seq-residue-in-range'
-                        : 'seq-residue-disabled'
-                      }
+                      className={residueClassName}
                       title={
                         inRange
                           ? `${chain.chain_id}/${resSeq}${hot ? ' ✓ 热点' : ''}`
                           : `${chain.chain_id}/${resSeq} (先拖拽选择范围)`
-                      }
+                        }
                     >
-                      {aa}
+                      <span className="seq-residue-letter">{aa}</span>
+                      {hot && <span className="seq-hotspot-dot absolute bottom-0.5 left-1/2 h-1.5 w-1.5 -translate-x-1/2 rounded-full bg-red-500 shadow-[0_0_0_2px_rgba(255,255,255,0.95)]" aria-hidden="true" />}
                     </span>
                   )
                 })}

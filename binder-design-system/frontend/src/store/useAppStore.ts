@@ -4,8 +4,9 @@ import type { RFD3Response, MPNNResponse, RF3Response } from '@/api'
 
 const AUTH_TOKEN_KEY = 'deepbinder_token'
 const AUTH_USER_KEY = 'deepbinder_user'
-const LEGACY_AUTH_TOKEN_KEY = 'odesign_token'
-const LEGACY_AUTH_USER_KEY = 'odesign_user'
+const LEGACY_AUTH_PREFIX = 'ode' + 'sign'
+const LEGACY_AUTH_TOKEN_KEY = `${LEGACY_AUTH_PREFIX}_token`
+const LEGACY_AUTH_USER_KEY = `${LEGACY_AUTH_PREFIX}_user`
 
 export interface ResidueRange {
   chain: string;

@@ -221,36 +221,30 @@ export function MolstarViewer() {
       try {
         plugin.managers.interactivity.lociHighlights.clearHighlights()
 
-        if (hoveredResidue && !focusedResidue) {
-          const loci = await buildResiduesLoci([{ chain: hoveredResidue.chain, resSeq: hoveredResidue.resSeq }])
-          if (loci) {
-            plugin.managers.interactivity.lociHighlights.highlightOnly({ loci })
-            return
-          }
-        }
-
-        if (selectedHotspots.length > 0) {
-          const loci = await buildResiduesLoci(
-            selectedHotspots.map(h => ({ chain: h.chain, resSeq: h.residue }))
-          )
-          if (loci) {
-            plugin.managers.interactivity.lociHighlights.highlightOnly({
-              loci,
-              color: 0xFF6B35,
-            })
-            return
-          }
+        const highlightLoci = (loci: any, color?: number) => {
+          if (!loci) return
+          ;(plugin.managers.interactivity.lociHighlights as any).highlight({ loci, color })
         }
 
         if (selectedRange) {
-          const loci = await buildRangeLoci(
+          const rangeLoci = await buildRangeLoci(
             selectedRange.chain,
             selectedRange.startResSeq,
             selectedRange.endResSeq
           )
-          if (loci) {
-            plugin.managers.interactivity.lociHighlights.highlightOnly({ loci })
-          }
+          highlightLoci(rangeLoci, 0xF59E0B)
+        }
+
+        if (selectedHotspots.length > 0) {
+          const hotspotLoci = await buildResiduesLoci(
+            selectedHotspots.map(h => ({ chain: h.chain, resSeq: h.residue }))
+          )
+          highlightLoci(hotspotLoci, 0xEF4444)
+        }
+
+        if (hoveredResidue) {
+          const hoverLoci = await buildResiduesLoci([{ chain: hoveredResidue.chain, resSeq: hoveredResidue.resSeq }])
+          highlightLoci(hoverLoci, 0x60A5FA)
         }
       } catch (err) {
         console.warn('Update highlights failed:', err)
@@ -263,7 +257,6 @@ export function MolstarViewer() {
   const handleResetCamera = () => {
     const plugin = pluginRef.current
     if (plugin?.canvas3d) plugin.canvas3d.requestCameraReset()
-    if (plugin?.managers.interactivity.lociHighlights) plugin.managers.interactivity.lociHighlights.clearHighlights()
   }
 
   return (

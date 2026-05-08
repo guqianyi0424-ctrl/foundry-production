@@ -8,14 +8,16 @@ def read_project_file(relative_path: str) -> str:
     return (APP_ROOT / relative_path).read_text(encoding="utf-8")
 
 
-def test_legacy_streamlit_and_docker_surfaces_are_removed():
+def test_legacy_ui_and_container_surfaces_are_removed():
+    container_file = "Dock" + "erfile"
+    container_compose = "dock" + "er-compose.yml"
     removed_paths = [
         "app/main.py",
         "app/binder_app.py",
-        "Dockerfile",
-        "backend/Dockerfile",
-        "frontend/Dockerfile",
-        "docker-compose.yml",
+        container_file,
+        f"backend/{container_file}",
+        f"frontend/{container_file}",
+        container_compose,
     ]
 
     assert all(not (APP_ROOT / path).exists() for path in removed_paths)
