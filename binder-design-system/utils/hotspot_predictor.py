@@ -9,6 +9,7 @@ import os
 import sys
 import io
 import types
+import importlib.util
 import numpy as np
 from pathlib import Path
 from typing import Dict, List, Optional, Any
@@ -196,9 +197,13 @@ class HotspotPredictor:
                     self._dl_loaded = True
                     return self._dl_models
 
-            sys.path.insert(0, str(self.hotspot_dl_path))
-            from model import PPIHotspotGAT
-            from config import INPUT_DIM, HIDDEN_DIM, NUM_HEADS, NUM_LAYERS, DROPOUT
+            hotspot_module = self._load_hotspot_dl_module()
+            PPIHotspotGAT = hotspot_module["PPIHotspotGAT"]
+            INPUT_DIM = hotspot_module["INPUT_DIM"]
+            HIDDEN_DIM = hotspot_module["HIDDEN_DIM"]
+            NUM_HEADS = hotspot_module["NUM_HEADS"]
+            NUM_LAYERS = hotspot_module["NUM_LAYERS"]
+            DROPOUT = hotspot_module["DROPOUT"]
 
             models_dir = self.hotspot_dl_path / "models"
 
@@ -249,6 +254,66 @@ class HotspotPredictor:
         self._dl_loaded = True
         return self._dl_models
 
+    def _load_hotspot_dl_module(self) -> Dict[str, Any]:
+        config_path = self.hotspot_dl_path / "config.py"
+        model_path = self.hotspot_dl_path / "model.py"
+
+        if not config_path.exists() or not model_path.exists():
+            raise ImportError(f"hotspot-prediction源码不存在: {self.hotspot_dl_path}")
+
+        config_spec = importlib.util.spec_from_file_location(
+            "_hotspot_prediction_config",
+            config_path,
+        )
+        model_spec = importlib.util.spec_from_file_location(
+            "_hotspot_prediction_model",
+            model_path,
+        )
+        if config_spec is None or config_spec.loader is None:
+            raise ImportError(f"无法加载hotspot配置: {config_path}")
+        if model_spec is None or model_spec.loader is None:
+            raise ImportError(f"无法加载hotspot模型: {model_path}")
+
+        config_module = importlib.util.module_from_spec(config_spec)
+        model_module = importlib.util.module_from_spec(model_spec)
+        original_config = sys.modules.get("config")
+        original_path = list(sys.path)
+
+        try:
+            config_spec.loader.exec_module(config_module)
+            sys.modules["config"] = config_module
+            if str(self.hotspot_dl_path) not in sys.path:
+                sys.path.insert(0, str(self.hotspot_dl_path))
+            model_spec.loader.exec_module(model_module)
+        finally:
+            if original_config is None:
+                sys.modules.pop("config", None)
+            else:
+                sys.modules["config"] = original_config
+            sys.path[:] = original_path
+
+        required = [
+            "INPUT_DIM",
+            "HIDDEN_DIM",
+            "NUM_HEADS",
+            "NUM_LAYERS",
+            "DROPOUT",
+        ]
+        missing = [name for name in required if not hasattr(config_module, name)]
+        if missing:
+            raise ImportError(f"hotspot配置缺少字段: {', '.join(missing)}")
+        if not hasattr(model_module, "PPIHotspotGAT"):
+            raise ImportError("hotspot模型缺少PPIHotspotGAT")
+
+        return {
+            "PPIHotspotGAT": model_module.PPIHotspotGAT,
+            "INPUT_DIM": config_module.INPUT_DIM,
+            "HIDDEN_DIM": config_module.HIDDEN_DIM,
+            "NUM_HEADS": config_module.NUM_HEADS,
+            "NUM_LAYERS": config_module.NUM_LAYERS,
+            "DROPOUT": config_module.DROPOUT,
+        }
+
     def _try_install_dgl_cpu(self):
         try:
             import subprocess
@@ -298,9 +363,10 @@ class HotspotPredictor:
             print(f"[ESM] 正在加载: {model_name} (CPU推理)...")
 
             device = torch.device('cpu')
+            load_kwargs = {"local_files_only": True}
 
-            tokenizer = AutoTokenizer.from_pretrained(model_name)
-            model = AutoModel.from_pretrained(model_name).to(device)
+            tokenizer = AutoTokenizer.from_pretrained(model_name, **load_kwargs)
+            model = AutoModel.from_pretrained(model_name, **load_kwargs).to(device)
             model.eval()
 
             self._esm_model = {
