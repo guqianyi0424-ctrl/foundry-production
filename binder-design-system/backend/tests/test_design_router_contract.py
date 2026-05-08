@@ -1,0 +1,96 @@
+import asyncio
+
+from schemas.domain import AdapterResult, PipelineResult
+
+
+class FakeHotspotService:
+    def predict(self, pdb_content, top_k=5):
+        return AdapterResult(
+            success=True,
+            data={
+                "hotspots_detail": [
+                    {
+                        "chain": "A",
+                        "residue_id": 10,
+                        "residue_name": "TYR",
+                        "score": 0.9,
+                        "label": "A10",
+                    }
+                ],
+                "num_hotspots": 1,
+                "method": "rule",
+                "model_loaded": False,
+                "total_residues": 100,
+            },
+        )
+
+
+class FakePipelineService:
+    def run_pipeline(self, pdb_content, hotspots, binder_length, job_id, user_id=None):
+        return PipelineResult(
+            job_id=job_id,
+            experiment_id="exp_1",
+            status="completed",
+            rfd3=AdapterResult(
+                success=True,
+                data={"success": True, "designs": [], "first_backbone_pdb": "ATOM"},
+            ),
+            mpnn=AdapterResult(
+                success=True,
+                data={"success": True, "sequences": [], "first_sequence_pdb": "ATOM"},
+            ),
+            rf3=AdapterResult(
+                success=True,
+                data={"success": True, "avg_plddt": 90.0, "rmsd": 1.0, "passed": True},
+            ),
+        )
+
+
+class FakeServices:
+    hotspot_prediction = FakeHotspotService()
+    pipeline = FakePipelineService()
+
+
+def patch_services(monkeypatch):
+    import routers.design as design_router
+
+    monkeypatch.setattr(design_router, "get_design_services", lambda: FakeServices())
+    return design_router
+
+
+def test_predict_hotspot_contract(monkeypatch):
+    design_router = patch_services(monkeypatch)
+
+    data = asyncio.run(
+        design_router.predict_hotspot(
+            design_router.HotspotRequest(pdb_content="ATOM")
+        )
+    )
+
+    assert data["hotspots"] == [
+        {"chain": "A", "residue": 10, "residue_name": "TYR", "score": 0.9, "label": "A10"}
+    ]
+    assert data["num_hotspots"] == 1
+    assert data["method"] == "rule"
+    assert data["model_loaded"] is False
+    assert data["total_residues"] == 100
+
+
+def test_run_pipeline_contract(monkeypatch):
+    design_router = patch_services(monkeypatch)
+
+    data = asyncio.run(
+        design_router.run_pipeline(
+            design_router.PipelineRequest(
+                pdb_content="ATOM",
+                hotspots=[{"chain": "A", "residue": 10}],
+                binder_length=80,
+            )
+        )
+    )
+
+    assert data["experiment_id"] == "exp_1"
+    assert data["status"] == "completed"
+    assert data["rfd3_results"]["success"] is True
+    assert data["mpnn_results"]["success"] is True
+    assert data["rf3_results"]["success"] is True

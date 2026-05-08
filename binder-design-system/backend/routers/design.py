@@ -1,25 +1,16 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import List, Optional
-import os
-import sys
 import time
 import uuid
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "app"))
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-
-from utils.hotspot_predictor import HotspotPredictor
-from utils.rfd3_runner import RFD3Runner
-from utils.mpnn_runner import MPNNRunner
-from utils.rf3_runner import RF3Runner
 from database import SessionLocal, Experiment, ExperimentDesign
 from routers.auth import get_current_user
 from logger import logger, record_task
+from schemas.domain import RFD3JobConfig
+from services.factory import get_design_services
 
 router = APIRouter()
-
-predictor = HotspotPredictor(top_k=5)
 
 
 class HotspotRequest(BaseModel):
@@ -121,8 +112,11 @@ def _save_designs(experiment_id: str, designs: list):
 async def predict_hotspot(req: HotspotRequest):
     start = time.time()
     try:
-        result = predictor.predict_hotspots(req.pdb_content, top_k=5)
-        hotspots_detail = result.get("hotspots_detail", [])
+        result = get_design_services().hotspot_prediction.predict(req.pdb_content, top_k=5)
+        if not result.success:
+            raise RuntimeError(result.message or result.raw_error or "热点预测失败")
+        payload = result.data or {}
+        hotspots_detail = payload.get("hotspots_detail", [])
         duration = time.time() - start
         record_task("predict_hotspot", "success", duration)
         return {
@@ -136,10 +130,10 @@ async def predict_hotspot(req: HotspotRequest):
                 }
                 for h in hotspots_detail
             ],
-            "num_hotspots": result.get("num_hotspots", len(hotspots_detail)),
-            "method": result.get("method", "unknown"),
-            "model_loaded": result.get("model_loaded", False),
-            "total_residues": result.get("total_residues", 0),
+            "num_hotspots": payload.get("num_hotspots", len(hotspots_detail)),
+            "method": payload.get("method", "unknown"),
+            "model_loaded": payload.get("model_loaded", False),
+            "total_residues": payload.get("total_residues", 0),
         }
     except Exception as e:
         duration = time.time() - start
@@ -151,7 +145,6 @@ async def predict_hotspot(req: HotspotRequest):
 async def run_rfd3(req: RFD3Request):
     start = time.time()
     try:
-        runner = RFD3Runner()
         job_id = f"rfd3_{int(time.time())}"
         config = {
             "target": req.target,
@@ -162,17 +155,23 @@ async def run_rfd3(req: RFD3Request):
             "diffusion_batch_size": req.diffusion_batch_size,
             "n_batches": req.n_batches,
         }
-        result = runner.run_rfd3(
-            pdb_content=req.pdb_content,
-            target=req.target,
-            hotspots=req.hotspots,
-            binder_length=req.binder_length,
-            length_min=req.length_min,
-            length_max=req.length_max,
-            diffusion_batch_size=req.diffusion_batch_size,
-            n_batches=req.n_batches,
-            job_id=job_id,
+        adapter_result = get_design_services().rfd3.run(
+            RFD3JobConfig(
+                pdb_content=req.pdb_content,
+                target=req.target,
+                hotspots=req.hotspots or [],
+                binder_length=req.binder_length,
+                length_min=req.length_min,
+                length_max=req.length_max,
+                diffusion_batch_size=req.diffusion_batch_size,
+                n_batches=req.n_batches,
+                job_id=job_id,
+            )
         )
+        result = adapter_result.data or {
+            "success": False,
+            "error": adapter_result.message or adapter_result.raw_error,
+        }
         duration = time.time() - start
         record_task("run_rfd3", "success", duration)
         _save_experiment_step(req.experiment_id, "rfd3", result, config)
@@ -199,14 +198,13 @@ async def run_rfd3(req: RFD3Request):
 async def run_mpnn(req: MPNNRequest):
     start = time.time()
     try:
-        runner = MPNNRunner()
         job_id = f"mpnn_{int(time.time())}"
         config = {
             "batch_size": req.batch_size,
             "fixed_chains": req.fixed_chains,
             "model_type": req.model_type,
         }
-        result = runner.run_mpnn(
+        adapter_result = get_design_services().mpnn.run(
             backbone_pdb_content=req.backbone_pdb_content,
             backbone_pdb_path=req.backbone_pdb_path,
             batch_size=req.batch_size,
@@ -214,6 +212,10 @@ async def run_mpnn(req: MPNNRequest):
             model_type=req.model_type,
             job_id=job_id,
         )
+        result = adapter_result.data or {
+            "success": False,
+            "error": adapter_result.message or adapter_result.raw_error,
+        }
         duration = time.time() - start
         record_task("run_mpnn", "success", duration)
         _save_experiment_step(req.experiment_id, "mpnn", result, config)
@@ -240,15 +242,18 @@ async def run_mpnn(req: MPNNRequest):
 async def run_rf3(req: RF3Request):
     start = time.time()
     try:
-        runner = RF3Runner()
         job_id = f"rf3_{int(time.time())}"
         config = {"example_id": req.example_id}
-        result = runner.run_rf3(
+        adapter_result = get_design_services().rf3.run(
             mpnn_pdb_content=req.mpnn_pdb_content,
             rfd3_pdb_content=req.rfd3_pdb_content,
             example_id=req.example_id,
             job_id=job_id,
         )
+        result = adapter_result.data or {
+            "success": False,
+            "error": adapter_result.message or adapter_result.raw_error,
+        }
         duration = time.time() - start
         record_task("run_rf3", "success", duration)
         _save_experiment_step(req.experiment_id, "rf3", result, config)
@@ -278,73 +283,27 @@ async def run_pipeline(req: PipelineRequest):
     start = time.time()
 
     try:
-        experiment_id = str(uuid.uuid4())
-        db = SessionLocal()
-        exp = Experiment(
-            id=experiment_id,
-            name=f"Pipeline_{time.strftime('%Y%m%d_%H%M%S')}",
-            status="running",
-            input_pdb=req.pdb_content,
-            hotspots=req.hotspots,
-            rfd3_config={"binder_length": req.binder_length},
-        )
-        db.add(exp)
-        db.commit()
-        db.close()
-
-        rfd3_runner = RFD3Runner()
-        rfd3_results = rfd3_runner.run_rfd3(
+        result = get_design_services().pipeline.run_pipeline(
             pdb_content=req.pdb_content,
-            hotspots=[f"{h['chain']}{h['residue']}" for h in req.hotspots],
+            hotspots=req.hotspots,
             binder_length=req.binder_length,
             job_id=job_id,
         )
-        _save_experiment_step(experiment_id, "rfd3", rfd3_results)
-
-        mpnn_results = None
-        if rfd3_results.get("success") and rfd3_results.get("first_backbone_pdb"):
-            mpnn_runner = MPNNRunner()
-            target_chains = list(set(h["chain"] for h in req.hotspots))
-            mpnn_results = mpnn_runner.run_mpnn(
-                backbone_pdb_content=rfd3_results["first_backbone_pdb"],
-                batch_size=10,
-                fixed_chains=target_chains,
-                job_id=job_id,
-            )
-            _save_experiment_step(experiment_id, "mpnn", mpnn_results)
-
-        rf3_results = None
-        if mpnn_results and mpnn_results.get("success") and mpnn_results.get("first_sequence_pdb"):
-            rf3_runner = RF3Runner()
-            rf3_results = rf3_runner.run(
-                pdb_content=mpnn_results["first_sequence_pdb"],
-                example_id=f"binder_{job_id}",
-                job_id=job_id,
-            )
-            _save_experiment_step(experiment_id, "rf3", rf3_results)
-
         duration = time.time() - start
-        record_task("run_pipeline", "success", duration)
-
-        db = SessionLocal()
-        try:
-            exp = db.query(Experiment).filter(Experiment.id == experiment_id).first()
-            if exp:
-                exp.duration_seconds = duration
-                exp.status = "completed"
-                from datetime import datetime
-                exp.updated_at = datetime.utcnow()
-                db.commit()
-        finally:
-            db.close()
+        record_task(
+            "run_pipeline",
+            "success" if result.status == "completed" else "failed",
+            duration,
+        )
 
         return {
-            "job_id": job_id,
-            "experiment_id": experiment_id,
-            "status": "completed",
-            "rfd3_results": rfd3_results,
-            "mpnn_results": mpnn_results,
-            "rf3_results": rf3_results,
+            "job_id": result.job_id,
+            "experiment_id": result.experiment_id,
+            "status": result.status,
+            "failed_step": result.failed_step,
+            "rfd3_results": result.rfd3.data if result.rfd3 else None,
+            "mpnn_results": result.mpnn.data if result.mpnn else None,
+            "rf3_results": result.rf3.data if result.rf3 else None,
         }
     except Exception as e:
         duration = time.time() - start
