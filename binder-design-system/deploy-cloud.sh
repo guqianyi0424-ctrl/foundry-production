@@ -2,17 +2,16 @@
 set -e
 
 echo "=========================================="
-echo "  蛋白质Binder设计系统 - 云平台一键部署"
+echo "  DeepBinder 蛋白质Binder设计系统 - 云平台一键部署"
 echo "  RFD3 + MPNN + RF3 | GPU推理 | React+FastAPI"
 echo "=========================================="
 
 # ==================== 配置 ====================
 PROJECT_DIR="/workspace/foundry-production"
 BINDER_DIR="$PROJECT_DIR/binder-design-system"
-CONDA_ENV="foundry"
+CONDA_ENV="deepbinder"
 CHECKPOINT_DIR="$PROJECT_DIR/foundry-production/checkpoints"
 BACKEND_PORT=8000
-FRONTEND_PORT=3000
 
 # ==================== 1. 系统依赖 ====================
 echo ""
@@ -44,9 +43,9 @@ fi
 eval "$(conda shell.bash hook 2>/dev/null)"
 echo "  ✅ Conda $(conda --version 2>/dev/null || echo 'OK')"
 
-# ==================== 2. 创建 foundry 环境 ====================
+# ==================== 2. 创建 deepbinder 环境 ====================
 echo ""
-echo "[2/8] 创建 foundry 环境 (Python 3.12)..."
+echo "[2/8] 创建 deepbinder 环境 (Python 3.12)..."
 
 if ! conda env list 2>/dev/null | grep -q "^$CONDA_ENV "; then
     conda create -n $CONDA_ENV python=3.12 -y -q
@@ -125,7 +124,7 @@ if [ -d "$CHECKPOINT_DIR" ] && ls "$CHECKPOINT_DIR"/*.ckpt "$CHECKPOINT_DIR"/*.p
 else
     echo "  ⚠️ 未找到模型权重，请确认权重文件位于: $CHECKPOINT_DIR"
     echo "  如需下载，请手动运行:"
-    echo "    conda activate foundry"
+    echo "    conda activate deepbinder"
     echo "    foundry install rfd3 ligandmpnn rf3 --checkpoint-dir $CHECKPOINT_DIR"
 fi
 
@@ -176,7 +175,7 @@ pkill -f "nginx" 2>/dev/null || true
 sleep 1
 
 # 配置 Nginx
-cat > /tmp/odesign-nginx.conf << 'EOF'
+cat > /tmp/deepbinder-nginx.conf << 'EOF'
 server {
     listen 80;
     server_name _;
@@ -197,19 +196,20 @@ server {
 }
 EOF
 
-sudo cp /tmp/odesign-nginx.conf /etc/nginx/sites-available/odesign 2>/dev/null || true
-sudo ln -sf /etc/nginx/sites-available/odesign /etc/nginx/sites-enabled/odesign 2>/dev/null || true
+sudo cp /tmp/deepbinder-nginx.conf /etc/nginx/sites-available/deepbinder 2>/dev/null || true
+sudo ln -sf /etc/nginx/sites-available/deepbinder /etc/nginx/sites-enabled/deepbinder 2>/dev/null || true
 sudo rm -f /etc/nginx/sites-enabled/default 2>/dev/null || true
 sudo nginx -t 2>/dev/null && sudo nginx 2>/dev/null || true
 
 # 启动后端
+cd "$BINDER_DIR/backend"
 export PYTHONPATH="$BINDER_DIR/backend:$BINDER_DIR"
 export FOUNDRY_CHECKPOINT_DIRS="$CHECKPOINT_DIR"
-nohup conda run --no-banner -n foundry uvicorn main:app \
+nohup conda run --no-banner -n deepbinder uvicorn main:app \
     --host 0.0.0.0 \
     --port $BACKEND_PORT \
     --timeout-keep-alive 3600 \
-    > /tmp/odesign-backend.log 2>&1 &
+    > /tmp/deepbinder-backend.log 2>&1 &
 
 BACKEND_PID=$!
 echo "  后端 PID: $BACKEND_PID (端口 $BACKEND_PORT)"
@@ -222,7 +222,7 @@ HEALTH=$(curl -s http://localhost:$BACKEND_PORT/health 2>/dev/null || echo "fail
 if [[ "$HEALTH" == *"ok"* ]]; then
     echo "  ✅ 后端启动成功"
 else
-    echo "  ⚠️ 后端可能未就绪，查看日志: tail -f /tmp/odesign-backend.log"
+    echo "  ⚠️ 后端可能未就绪，查看日志: tail -f /tmp/deepbinder-backend.log"
 fi
 
 echo ""
@@ -232,7 +232,7 @@ echo "=========================================="
 echo ""
 echo "  访问地址: http://$(hostname -I 2>/dev/null | awk '{print $1}' || echo 'localhost')"
 echo "  后端API:  http://localhost:$BACKEND_PORT/health"
-echo "  后端日志: tail -f /tmp/odesign-backend.log"
+echo "  后端日志: tail -f /tmp/deepbinder-backend.log"
 echo ""
 echo "  GPU状态:"
 python -c "

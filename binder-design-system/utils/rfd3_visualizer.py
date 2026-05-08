@@ -1,5 +1,5 @@
 """
-RFD3 可视化模块 - ODesign风格
+RFD3 可视化模块 - DeepBinder风格
 支持: 主链3D展示、pLDDT热图、设计排名卡片、结构叠加对比
 """
 import base64

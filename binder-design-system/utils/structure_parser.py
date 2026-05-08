@@ -76,10 +76,10 @@ class StructureParser:
     
     def parse_uploaded_file(self, uploaded_file) -> struc.AtomArray:
         """
-        解析Streamlit上传的文件
+        解析上传文件
         
         Args:
-            uploaded_file: Streamlit UploadedFile对象
+            uploaded_file: 上传文件对象
         
         Returns:
             AtomArray对象

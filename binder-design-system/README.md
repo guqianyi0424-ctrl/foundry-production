@@ -1,85 +1,66 @@
-# 基于深度学习的蛋白质Binder生成系统
+# DeepBinder 蛋白质 Binder 生成系统
 
-## 项目简介
+DeepBinder 是基于 React + FastAPI 的蛋白质 Binder 智能设计平台，整合热点残基预测、RFD3 骨架生成、MPNN 序列设计和 RF3 结构验证流程。
 
-本系统整合了多个深度学习模型，实现蛋白质Binder的自动化设计与验证。
+## 技术栈
 
-### 核心功能
-
-- **热点残基预测**: 基于机器学习和深度学习的热点残基识别
-- **Binder骨架生成**: 使用RFD3生成Binder骨架结构
-- **序列设计**: 使用MPNN设计Binder氨基酸序列
-- **结构验证**: 使用RF3预测并验证设计结构
-- **可视化展示**: 3D结构可视化和交互式界面
-
-### 技术栈
-
-- **前端**: Streamlit
-- **后端**: Python 3.11
-- **深度学习**: PyTorch, rc-foundry
-- **可视化**: py3Dmol
-- **存储**: 腾讯云COS
+- 前端: React 18, Vite, TypeScript, Zustand, Molstar
+- 后端: FastAPI, Python 3.12
+- 模型运行: PyTorch, rc-foundry, RFD3, MPNN, RF3
+- 部署: conda + Nginx
 
 ## 项目结构
 
-```
+```text
 binder-design-system/
-├── app/                    # Streamlit应用
-│   ├── main.py            # 主应用
-│   └── pages/             # 多页面应用
-├── utils/                  # 工具模块
-│   ├── structure_parser.py # 结构解析
-│   ├── hotspot_predictor.py # 热点预测
-│   └── cos_storage.py     # COS存储管理
-├── models/                 # 模型权重
-├── config/                 # 配置文件
-│   └── settings.py        # 系统配置
-├── data/                   # 数据文件
-├── outputs/                # 输出结果
-├── requirements.txt        # 依赖列表
-└── README.md              # 项目说明
+├── backend/          # FastAPI API、服务层、测试
+├── frontend/         # React 前端
+├── utils/            # 结构解析、模型 runner、可视化工具
+├── config/           # 模型路径与运行配置
+├── data/             # 示例数据
+├── outputs/          # 设计输出
+├── environment.yml   # conda 环境
+├── deploy-cloud.sh   # 云服务器部署脚本
+└── deploy.md         # 部署说明
 ```
 
-## 快速开始
+## 本地开发
 
-### 1. 安装依赖
+后端：
 
 ```bash
-pip install -r requirements.txt
+cd binder-design-system/backend
+python -m uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
-### 2. 下载模型权重
+前端：
 
 ```bash
-foundry install rfd3 ligandmpnn rf3
+cd binder-design-system/frontend
+npm install
+npm run dev
 ```
 
-### 3. 运行应用
+## 生产构建
 
 ```bash
-streamlit run app/main.py
+cd binder-design-system
+conda env create -f environment.yml
+conda activate deepbinder
+cd frontend
+npm install
+npm run build
+cd ../backend
+python -m uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
-## 部署说明
+更多部署细节见 [deploy.md](deploy.md)。
 
-详见 [deploy.md](deploy.md)
+## 验证
 
-## 开发进度
-
-- [x] 项目结构搭建
-- [x] 基础Streamlit应用
-- [ ] 文件上传与解析
-- [ ] 3D结构可视化
-- [ ] 热点残基预测集成
-- [ ] RFD3骨架生成
-- [ ] MPNN序列设计
-- [ ] RF3结构验证
-- [ ] 结果评估与导出
-
-## 作者
-
-本科毕业设计项目
-
-## 许可证
-
-MIT License
+```bash
+cd binder-design-system/backend
+python -m pytest tests -v
+cd ../frontend
+npm run build
+```

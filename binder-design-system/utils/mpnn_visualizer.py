@@ -1,5 +1,5 @@
 """
-MPNN 可视化模块 - ODesign风格
+MPNN 可视化模块 - DeepBinder风格
 支持: 序列对比展示、得分分布图、序列logo风格展示
 """
 import json

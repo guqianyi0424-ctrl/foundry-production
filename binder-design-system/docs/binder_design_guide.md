@@ -26,9 +26,9 @@
 - **生物技术**：蛋白质纯化、生物传感器、诊断试剂
 - **合成生物学**：蛋白质回路设计、信号通路调控
 
-### 1.2 ODesign 设计流程
+### 1.2 DeepBinder 设计流程
 
-ODesign 采用端到端的计算设计流程：
+DeepBinder 采用端到端的计算设计流程：
 
 ```
 靶标蛋白 → 热点预测(DL) → RFD3(主链生成) → MPNN(序列设计) → RF3(结构验证) → RMSD筛选
@@ -108,7 +108,7 @@ ODesign 采用端到端的计算设计流程：
 
 ### 3.1 文件格式
 
-ODesign 支持以下格式：
+DeepBinder 支持以下格式：
 
 - **PDB** (.pdb) - 推荐格式，最广泛兼容
 - **CIF** (.cif) - mmCIF格式，支持大分子复合物
@@ -156,7 +156,7 @@ save target_clean.pdb
 
 ### 4.2 预测方法
 
-ODesign 提供两种方式确定热点残基：
+DeepBinder 提供两种方式确定热点残基：
 
 #### 4.2.1 DL模型自动预测
 
@@ -413,4 +413,4 @@ RoseTTAFold3 (RF3) 是三轨神经网络结构预测器，用于验证设计的B
 
 ---
 
-*ODesign 蛋白质Binder设计系统 | 版本 1.0*
+*DeepBinder 蛋白质Binder设计系统 | 版本 1.0*

@@ -1,5 +1,5 @@
 """
-RF3 可视化模块 - ODesign风格
+RF3 可视化模块 - DeepBinder风格
 支持: pLDDT分布图、PAE热力图、RMSD残基着色、通过/未通过状态卡片
 """
 import base64
