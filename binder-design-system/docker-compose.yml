@@ -16,7 +16,7 @@ services:
       - ./data:/app/data
       - checkpoints:/opt/checkpoints
     environment:
-      - PYTHONPATH=/app
+      - PYTHONPATH=/app/backend:/app
       - NVIDIA_VISIBLE_DEVICES=all
       - FOUNDRY_CHECKPOINT_DIRS=/opt/checkpoints
     restart: unless-stopped

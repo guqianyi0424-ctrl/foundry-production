@@ -25,3 +25,12 @@ def test_foundry_bootstrap_is_the_allowed_source_path_boundary():
     assert "models/rfd3/src" in text
     assert "models/mpnn/src" in text
     assert "models/rf3/src" in text
+
+
+def test_utils_package_init_does_not_import_model_runtime_modules():
+    text = (APP_ROOT / "utils" / "__init__.py").read_text()
+
+    assert "hotspot_predictor" not in text
+    assert "rfd3_runner" not in text
+    assert "mpnn_runner" not in text
+    assert "rf3_runner" not in text
