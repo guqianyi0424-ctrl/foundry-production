@@ -14,3 +14,19 @@ def test_settings_exposes_project_paths():
     assert settings.paths.ppihotspotid_root == settings.paths.repo_root / "ppihotspotid-main"
     assert settings.paths.output_root == settings.paths.app_root / "outputs"
     assert isinstance(settings.paths.output_root, Path)
+
+
+def test_runtime_settings_read_environment(monkeypatch):
+    monkeypatch.setenv("ODESIGN_FOUNDRY_MODE", "source")
+    monkeypatch.setenv("ODESIGN_ALLOW_MOCK", "0")
+    monkeypatch.setenv("ODESIGN_FOUNDRY_ENV", "foundry-prod")
+    monkeypatch.setenv("ODESIGN_MODEL_TIMEOUT_SECONDS", "45")
+
+    from config.settings import build_settings
+
+    settings = build_settings()
+
+    assert settings.runtime.foundry_mode == "source"
+    assert settings.runtime.allow_mock is False
+    assert settings.runtime.foundry_env == "foundry-prod"
+    assert settings.runtime.model_timeout_seconds == 45
