@@ -11,7 +11,7 @@ from database import init_db
 from logger import logger
 
 app = FastAPI(
-    title="ODesign API",
+    title="DeepBinder API",
     description="蛋白质Binder设计系统后端API - 支持用户认证、实验记录管理、系统监控",
     version="2.0.0",
 )
@@ -46,7 +46,7 @@ async def startup():
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "service": "odesign-api", "version": "2.0.0"}
+    return {"status": "ok", "service": "deepbinder-api", "version": "2.0.0"}
 
 
 if os.path.exists(frontend_dist):

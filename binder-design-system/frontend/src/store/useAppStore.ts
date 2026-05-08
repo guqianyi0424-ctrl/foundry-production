@@ -2,6 +2,11 @@ import { create } from 'zustand'
 import type { ChainInfo, HotspotResidue, RFD3Design, MPNNResult, RF3Result } from '@/types'
 import type { RFD3Response, MPNNResponse, RF3Response } from '@/api'
 
+const AUTH_TOKEN_KEY = 'deepbinder_token'
+const AUTH_USER_KEY = 'deepbinder_user'
+const LEGACY_AUTH_TOKEN_KEY = 'odesign_token'
+const LEGACY_AUTH_USER_KEY = 'odesign_user'
+
 export interface ResidueRange {
   chain: string;
   startResSeq: number;
@@ -88,8 +93,16 @@ interface AppState {
 
 const getInitialAuth = () => {
   try {
-    const token = localStorage.getItem('odesign_token')
-    const user = localStorage.getItem('odesign_user')
+    const token = localStorage.getItem(AUTH_TOKEN_KEY) || localStorage.getItem(LEGACY_AUTH_TOKEN_KEY)
+    const user = localStorage.getItem(AUTH_USER_KEY) || localStorage.getItem(LEGACY_AUTH_USER_KEY)
+
+    if (token && !localStorage.getItem(AUTH_TOKEN_KEY)) {
+      localStorage.setItem(AUTH_TOKEN_KEY, token)
+    }
+    if (user && !localStorage.getItem(AUTH_USER_KEY)) {
+      localStorage.setItem(AUTH_USER_KEY, user)
+    }
+
     return {
       token: token || null,
       user: user ? JSON.parse(user) : null,
@@ -137,13 +150,17 @@ export const useAppStore = create<AppState>((set, get) => ({
   setCurrentPage: (page) => set({ currentPage: page }),
 
   setAuth: (token, user) => {
-    localStorage.setItem('odesign_token', token)
-    localStorage.setItem('odesign_user', JSON.stringify(user))
+    localStorage.setItem(AUTH_TOKEN_KEY, token)
+    localStorage.setItem(AUTH_USER_KEY, JSON.stringify(user))
+    localStorage.removeItem(LEGACY_AUTH_TOKEN_KEY)
+    localStorage.removeItem(LEGACY_AUTH_USER_KEY)
     set({ token, user })
   },
   clearAuth: () => {
-    localStorage.removeItem('odesign_token')
-    localStorage.removeItem('odesign_user')
+    localStorage.removeItem(AUTH_TOKEN_KEY)
+    localStorage.removeItem(AUTH_USER_KEY)
+    localStorage.removeItem(LEGACY_AUTH_TOKEN_KEY)
+    localStorage.removeItem(LEGACY_AUTH_USER_KEY)
     set({ token: null, user: null })
   },
 

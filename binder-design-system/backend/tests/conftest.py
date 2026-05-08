@@ -12,5 +12,5 @@ def pytest_configure():
     for path in (str(REPO_ROOT), str(APP_ROOT), str(BACKEND_ROOT)):
         if path not in sys.path:
             sys.path.insert(0, path)
-    os.environ.setdefault("ODESIGN_ALLOW_MOCK", "1")
-    os.environ.setdefault("ODESIGN_FOUNDRY_MODE", "mock")
+    os.environ.setdefault("DEEPBINDER_ALLOW_MOCK", "1")
+    os.environ.setdefault("DEEPBINDER_FOUNDRY_MODE", "mock")

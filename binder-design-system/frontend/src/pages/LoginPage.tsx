@@ -48,7 +48,7 @@ export function LoginModal() {
           </button>
 
           <h2 className="text-xl font-bold text-center text-gray-900 mb-6">
-            {mode === 'login' ? '登录 ODesign' : '注册 ODesign'}
+            {mode === 'login' ? '登录 DeepBinder' : '注册 DeepBinder'}
           </h2>
 
           {error && (

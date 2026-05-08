@@ -16,7 +16,7 @@ function App() {
   const experimentId = experimentMatch ? experimentMatch[1] : null
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-odesign-bg">
+    <div className="flex h-screen w-screen overflow-hidden bg-deepbinder-bg">
       <Sidebar />
       <main className="flex-1 overflow-auto relative">
         {currentPage === '新建设计' && <NewDesignPage />}

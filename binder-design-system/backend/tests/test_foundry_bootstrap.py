@@ -2,8 +2,8 @@ def test_bootstrap_returns_mock_mode_when_mock_forced(monkeypatch):
     from adapters.foundry_bootstrap import FoundryBootstrap
     from config.settings import build_settings
 
-    monkeypatch.setenv("ODESIGN_FOUNDRY_MODE", "mock")
-    monkeypatch.setenv("ODESIGN_ALLOW_MOCK", "1")
+    monkeypatch.setenv("DEEPBINDER_FOUNDRY_MODE", "mock")
+    monkeypatch.setenv("DEEPBINDER_ALLOW_MOCK", "1")
 
     settings = build_settings()
     bootstrap = FoundryBootstrap(settings)
@@ -19,8 +19,8 @@ def test_bootstrap_rejects_mock_when_disabled(monkeypatch):
     from adapters.foundry_bootstrap import FoundryBootstrap
     from config.settings import build_settings
 
-    monkeypatch.setenv("ODESIGN_FOUNDRY_MODE", "mock")
-    monkeypatch.setenv("ODESIGN_ALLOW_MOCK", "0")
+    monkeypatch.setenv("DEEPBINDER_FOUNDRY_MODE", "mock")
+    monkeypatch.setenv("DEEPBINDER_ALLOW_MOCK", "0")
 
     settings = build_settings()
     bootstrap = FoundryBootstrap(settings)

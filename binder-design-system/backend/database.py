@@ -5,7 +5,7 @@ import os
 
 DATABASE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 os.makedirs(DATABASE_DIR, exist_ok=True)
-DATABASE_URL = f"sqlite:///{os.path.join(DATABASE_DIR, 'odesign.db')}"
+DATABASE_URL = f"sqlite:///{os.path.join(DATABASE_DIR, 'deepbinder.db')}"
 
 engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -103,7 +103,7 @@ def init_db():
             admin = User(
                 id="admin_001",
                 username="admin",
-                email="admin@odesign.local",
+                email="admin@deepbinder.local",
                 hashed_password=get_password_hash("admin123"),
                 role="admin",
             )

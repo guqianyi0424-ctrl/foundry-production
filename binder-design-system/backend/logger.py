@@ -24,7 +24,7 @@ class StructuredLogger:
         self.logger.warning(json.dumps({"level": "warning", "msg": msg, "ts": datetime.utcnow().isoformat(), **kwargs}, default=str, ensure_ascii=False))
 
 
-logger = StructuredLogger("odesign")
+logger = StructuredLogger("deepbinder")
 
 
 def track_performance(func):

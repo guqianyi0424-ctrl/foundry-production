@@ -1,12 +1,17 @@
 import axios from 'axios'
 
+const AUTH_TOKEN_KEY = 'deepbinder_token'
+const AUTH_USER_KEY = 'deepbinder_user'
+const LEGACY_AUTH_TOKEN_KEY = 'odesign_token'
+const LEGACY_AUTH_USER_KEY = 'odesign_user'
+
 const api = axios.create({
   baseURL: '/api',
   timeout: 1800000,
 })
 
 api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('odesign_token')
+  const token = localStorage.getItem(AUTH_TOKEN_KEY) || localStorage.getItem(LEGACY_AUTH_TOKEN_KEY)
   if (token) {
     config.headers.Authorization = `Bearer ${token}`
   }
@@ -17,8 +22,10 @@ api.interceptors.response.use(
   (res) => res,
   (err) => {
     if (err.response?.status === 401) {
-      localStorage.removeItem('odesign_token')
-      localStorage.removeItem('odesign_user')
+      localStorage.removeItem(AUTH_TOKEN_KEY)
+      localStorage.removeItem(AUTH_USER_KEY)
+      localStorage.removeItem(LEGACY_AUTH_TOKEN_KEY)
+      localStorage.removeItem(LEGACY_AUTH_USER_KEY)
     }
     return Promise.reject(err)
   }

@@ -6,11 +6,12 @@ from pydantic import BaseModel
 from jose import JWTError, jwt
 import bcrypt
 from sqlalchemy.orm import Session
+import os
 import uuid
 
 from database import get_db, User, AuditLog
 
-SECRET_KEY = "odesign_secret_key_2024_change_in_production"
+SECRET_KEY = os.getenv("DEEPBINDER_SECRET_KEY", "deepbinder_secret_key_2026_change_in_production")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 1440
 

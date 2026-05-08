@@ -19,7 +19,7 @@ export default {
           800: '#3730a3',
           900: '#312e81',
         },
-        odesign: {
+        deepbinder: {
           bg: '#f5f7fa',
           sidebar: '#ffffff',
           border: '#e2e8f0',

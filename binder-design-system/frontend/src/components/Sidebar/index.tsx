@@ -19,9 +19,9 @@ export function Sidebar() {
     <aside className="w-[200px] min-w-[200px] bg-white border-r border-gray-200 flex flex-col h-full shadow-sm">
       <div className="flex items-center gap-2 px-5 py-4 border-b border-gray-100">
         <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-primary-500 to-primary-700 flex items-center justify-center text-white font-bold text-sm">
-          O
+          D
         </div>
-        <span className="font-bold text-lg text-gray-900">ODesign</span>
+        <span className="font-bold text-lg text-gray-900">DeepBinder</span>
       </div>
 
       <nav className="flex-1 py-3 px-3 space-y-1">
@@ -62,7 +62,7 @@ export function Sidebar() {
         ) : (
           <div className="text-xs text-gray-400 text-center">未登录</div>
         )}
-        <div className="text-xs text-gray-400 text-center mt-2">ODesign v2.0</div>
+        <div className="text-xs text-gray-400 text-center mt-2">DeepBinder v2.0</div>
       </div>
     </aside>
   )

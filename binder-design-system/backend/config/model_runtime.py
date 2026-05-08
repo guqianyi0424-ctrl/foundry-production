@@ -19,8 +19,8 @@ def _env_bool(name: str, default: bool) -> bool:
 
 def load_runtime_settings() -> ModelRuntimeSettings:
     return ModelRuntimeSettings(
-        foundry_mode=os.getenv("ODESIGN_FOUNDRY_MODE", "auto").strip().lower(),
-        allow_mock=_env_bool("ODESIGN_ALLOW_MOCK", True),
-        foundry_env=os.getenv("ODESIGN_FOUNDRY_ENV", "foundry"),
-        model_timeout_seconds=int(os.getenv("ODESIGN_MODEL_TIMEOUT_SECONDS", "1800")),
+        foundry_mode=os.getenv("DEEPBINDER_FOUNDRY_MODE", "auto").strip().lower(),
+        allow_mock=_env_bool("DEEPBINDER_ALLOW_MOCK", True),
+        foundry_env=os.getenv("DEEPBINDER_FOUNDRY_ENV", "deepbinder"),
+        model_timeout_seconds=int(os.getenv("DEEPBINDER_MODEL_TIMEOUT_SECONDS", "1800")),
     )
