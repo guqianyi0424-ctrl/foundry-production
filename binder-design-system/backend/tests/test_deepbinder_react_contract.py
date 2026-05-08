@@ -36,24 +36,51 @@ def test_frontend_uses_deepbinder_brand_and_storage_keys():
     assert "deepbinder_token" in api
 
 
-def test_hotspot_prediction_updates_sequence_dots_before_confirmation():
+def test_hotspot_prediction_marks_sequence_without_committing_configuration():
     page = read_project_file("frontend/src/pages/NewDesignPage.tsx")
     sequence_viewer = read_project_file("frontend/src/components/SequenceViewer/index.tsx")
+    design_panel = read_project_file("frontend/src/components/DesignPanel/index.tsx")
+    store = read_project_file("frontend/src/store/useAppStore.ts")
 
     prediction_call = "const hotspots = res.hotspots.map(h => ({ chain: h.chain, residue: h.residue, score: h.score }))"
     assert prediction_call in page
-    assert "setSelectedHotspots(hotspots)" in page
-    assert page.index("setSelectedHotspots(hotspots)") < page.index("setPredictionResult(res)")
+    assert "setPredictedHotspots(hotspots)" in page
+    assert "setSelectedHotspots(hotspots)" not in page
+    assert "setPredictedHotspots(hotspots)" in page
+    assert page.index("setPredictedHotspots(hotspots)") < page.index("setPredictionResult(res)")
+    assert "预测热点已在序列下方以红点标记；双击可移除，点击「指定热点」才会写入热点参数框。" in page
+    assert "handleConfirmPrediction" not in page
+    assert "const pendingHotspots = mergeHotspotSelections(predictedHotspots, selectedHotspots)" in page
+    assert "const hotspotStr = pendingHotspots.map(h => `${h.chain}/${h.residue}`).join(', ')" in page
+    assert "hotspots: committedHotspotTokens.length > 0 ? committedHotspotTokens : undefined" in page
+
+    assert "predictedHotspots: HotspotResidue[]" in store
+    assert "setPredictedHotspots: (hotspots: HotspotResidue[]) => void" in store
+    assert "removePredictedHotspot: (chain: string, residue: number) => void" in store
+    assert "set({ selectedRange: range })" in store
+    assert "set({ selectedRange: null, selectedHotspots: [], hotspotInput: '' })" not in store
+    assert "filter(h => h.chain !== range.chain)" not in store
+
+    assert "useEffect" not in design_panel
+    assert "hotspotInput" not in design_panel
 
     assert "seq-hotspot-dot" in sequence_viewer
-    assert "absolute bottom-0.5 left-1/2" in sequence_viewer
+    assert "z-20" in sequence_viewer
     assert "bg-red-500" in sequence_viewer
+    assert "onDoubleClick" in sequence_viewer
+    assert "handleDoubleClick(chain.chain_id, resSeq)" in sequence_viewer
+    assert "removePredictedHotspot(chainId, resSeq)" in sequence_viewer
+    assert "addHotspot({ chain: chainId, residue: r, score: getHotspotScore(chainId, r) ?? 0 })" in sequence_viewer
+    assert "toggleHotspot" not in sequence_viewer
+    assert "预测红点为候选热点，双击可移除；点击「指定热点」写入配置。" in sequence_viewer
 
 
 def test_molstar_keeps_persistent_highlights_separate_from_camera_reset():
     viewer = read_project_file("frontend/src/components/MolstarViewer/index.tsx")
 
-    assert "const highlightLoci = (loci: any, color?: number)" in viewer
+    assert "plugin.managers.structure.selection.clear()" in viewer
+    assert "plugin.managers.structure.selection.fromLoci" in viewer
+    assert "combinedSelectionLoci" in viewer
     assert "highlightLoci(rangeLoci, 0xF59E0B)" in viewer
     assert "highlightLoci(hotspotLoci, 0xEF4444)" in viewer
     assert "highlightLoci(hoverLoci, 0x60A5FA)" in viewer

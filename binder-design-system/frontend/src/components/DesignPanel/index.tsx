@@ -1,4 +1,3 @@
-import { useEffect } from 'react'
 import { useAppStore } from '@/store/useAppStore'
 import { HelpCircle, Dna } from 'lucide-react'
 
@@ -11,9 +10,6 @@ export function DesignPanel({ onOpenRFD3, isRFD3Running }: DesignPanelProps) {
   const rfd3Config = useAppStore((s) => s.rfd3Config)
   const setRfd3Config = useAppStore((s) => s.setRfd3Config)
   const selectedRange = useAppStore((s) => s.selectedRange)
-  const chains = useAppStore((s) => s.chains)
-  const selectedHotspots = useAppStore((s) => s.selectedHotspots)
-  const hotspotInput = useAppStore((s) => s.hotspotInput)
 
   const syncTargetFromRange = () => {
     if (!selectedRange) return
@@ -24,12 +20,6 @@ export function DesignPanel({ onOpenRFD3, isRFD3Running }: DesignPanelProps) {
   if (selectedRange && !rfd3Config.targetStructure) {
     syncTargetFromRange()
   }
-
-  useEffect(() => {
-    if (hotspotInput && hotspotInput !== rfd3Config.hotspots) {
-      setRfd3Config({ hotspots: hotspotInput })
-    }
-  }, [hotspotInput])
 
   const configSummary = () => {
     const cfg = rfd3Config

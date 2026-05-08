@@ -9,7 +9,9 @@ export function MolstarViewer() {
   const hoveredResidue = useAppStore((s) => s.hoveredResidue)
   const selectedRange = useAppStore((s) => s.selectedRange)
   const selectedHotspots = useAppStore((s) => s.selectedHotspots)
+  const predictedHotspots = useAppStore((s) => s.predictedHotspots)
   const [initDone, setInitDone] = useState(false)
+  const [structureVersion, setStructureVersion] = useState(0)
   const pluginRef = useRef<any>(null)
 
   useEffect(() => {
@@ -71,6 +73,7 @@ export function MolstarViewer() {
         const trajectory = await plugin.builders.structure.parseTrajectory(data, 'pdb')
         if (cancelled) return
         await plugin.builders.structure.hierarchy.applyPreset(trajectory, 'default')
+        if (!cancelled) setStructureVersion(version => version + 1)
       } catch (err) {
         console.warn('Load structure failed:', err)
       }
@@ -220,10 +223,21 @@ export function MolstarViewer() {
     const updateHighlights = async () => {
       try {
         plugin.managers.interactivity.lociHighlights.clearHighlights()
+        plugin.managers.structure.selection.clear()
+
+        let combinedSelectionLoci: any = null
 
         const highlightLoci = (loci: any, color?: number) => {
           if (!loci) return
           ;(plugin.managers.interactivity.lociHighlights as any).highlight({ loci, color })
+        }
+
+        const addPersistentSelection = async (loci: any) => {
+          if (!loci) return
+          combinedSelectionLoci = combinedSelectionLoci
+            ? (await import('molstar/lib/mol-model/structure')).StructureElement.Loci.union(combinedSelectionLoci, loci)
+            : loci
+          plugin.managers.structure.selection.fromLoci('add', loci, false)
         }
 
         if (selectedRange) {
@@ -233,13 +247,22 @@ export function MolstarViewer() {
             selectedRange.endResSeq
           )
           highlightLoci(rangeLoci, 0xF59E0B)
+          await addPersistentSelection(rangeLoci)
         }
 
-        if (selectedHotspots.length > 0) {
+        const visibleHotspots = [
+          ...predictedHotspots,
+          ...selectedHotspots.filter(selected => !predictedHotspots.some(predicted =>
+            predicted.chain === selected.chain && predicted.residue === selected.residue
+          )),
+        ]
+
+        if (visibleHotspots.length > 0) {
           const hotspotLoci = await buildResiduesLoci(
-            selectedHotspots.map(h => ({ chain: h.chain, resSeq: h.residue }))
+            visibleHotspots.map(h => ({ chain: h.chain, resSeq: h.residue }))
           )
           highlightLoci(hotspotLoci, 0xEF4444)
+          await addPersistentSelection(hotspotLoci)
         }
 
         if (hoveredResidue) {
@@ -252,7 +275,7 @@ export function MolstarViewer() {
     }
 
     updateHighlights()
-  }, [hoveredResidue, focusedResidue, selectedHotspots, selectedRange])
+  }, [hoveredResidue, focusedResidue, selectedHotspots, predictedHotspots, selectedRange, structureVersion])
 
   const handleResetCamera = () => {
     const plugin = pluginRef.current

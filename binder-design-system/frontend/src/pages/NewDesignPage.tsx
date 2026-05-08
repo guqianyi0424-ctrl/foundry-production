@@ -5,17 +5,48 @@ import { MolstarViewer } from '@/components/MolstarViewer'
 import { DesignPanel } from '@/components/DesignPanel'
 import { uploadPdb, predictHotspot, runRFD3, runMPNN, runRF3 } from '@/api'
 import type { PredictHotspotResponse, RFD3Design, MPNNSequence, RF3Response } from '@/api'
+import type { HotspotResidue } from '@/types'
 import { parseStructureFile } from '@/utils/pdbParser'
 import { Upload, Play, RotateCcw, Sparkles, Scissors, Target, RefreshCw, X, CheckCircle2, Dna, FlaskConical, ChevronRight, Shield, TrendingUp, AlertTriangle } from 'lucide-react'
+
+const splitHotspotConfig = (input: string): string[] =>
+  input
+    .split(',')
+    .map(item => item.trim())
+    .filter(Boolean)
+
+const toRfd3HotspotToken = (input: string): string =>
+  input.replace('/', '').replace(/\s+/g, '')
+
+const hotspotChainFromConfig = (input: string): string | null => {
+  const trimmed = input.trim()
+  if (!trimmed) return null
+  return trimmed.includes('/') ? trimmed.split('/')[0] : trimmed.match(/^[A-Za-z0-9]+/)?.[0] ?? null
+}
+
+const mergeHotspotSelections = (...groups: HotspotResidue[][]): HotspotResidue[] => {
+  const seen = new Set<string>()
+  const merged: HotspotResidue[] = []
+
+  for (const group of groups) {
+    for (const hotspot of group) {
+      const key = `${hotspot.chain}/${hotspot.residue}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      merged.push(hotspot)
+    }
+  }
+
+  return merged
+}
 
 interface HotspotPredictionModalProps {
   open: boolean
   onClose: () => void
-  onConfirm: () => void
   prediction: PredictHotspotResponse | null
 }
 
-function HotspotPredictionModal({ open, onClose, onConfirm, prediction }: HotspotPredictionModalProps) {
+function HotspotPredictionModal({ open, onClose, prediction }: HotspotPredictionModalProps) {
   if (!open || !prediction) return null
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
@@ -63,12 +94,11 @@ function HotspotPredictionModal({ open, onClose, onConfirm, prediction }: Hotspo
             ))}
           </div>
           <div className="mt-4 p-3 bg-amber-50 rounded-xl text-xs text-amber-700">
-            预测的热点残基已在序列下方以红点标记，并同步到3D结构中高亮显示；点击「确认」将写入热点参数框。
+            预测热点已在序列下方以红点标记；双击可移除，点击「指定热点」才会写入热点参数框。
           </div>
         </div>
         <div className="p-4 border-t border-gray-100 flex justify-end gap-3">
-          <button onClick={onClose} className="px-5 py-2 rounded-lg border border-gray-200 text-gray-600 text-sm hover:bg-gray-50 transition-colors">取消</button>
-          <button onClick={onConfirm} className="px-5 py-2 rounded-lg bg-green-600 text-white text-sm font-medium hover:bg-green-700 transition-colors">确认填入</button>
+          <button onClick={onClose} className="px-5 py-2 rounded-lg bg-green-600 text-white text-sm font-medium hover:bg-green-700 transition-colors">知道了</button>
         </div>
       </div>
     </div>
@@ -149,6 +179,8 @@ export function NewDesignPage() {
   const setSelectedRange = useAppStore((s) => s.setSelectedRange)
   const selectedHotspots = useAppStore((s) => s.selectedHotspots)
   const setSelectedHotspots = useAppStore((s) => s.setSelectedHotspots)
+  const predictedHotspots = useAppStore((s) => s.predictedHotspots)
+  const setPredictedHotspots = useAppStore((s) => s.setPredictedHotspots)
   const setRfd3Config = useAppStore((s) => s.setRfd3Config)
   const binderLength = useAppStore((s) => s.binderLength)
   const rfd3Config = useAppStore((s) => s.rfd3Config)
@@ -174,6 +206,9 @@ export function NewDesignPage() {
   const [selectedRFD3Design, setSelectedRFD3Design] = useState<RFD3Design | null>(null)
   const [selectedMPNNSeq, setSelectedMPNNSeq] = useState<MPNNSequence | null>(null)
   const [activeStep, setActiveStep] = useState(0)
+  const pendingHotspots = mergeHotspotSelections(predictedHotspots, selectedHotspots)
+  const committedHotspotItems = splitHotspotConfig(rfd3Config.hotspots)
+  const committedHotspotTokens = committedHotspotItems.map(toRfd3HotspotToken)
 
   const handleUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -200,18 +235,12 @@ export function NewDesignPage() {
     try {
       const res = await predictHotspot(pdbContent)
       const hotspots = res.hotspots.map(h => ({ chain: h.chain, residue: h.residue, score: h.score }))
-      setSelectedHotspots(hotspots)
+      setPredictedHotspots(hotspots)
       setPredictionResult(res)
       setShowPredictionModal(true)
     } catch { alert('热点预测失败') }
     finally { setIsPredicting(false) }
-  }, [pdbContent])
-
-  const handleConfirmPrediction = useCallback(() => {
-    if (!predictionResult) return
-    setRfd3Config({ hotspots: predictionResult.hotspots.map(h => `${h.chain}/${h.residue}`).join(', ') })
-    setShowPredictionModal(false)
-  }, [predictionResult, setRfd3Config])
+  }, [pdbContent, setPredictedHotspots])
 
   const handleTrimTarget = () => {
     if (!selectedRange) { alert('请先选择残基范围'); return }
@@ -220,8 +249,8 @@ export function NewDesignPage() {
   }
 
   const handleSpecifyHotspot = () => {
-    if (selectedHotspots.length === 0) { alert('请先选择热点残基'); return }
-    const hotspotStr = selectedHotspots.map(h => `${h.chain}/${h.residue}`).join(', ')
+    if (pendingHotspots.length === 0) { alert('请先选择热点残基'); return }
+    const hotspotStr = pendingHotspots.map(h => `${h.chain}/${h.residue}`).join(', ')
     if (confirm(`指定热点: ${hotspotStr}，是否确认？`)) setRfd3Config({ hotspots: hotspotStr })
   }
 
@@ -239,7 +268,7 @@ export function NewDesignPage() {
       const res = await runRFD3({
         pdb_content: pdbContent,
         target: rfd3Config.targetStructure || undefined,
-        hotspots: selectedHotspots.map(h => `${h.chain}${h.residue}`) || undefined,
+        hotspots: committedHotspotTokens.length > 0 ? committedHotspotTokens : undefined,
         binder_length: params.binder_length,
         diffusion_batch_size: params.diffusion_batch_size,
         n_batches: params.n_batches,
@@ -248,13 +277,13 @@ export function NewDesignPage() {
       setActiveStep(1)
     } catch (err) { alert('RFD3运行失败: ' + String(err)) }
     finally { setIsRFD3Running(false) }
-  }, [pdbContent, rfd3Config, selectedHotspots, setRfd3Results])
+  }, [pdbContent, rfd3Config, committedHotspotTokens, setRfd3Results])
 
   const handleRunMPNN = useCallback(async (backbonePdb: string, designIdx: number) => {
     setIsMPNNRunning(true)
     setRunningMPNNDesignIdx(designIdx)
     try {
-      const targetChains = [...new Set(selectedHotspots.map(h => h.chain))]
+      const targetChains = [...new Set(committedHotspotItems.map(hotspotChainFromConfig).filter((chain): chain is string => Boolean(chain)))]
       const res = await runMPNN({
         backbone_pdb_content: backbonePdb,
         batch_size: 10,
@@ -264,7 +293,7 @@ export function NewDesignPage() {
       setActiveStep(2)
     } catch (err) { alert('MPNN运行失败: ' + String(err)) }
     finally { setIsMPNNRunning(false); setRunningMPNNDesignIdx(null) }
-  }, [selectedHotspots, setMpnnResults])
+  }, [committedHotspotItems, setMpnnResults])
 
   const handleRunRF3 = useCallback(async (mpnnPdb: string) => {
     setIsRF3Running(true)
@@ -283,8 +312,8 @@ export function NewDesignPage() {
 
   return (
     <div className="p-6 max-w-[1400px] mx-auto space-y-5">
-      <HotspotPredictionModal open={showPredictionModal} onClose={() => setShowPredictionModal(false)} onConfirm={handleConfirmPrediction} prediction={predictionResult} />
-      <RFD3Modal open={showRFD3Modal} onClose={() => setShowRFD3Modal(false)} onRun={handleRunRFD3} target={rfd3Config.targetStructure} hotspots={selectedHotspots.map(h => `${h.chain}/${h.residue}`)} isRunning={isRFD3Running} />
+      <HotspotPredictionModal open={showPredictionModal} onClose={() => setShowPredictionModal(false)} prediction={predictionResult} />
+      <RFD3Modal open={showRFD3Modal} onClose={() => setShowRFD3Modal(false)} onRun={handleRunRFD3} target={rfd3Config.targetStructure} hotspots={committedHotspotItems} isRunning={isRFD3Running} />
 
       {/* Header */}
       <div className="flex items-center justify-between">
@@ -334,10 +363,10 @@ export function NewDesignPage() {
             <button onClick={handleTrimTarget} disabled={!selectedRange} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs transition-all ${!selectedRange ? 'border-gray-100 text-gray-300 cursor-not-allowed' : 'border-gray-200 text-gray-600 hover:bg-orange-50 hover:text-orange-600'}`}>
               <Scissors size={14} />裁剪靶点
             </button>
-            <button onClick={handleSpecifyHotspot} disabled={selectedHotspots.length === 0} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs transition-all ${selectedHotspots.length === 0 ? 'border-gray-100 text-gray-300 cursor-not-allowed' : 'border-gray-200 text-gray-600 hover:bg-green-50 hover:text-green-600'}`}>
+            <button onClick={handleSpecifyHotspot} disabled={pendingHotspots.length === 0} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs transition-all ${pendingHotspots.length === 0 ? 'border-gray-100 text-gray-300 cursor-not-allowed' : 'border-gray-200 text-gray-600 hover:bg-green-50 hover:text-green-600'}`}>
               <Target size={14} />指定热点
             </button>
-            <button onClick={() => { setSelectedRange(null); setSelectedHotspots([]) }} disabled={selectedHotspots.length === 0 && !selectedRange} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs transition-all ${selectedHotspots.length === 0 && !selectedRange ? 'border-gray-100 text-gray-300 cursor-not-allowed' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
+            <button onClick={() => { setSelectedRange(null); setSelectedHotspots([]); setPredictedHotspots([]) }} disabled={selectedHotspots.length === 0 && predictedHotspots.length === 0 && !selectedRange} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs transition-all ${selectedHotspots.length === 0 && predictedHotspots.length === 0 && !selectedRange ? 'border-gray-100 text-gray-300 cursor-not-allowed' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
               <RefreshCw size={14} />重置
             </button>
           </div>

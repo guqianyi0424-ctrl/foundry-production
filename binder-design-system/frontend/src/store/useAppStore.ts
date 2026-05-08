@@ -47,6 +47,10 @@ interface AppState {
   removeHotspot: (chain: string, residue: number) => void;
   toggleHotspot: (chain: string, residue: number, score?: number) => void;
 
+  predictedHotspots: HotspotResidue[];
+  setPredictedHotspots: (hotspots: HotspotResidue[]) => void;
+  removePredictedHotspot: (chain: string, residue: number) => void;
+
   focusedResidue: { chain: string; resSeq: number } | null;
   setFocusedResidue: (residue: { chain: string; resSeq: number } | null) => void;
 
@@ -123,6 +127,7 @@ const initialState = {
   chains: [],
   selectedRange: null as ResidueRange | null,
   selectedHotspots: [] as HotspotResidue[],
+  predictedHotspots: [] as HotspotResidue[],
   focusedResidue: null as { chain: string; resSeq: number } | null,
   hoveredResidue: null as { chain: string; resSeq: number } | null,
   hotspotInput: '',
@@ -169,14 +174,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   setPdbContent: (content) => set({ pdbContent: content }),
   setChains: (chains) => set({ chains }),
 
-  setSelectedRange: (range) => {
-    if (!range) {
-      set({ selectedRange: null, selectedHotspots: [], hotspotInput: '' })
-    } else {
-      const hotspots = get().selectedHotspots.filter(h => h.chain !== range.chain)
-      set({ selectedRange: range, selectedHotspots: hotspots, hotspotInput: hotspots.map(h => `${h.chain}/${h.residue}`).join(', ') })
-    }
-  },
+  setSelectedRange: (range) => set({ selectedRange: range }),
 
   setSelectedHotspots: (hotspots) => {
     const input = hotspots.map(h => `${h.chain}/${h.residue}`).join(', ')
@@ -209,6 +207,13 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
     const input = updated.map(h => `${h.chain}/${h.residue}`).join(', ')
     set({ selectedHotspots: updated, hotspotInput: input })
+  },
+
+  setPredictedHotspots: (hotspots) => set({ predictedHotspots: hotspots }),
+
+  removePredictedHotspot: (chain, residue) => {
+    const predictedHotspots = get().predictedHotspots.filter(h => !(h.chain === chain && h.residue === residue))
+    set({ predictedHotspots })
   },
 
   setFocusedResidue: (residue) => set({ focusedResidue: residue }),
