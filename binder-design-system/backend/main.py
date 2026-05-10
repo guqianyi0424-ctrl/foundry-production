@@ -10,6 +10,13 @@ from routers import auth, experiments, monitor
 from database import init_db
 from logger import logger
 
+
+def load_cors_origins() -> list[str]:
+    raw = os.getenv("DEEPBINDER_CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173")
+    origins = [origin.strip() for origin in raw.split(",") if origin.strip()]
+    return origins or ["http://localhost:5173"]
+
+
 app = FastAPI(
     title="DeepBinder API",
     description="蛋白质Binder设计系统后端API - 支持用户认证、实验记录管理、系统监控",
@@ -18,7 +25,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=load_cors_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -40,6 +47,7 @@ logger.info("backend_starting", project_dir=PROJECT_DIR, frontend_dist=frontend_
 
 @app.on_event("startup")
 async def startup():
+    auth.validate_secret_key_for_environment()
     init_db()
     logger.info("database_initialized")
 

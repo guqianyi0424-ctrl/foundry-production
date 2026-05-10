@@ -56,11 +56,24 @@ python -m uvicorn main:app --host 0.0.0.0 --port 8000
 
 更多部署细节见 [deploy.md](deploy.md)。
 
+## 安全配置
+
+生产环境建议显式设置以下变量：
+
+```bash
+export DEEPBINDER_ENV=production
+export DEEPBINDER_SECRET_KEY="请替换为不少于32位的随机密钥"
+export DEEPBINDER_CORS_ORIGINS="https://your-domain.example.edu"
+```
+
+其中 `DEEPBINDER_SECRET_KEY` 用于签发 JWT，生产环境不能使用默认开发密钥。`DEEPBINDER_CORS_ORIGINS` 用逗号分隔允许访问后端 API 的前端源。
+
 ## 验证
 
 ```bash
 cd binder-design-system/backend
-python -m pytest tests -v
+PYTHONPATH="$PWD/../..:$PWD/..:$PWD" python -m pytest tests/test_system_acceptance.py tests/test_security_robustness.py -v
 cd ../frontend
+npm test -- --run
 npm run build
 ```

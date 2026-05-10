@@ -5,6 +5,8 @@ from pathlib import Path
 from utils.structure_parser import StructureParser
 
 router = APIRouter()
+MAX_UPLOAD_BYTES = 200 * 1024 * 1024
+ALLOWED_SUFFIXES = {".pdb", ".cif", ".mmcif"}
 
 THREE_TO_ONE = {
     "ALA": "A", "ARG": "R", "ASN": "N", "ASP": "D", "CYS": "C",
@@ -16,13 +18,21 @@ THREE_TO_ONE = {
 
 @router.post("/upload")
 async def upload_pdb(file: UploadFile = File(...)):
-    if file.size is not None and file.size > 200 * 1024 * 1024:
+    suffix = Path(file.filename or "upload.pdb").suffix.lower() or ".pdb"
+    if suffix not in ALLOWED_SUFFIXES:
+        raise HTTPException(status_code=400, detail="仅支持 PDB/CIF/mmCIF 结构文件")
+
+    if file.size is not None and file.size > MAX_UPLOAD_BYTES:
         raise HTTPException(status_code=400, detail="文件大小不能超过200MB")
 
     content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="上传文件不能为空")
+    if len(content) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=400, detail="文件大小不能超过200MB")
+
     pdb_str = content.decode("utf-8", errors="ignore")
 
-    suffix = Path(file.filename or "upload.pdb").suffix or ".pdb"
     tmp_path = None
     try:
         with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp_file:
@@ -32,6 +42,8 @@ async def upload_pdb(file: UploadFile = File(...)):
         parser = StructureParser()
         atom_array = parser.parse_file(tmp_path)
         chain_ids = parser.get_chain_ids(atom_array)
+        if not chain_ids:
+            raise ValueError("未识别到有效蛋白质链")
         residue_info = parser.get_residue_info(atom_array)
         chains = []
         for chain_id in chain_ids:

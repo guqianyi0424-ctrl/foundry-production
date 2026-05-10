@@ -18,6 +18,11 @@
 | SAT-014 | De Novo 前端流程 | mock RFD3、MPNN、RF3 API 响应 | 1. 点击 `De Novo Design`；2. 点击运行 RFD3；3. 选择结果并送入 MPNN；4. 送入 RF3 | 页面展示 RFD3 骨架、MPNN 序列、RF3 验证通过和 RMSD 指标 | 自动化测试断言三次 API 调用参数和页面结果 | 是 | `frontend/src/pages/__tests__/acceptance.test.tsx::runs the De Novo RFD3 to MPNN to RF3 page flow with mocked APIs` |
 | SAT-015 | 实验记录前端列表 | mock 实验列表返回 1 条已完成记录 | 1. 登录研究人员；2. 点击实验记录；3. 等待列表加载 | 表格展示实验名称、状态、靶点和设计数 | 自动化测试断言表格内容 | 是 | `frontend/src/pages/__tests__/acceptance.test.tsx::loads experiment records through the experiments page` |
 | SAT-016 | 帮助页角色和 ProteinMPNN 说明 | 登录研究人员状态 | 1. 点击帮助；2. 查看用户角色与结果解读部分 | 帮助页包含研究人员、管理员能力说明；说明 ProteinMPNN 负责序列设计而非结构预测 | 自动化测试断言角色文本和 MPNN 可视化说明 | 是 | `frontend/src/pages/__tests__/acceptance.test.tsx::documents roles and ProteinMPNN visualization limits in help page` |
+| SAT-017 | 实验记录对象级权限 | owner 创建实验，other 使用自己的 token 访问 owner 实验 | 1. owner 创建实验；2. other 调用详情、更新、添加设计、导出、对比接口 | other 对 owner 实验的访问全部返回 403 | 自动化测试断言所有越权响应为 403 | 是 | `backend/tests/test_security_robustness.py::test_researcher_cannot_read_or_mutate_another_users_experiment` |
+| SAT-018 | 实验接口匿名访问限制 | 无 token 请求实验详情、创建、更新、添加设计、导出、对比 | 1. 不携带 token 调用实验记录接口；2. 读取响应状态码 | 所有需要登录的实验接口返回 401 | 自动化测试断言所有匿名响应为 401 | 是 | `backend/tests/test_security_robustness.py::test_experiment_interfaces_require_login` |
+| SAT-019 | 注册输入校验 | 短用户名、非法用户名、弱密码、非法邮箱 | 1. 调用注册接口提交非法输入；2. 读取响应状态码 | 非法输入均返回 422，不写入用户数据 | 自动化测试断言非法注册请求被拒绝 | 是 | `backend/tests/test_security_robustness.py::test_register_rejects_invalid_identity_inputs` |
+| SAT-020 | 上传文件鲁棒性 | `.txt` 文件、空 `.pdb` 文件、超过大小限制的结构文件 | 1. 调用上传接口提交异常文件；2. 读取响应状态码 | 异常文件均返回 400 | 自动化测试断言非法扩展名、空文件和超限文件被拒绝 | 是 | `backend/tests/test_security_robustness.py::test_upload_rejects_invalid_file_types_empty_files_and_oversized_content` |
+| SAT-021 | CORS 白名单配置 | `DEEPBINDER_CORS_ORIGINS=https://deepbinder.example.edu,http://localhost:5173` | 1. 设置环境变量；2. 重新加载后端应用；3. 读取 CORS 中间件配置 | CORS 只允许环境变量中列出的源 | 自动化测试断言 CORS allow_origins 等于配置列表 | 是 | `backend/tests/test_security_robustness.py::test_cors_origin_configuration_uses_environment_allowlist` |
 
 ## 执行命令
 
@@ -25,7 +30,7 @@
 
 ```bash
 cd binder-design-system/backend
-python3 -m pytest tests/test_system_acceptance.py -v
+python3 -m pytest tests/test_system_acceptance.py tests/test_security_robustness.py -v
 ```
 
 前端：

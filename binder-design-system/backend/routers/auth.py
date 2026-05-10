@@ -2,12 +2,13 @@ from datetime import datetime, timedelta
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 from jose import JWTError, jwt
 import bcrypt
 from sqlalchemy.orm import Session
 import json
 import os
+import re
 import uuid
 from urllib.parse import parse_qs
 
@@ -16,6 +17,8 @@ from database import get_db, User, AuditLog
 SECRET_KEY = os.getenv("DEEPBINDER_SECRET_KEY", "deepbinder_secret_key_2026_change_in_production")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 1440
+MIN_SECRET_KEY_LENGTH = 32
+DEFAULT_SECRET_KEY = "deepbinder_secret_key_2026_change_in_production"
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login", auto_error=False)
 
@@ -66,9 +69,33 @@ def require_role(allowed_roles: list):
 
 
 class RegisterRequest(BaseModel):
-    username: str
-    password: str
-    email: Optional[str] = None
+    username: str = Field(min_length=3, max_length=32)
+    password: str = Field(min_length=8, max_length=128)
+    email: Optional[str] = Field(default=None, max_length=254)
+
+    @field_validator("username")
+    @classmethod
+    def username_must_be_safe_identifier(cls, value: str) -> str:
+        if not re.fullmatch(r"[A-Za-z0-9_-]+", value):
+            raise ValueError("用户名只能包含字母、数字、下划线和连字符")
+        return value
+
+    @field_validator("email")
+    @classmethod
+    def email_must_have_basic_shape(cls, value: Optional[str]) -> Optional[str]:
+        if value is None or value == "":
+            return value
+        if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", value):
+            raise ValueError("邮箱格式不正确")
+        return value
+
+
+def validate_secret_key_for_environment() -> None:
+    env = os.getenv("DEEPBINDER_ENV", "development").strip().lower()
+    if env in {"prod", "production"} and (
+        SECRET_KEY == DEFAULT_SECRET_KEY or len(SECRET_KEY) < MIN_SECRET_KEY_LENGTH
+    ):
+        raise RuntimeError("生产环境必须设置长度不少于32位的 DEEPBINDER_SECRET_KEY")
 
 
 class UserResponse(BaseModel):

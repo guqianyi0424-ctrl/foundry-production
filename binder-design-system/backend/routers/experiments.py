@@ -8,7 +8,7 @@ import uuid
 import json
 
 from database import get_db, Experiment, ExperimentDesign, User, AuditLog
-from routers.auth import require_login, get_current_user
+from routers.auth import require_login
 
 router = APIRouter()
 
@@ -67,6 +67,19 @@ class ExperimentResponse(BaseModel):
         from_attributes = True
 
 
+def ensure_experiment_access(exp: Experiment, current_user: User) -> None:
+    if current_user.role != "admin" and exp.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="无权访问此实验")
+
+
+def get_accessible_experiment(db: Session, experiment_id: str, current_user: User) -> Experiment:
+    exp = db.query(Experiment).filter(Experiment.id == experiment_id).first()
+    if not exp:
+        raise HTTPException(status_code=404, detail="实验记录不存在")
+    ensure_experiment_access(exp, current_user)
+    return exp
+
+
 @router.get("/experiments", summary="实验列表(分页+筛选)")
 async def list_experiments(
     page: int = Query(1, ge=1),
@@ -74,10 +87,10 @@ async def list_experiments(
     status: Optional[str] = None,
     keyword: Optional[str] = None,
     db: Session = Depends(get_db),
-    current_user: Optional[User] = Depends(get_current_user),
+    current_user: User = Depends(require_login),
 ):
     query = db.query(Experiment)
-    if current_user and current_user.role != "admin":
+    if current_user.role != "admin":
         query = query.filter(Experiment.user_id == current_user.id)
     if status:
         query = query.filter(Experiment.status == status)
@@ -111,11 +124,9 @@ async def list_experiments(
 async def get_experiment(
     experiment_id: str,
     db: Session = Depends(get_db),
-    current_user: Optional[User] = Depends(get_current_user),
+    current_user: User = Depends(require_login),
 ):
-    exp = db.query(Experiment).filter(Experiment.id == experiment_id).first()
-    if not exp:
-        raise HTTPException(status_code=404, detail="实验记录不存在")
+    exp = get_accessible_experiment(db, experiment_id, current_user)
 
     designs = []
     for d in exp.designs:
@@ -156,7 +167,7 @@ async def get_experiment(
 async def create_experiment(
     req: ExperimentCreate,
     db: Session = Depends(get_db),
-    current_user: Optional[User] = Depends(get_current_user),
+    current_user: User = Depends(require_login),
 ):
     exp = Experiment(
         id=str(uuid.uuid4()),
@@ -168,19 +179,18 @@ async def create_experiment(
         rfd3_config=req.rfd3_config,
         mpnn_config=req.mpnn_config,
         rf3_config=req.rf3_config,
-        user_id=current_user.id if current_user else None,
+        user_id=current_user.id,
     )
     db.add(exp)
 
-    if current_user:
-        audit = AuditLog(
-            id=str(uuid.uuid4()),
-            user_id=current_user.id,
-            action="create_experiment",
-            target=exp.id,
-            detail={"name": req.name},
-        )
-        db.add(audit)
+    audit = AuditLog(
+        id=str(uuid.uuid4()),
+        user_id=current_user.id,
+        action="create_experiment",
+        target=exp.id,
+        detail={"name": req.name},
+    )
+    db.add(audit)
 
     db.commit()
     db.refresh(exp)
@@ -192,26 +202,23 @@ async def update_experiment(
     experiment_id: str,
     req: ExperimentUpdate,
     db: Session = Depends(get_db),
-    current_user: Optional[User] = Depends(get_current_user),
+    current_user: User = Depends(require_login),
 ):
-    exp = db.query(Experiment).filter(Experiment.id == experiment_id).first()
-    if not exp:
-        raise HTTPException(status_code=404, detail="实验记录不存在")
+    exp = get_accessible_experiment(db, experiment_id, current_user)
 
     update_data = req.model_dump(exclude_unset=True)
     for key, value in update_data.items():
         setattr(exp, key, value)
     exp.updated_at = datetime.utcnow()
 
-    if current_user:
-        audit = AuditLog(
-            id=str(uuid.uuid4()),
-            user_id=current_user.id,
-            action="update_experiment",
-            target=experiment_id,
-            detail=update_data,
-        )
-        db.add(audit)
+    audit = AuditLog(
+        id=str(uuid.uuid4()),
+        user_id=current_user.id,
+        action="update_experiment",
+        target=experiment_id,
+        detail=update_data,
+    )
+    db.add(audit)
 
     db.commit()
     return {"ok": True, "id": exp.id}
@@ -223,12 +230,7 @@ async def delete_experiment(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_login),
 ):
-    exp = db.query(Experiment).filter(Experiment.id == experiment_id).first()
-    if not exp:
-        raise HTTPException(status_code=404, detail="实验记录不存在")
-
-    if current_user.role != "admin" and exp.user_id != current_user.id:
-        raise HTTPException(status_code=403, detail="无权删除此实验")
+    exp = get_accessible_experiment(db, experiment_id, current_user)
 
     audit = AuditLog(
         id=str(uuid.uuid4()),
@@ -248,11 +250,9 @@ async def add_design(
     experiment_id: str,
     req: DesignCreate,
     db: Session = Depends(get_db),
-    current_user: Optional[User] = Depends(get_current_user),
+    current_user: User = Depends(require_login),
 ):
-    exp = db.query(Experiment).filter(Experiment.id == experiment_id).first()
-    if not exp:
-        raise HTTPException(status_code=404, detail="实验记录不存在")
+    get_accessible_experiment(db, experiment_id, current_user)
 
     design = ExperimentDesign(
         id=str(uuid.uuid4()),
@@ -274,11 +274,9 @@ async def add_design(
 async def export_experiment(
     experiment_id: str,
     db: Session = Depends(get_db),
-    current_user: Optional[User] = Depends(get_current_user),
+    current_user: User = Depends(require_login),
 ):
-    exp = db.query(Experiment).filter(Experiment.id == experiment_id).first()
-    if not exp:
-        raise HTTPException(status_code=404, detail="实验记录不存在")
+    exp = get_accessible_experiment(db, experiment_id, current_user)
 
     designs = []
     for d in exp.designs:
@@ -319,11 +317,13 @@ async def export_experiment(
 async def compare_experiments(
     experiment_ids: List[str],
     db: Session = Depends(get_db),
-    current_user: Optional[User] = Depends(get_current_user),
+    current_user: User = Depends(require_login),
 ):
     experiments = db.query(Experiment).filter(Experiment.id.in_(experiment_ids)).all()
     if not experiments:
         raise HTTPException(status_code=404, detail="未找到实验记录")
+    for exp in experiments:
+        ensure_experiment_access(exp, current_user)
 
     comparison = []
     for exp in experiments:
