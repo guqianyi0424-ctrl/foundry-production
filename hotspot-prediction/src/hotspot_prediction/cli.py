@@ -10,6 +10,7 @@ from hotspot_prediction.data.io import read_excel_rows, write_csv_rows
 from hotspot_prediction.data.normalize import (
     build_data1_train_samples,
     build_data2_test_samples,
+    exclude_overlapping_train_samples,
     normalize_data1_rows,
     normalize_data2_rows,
 )
@@ -27,6 +28,12 @@ def prepare_data(args: argparse.Namespace) -> None:
     data2_normalized = normalize_data2_rows(data2_rows)
     train_samples = build_data1_train_samples(data1_normalized)
     test_samples = build_data2_test_samples(data2_normalized)
+    original_train_samples = len(train_samples)
+    train_samples, removed_train_samples = exclude_overlapping_train_samples(
+        train_samples,
+        test_samples,
+        policy=args.overlap_policy,
+    )
 
     write_csv_rows(output_dir / "data1_mutations.csv", data1_normalized)
     write_csv_rows(output_dir / "data2_test_samples.csv", data2_normalized)
@@ -37,6 +44,10 @@ def prepare_data(args: argparse.Namespace) -> None:
     print(f"Wrote {len(data2_normalized)} data2 test rows to {output_dir / 'data2_test_samples.csv'}")
     print(f"Wrote {len(train_samples)} train/validation samples to {output_dir / 'train_val_samples.csv'}")
     print(f"Wrote {len(test_samples)} legacy test samples to {output_dir / 'legacy_data2_test_samples.csv'}")
+    print(
+        f"Overlap policy {args.overlap_policy!r}: kept {len(train_samples)} of "
+        f"{original_train_samples} train samples; removed {removed_train_samples}"
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -47,6 +58,15 @@ def build_parser() -> argparse.ArgumentParser:
     prepare.add_argument("--data1", default=str(DEFAULT_CONFIG.data1_file))
     prepare.add_argument("--data2", default=str(DEFAULT_CONFIG.data2_file))
     prepare.add_argument("--output-dir", default=str(DEFAULT_CONFIG.processed_dir))
+    prepare.add_argument(
+        "--overlap-policy",
+        choices=["none", "pdb-chain", "uniprot", "uniprot-or-pdb-chain"],
+        default="none",
+        help=(
+            "How to remove data1 train samples overlapping data2. Default keeps data1 usable "
+            "and reports overlap; use uniprot-or-pdb-chain for strict independent evaluation."
+        ),
+    )
     prepare.set_defaults(func=prepare_data)
 
     return parser

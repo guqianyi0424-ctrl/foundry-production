@@ -46,7 +46,7 @@ def label_from_ddg(ddg: Any, threshold: float = DDG_HOTSPOT_THRESHOLD) -> int:
     parsed = parse_float(ddg)
     if parsed is None:
         return 0
-    return int(parsed > threshold)
+    return int(parsed >= threshold)
 
 
 def parse_float(value: Any) -> float | None:
@@ -250,3 +250,45 @@ def build_data2_test_samples(test_rows: Iterable[dict[str, Any]]) -> list[dict[s
             }
         )
     return samples
+
+
+def exclude_overlapping_train_samples(
+    train_samples: Iterable[dict[str, Any]],
+    test_samples: Iterable[dict[str, Any]],
+    policy: str = "uniprot-or-pdb-chain",
+) -> tuple[list[dict[str, Any]], int]:
+    """Remove training samples that overlap independent test by UniProt or PDB-chain."""
+    allowed = {"none", "pdb-chain", "uniprot", "uniprot-or-pdb-chain"}
+    if policy not in allowed:
+        raise ValueError(f"Unknown overlap policy {policy!r}; expected one of {sorted(allowed)}")
+    if policy == "none":
+        return [dict(row) for row in train_samples], 0
+
+    test_uniprots = {
+        _clean_cell(row.get("uniprot_id"))
+        for row in test_samples
+        if _clean_cell(row.get("uniprot_id"))
+    }
+    test_pdb_chains = {
+        _clean_cell(row.get("pdb_id")).lower()
+        for row in test_samples
+        if _clean_cell(row.get("pdb_id"))
+    }
+
+    filtered: list[dict[str, Any]] = []
+    removed = 0
+    for row in train_samples:
+        uniprot_id = _clean_cell(row.get("uniprot_id"))
+        pdb_chain = _clean_cell(row.get("pdb_id")).lower()
+        overlaps_uniprot = uniprot_id in test_uniprots
+        overlaps_pdb_chain = pdb_chain in test_pdb_chains
+        should_remove = (
+            (policy == "uniprot" and overlaps_uniprot)
+            or (policy == "pdb-chain" and overlaps_pdb_chain)
+            or (policy == "uniprot-or-pdb-chain" and (overlaps_uniprot or overlaps_pdb_chain))
+        )
+        if should_remove:
+            removed += 1
+            continue
+        filtered.append(dict(row))
+    return filtered, removed

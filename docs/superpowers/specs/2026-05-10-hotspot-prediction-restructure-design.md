@@ -8,11 +8,13 @@ Refactor the `hotspot-prediction` project into a clearer, reproducible pipeline 
 
 Two source datasets are used with distinct roles.
 
-`elife-96643-data1-v1.xlsx` is the training and validation source. It contains alanine or other mutation measurements with binding free energy change. A residue is labeled as a hotspot when `Binding free energy change (kcal/mol) > 2.0`; otherwise it is labeled as non-hotspot. This rule is the source of truth, even if the original `PPI-hot spots assignment` column disagrees.
+`elife-96643-data1-v1.xlsx` is the training and validation source. It contains alanine or other mutation measurements with binding free energy change. A residue is labeled as a hotspot when `Binding free energy change (kcal/mol) >= 2.0`; otherwise it is labeled as non-hotspot. This rule follows the common SKEMPI/PPI-hotspotID threshold and is the source of truth, even if the original `PPI-hot spots assignment` column disagrees.
 
 `elife-96643-data2-v1.xlsx` is the independent test source only. It contains protein-level hotspot lists in UniProt numbering. These positions are converted to PDB residue numbering using the free protein A structure range, for example `5f18-A(374-620)`.
 
 Training, validation, threshold selection, and model selection must not use data2 labels. Data2 is evaluated once with a threshold selected on validation data.
+
+The bundled data1/data2 pair has heavy UniProt/PDB-chain overlap. The preparation CLI therefore exposes an overlap policy. The default keeps data1 train/validation usable and reports overlap; strict audit mode can remove data1 samples that overlap data2 by UniProt or PDB-chain. For publication-grade comparison, sequence-cluster splitting at a benchmark threshold such as 60% identity should be used with a larger training set.
 
 ## Architecture
 

@@ -3,6 +3,7 @@ import unittest
 from hotspot_prediction.data.normalize import (
     build_data1_train_samples,
     build_data2_test_samples,
+    exclude_overlapping_train_samples,
     label_from_ddg,
     normalize_data1_rows,
     normalize_data2_rows,
@@ -13,9 +14,9 @@ from hotspot_prediction.data.normalize import (
 
 
 class NormalizeTests(unittest.TestCase):
-    def test_data1_label_uses_strict_ddg_threshold(self):
+    def test_data1_label_uses_baseline_ddg_threshold_inclusively(self):
         self.assertEqual(label_from_ddg("2.01"), 1)
-        self.assertEqual(label_from_ddg(2.0), 0)
+        self.assertEqual(label_from_ddg(2.0), 1)
         self.assertEqual(label_from_ddg("1.99"), 0)
 
     def test_parse_pdb_chain_range(self):
@@ -142,6 +143,40 @@ class NormalizeTests(unittest.TestCase):
 
         self.assertEqual(len(samples), 1)
         self.assertEqual(samples[0]["hotspot_list"], "130,131,133")
+
+    def test_exclude_overlapping_train_samples_removes_test_uniprot_and_pdb_chain(self):
+        train_samples = [
+            {"uniprot_id": "P1", "pdb_id": "1aaa-A", "hotspot_list": "10"},
+            {"uniprot_id": "P2", "pdb_id": "2bbb-B", "hotspot_list": "20"},
+            {"uniprot_id": "P3", "pdb_id": "3ccc-C", "hotspot_list": "30"},
+        ]
+        test_samples = [
+            {"uniprot_id": "P1", "pdb_id": "9zzz-Z", "hotspot_list": "1"},
+            {"uniprot_id": "PX", "pdb_id": "2bbb-B", "hotspot_list": "2"},
+        ]
+
+        filtered, removed = exclude_overlapping_train_samples(train_samples, test_samples)
+
+        self.assertEqual(filtered, [{"uniprot_id": "P3", "pdb_id": "3ccc-C", "hotspot_list": "30"}])
+        self.assertEqual(removed, 2)
+
+    def test_exclude_overlapping_train_samples_can_remove_only_pdb_chain(self):
+        train_samples = [
+            {"uniprot_id": "P1", "pdb_id": "1aaa-A", "hotspot_list": "10"},
+            {"uniprot_id": "P2", "pdb_id": "2bbb-B", "hotspot_list": "20"},
+        ]
+        test_samples = [
+            {"uniprot_id": "P1", "pdb_id": "9zzz-Z", "hotspot_list": "1"},
+        ]
+
+        filtered, removed = exclude_overlapping_train_samples(
+            train_samples,
+            test_samples,
+            policy="pdb-chain",
+        )
+
+        self.assertEqual(filtered, train_samples)
+        self.assertEqual(removed, 0)
 
 
 if __name__ == "__main__":
