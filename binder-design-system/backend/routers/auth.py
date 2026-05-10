@@ -1,13 +1,15 @@
 from datetime import datetime, timedelta
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.security import OAuth2PasswordBearer
 from pydantic import BaseModel
 from jose import JWTError, jwt
 import bcrypt
 from sqlalchemy.orm import Session
+import json
 import os
 import uuid
+from urllib.parse import parse_qs
 
 from database import get_db, User, AuditLog
 
@@ -105,9 +107,24 @@ async def register(req: RegisterRequest, db: Session = Depends(get_db)):
 
 
 @router.post("/auth/login", summary="用户登录")
-async def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.username == form_data.username).first()
-    if not user or not verify_password(form_data.password, user.hashed_password):
+async def login(request: Request, db: Session = Depends(get_db)):
+    content_type = request.headers.get("content-type", "").split(";")[0]
+    body = await request.body()
+
+    if content_type == "application/json":
+        try:
+            payload = json.loads(body.decode("utf-8") or "{}")
+        except json.JSONDecodeError:
+            payload = {}
+        username = payload.get("username")
+        password = payload.get("password")
+    else:
+        payload = parse_qs(body.decode("utf-8"), keep_blank_values=True)
+        username = payload.get("username", [""])[0]
+        password = payload.get("password", [""])[0]
+
+    user = db.query(User).filter(User.username == username).first()
+    if not user or not verify_password(password or "", user.hashed_password):
         raise HTTPException(status_code=401, detail="用户名或密码错误")
 
     user.last_login = datetime.utcnow()

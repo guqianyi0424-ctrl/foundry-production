@@ -55,6 +55,8 @@ env/
 *.json
 !requirements.txt
 !package.json
+!package-lock.json
+*.db
 
 # Model weights (large files)
 *.pt
