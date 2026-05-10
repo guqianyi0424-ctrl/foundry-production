@@ -18,6 +18,16 @@ export function HelpPage() {
       ],
     },
     {
+      title: '用户角色与功能',
+      icon: '👥',
+      items: [
+        { label: '研究人员', desc: '运行 Binder/De Novo 设计，查看自己的实验记录，导出序列和结构结果。' },
+        { label: '管理员', desc: '拥有研究人员能力，并可查看系统监控、全部实验和用户列表，处理异常任务。' },
+        { label: 'Binder Design', desc: '基于上传靶点结构和热点残基生成结合蛋白骨架、序列并进行结构验证。' },
+        { label: 'De Novo Design', desc: '无需上传靶点结构，从指定长度开始生成新蛋白骨架，再设计序列并验证折叠结构。' },
+      ],
+    },
+    {
       title: '参数说明',
       icon: '⚙️',
       items: [
@@ -33,6 +43,7 @@ export function HelpPage() {
       items: [
         { label: 'RFD3主链', desc: '生成的主链骨架结构，pLDDT越高越可靠' },
         { label: 'MPNN序列', desc: '设计的氨基酸序列，得分越高与主链兼容性越好' },
+        { label: 'MPNN可视化', desc: 'ProteinMPNN负责序列设计，不负责从序列预测折叠结构；只有后端返回PDB时才显示序列映射骨架' },
         { label: 'RF3验证', desc: '验证设计结构的稳定性，RMSD<2.0Å为通过' },
         { label: 'PAE热图', desc: '预测对齐误差，低值区域表示结构可靠' },
       ],
@@ -72,7 +83,7 @@ export function HelpPage() {
             )}
 
             {sec.items && (
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 {sec.items.map((item) => (
                   <div key={item.label} className="bg-gray-50 rounded-lg p-4">
                     <div className="text-xs font-semibold text-primary-700 mb-1">{item.label}</div>

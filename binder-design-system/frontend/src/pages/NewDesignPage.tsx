@@ -3,6 +3,7 @@ import { useAppStore } from '@/store/useAppStore'
 import { SequenceViewer } from '@/components/SequenceViewer'
 import { MolstarViewer } from '@/components/MolstarViewer'
 import { DesignPanel } from '@/components/DesignPanel'
+import { SilentStructureViewer } from '@/components/SilentStructureViewer'
 import { uploadPdb, predictHotspot, runRFD3, runMPNN, runRF3 } from '@/api'
 import type { PredictHotspotResponse, RFD3Design, MPNNSequence, RF3Response } from '@/api'
 import type { HotspotResidue } from '@/types'
@@ -423,7 +424,11 @@ export function NewDesignPage() {
                           </div>
                           {design.pdb_content && (
                             <div className="h-32 rounded-lg overflow-hidden border border-gray-100 bg-gray-50">
-                              <iframe srcDoc={`<!DOCTYPE html><html><head><script src="https://cdn.jsdelivr.net/npm/molstar@4.4.0/build/viewer/molstar.js"></script><style>body{margin:0;padding:0;overflow:hidden}#app{width:100%;height:100%}</style></head><body><div id="app"></div><script>var noop=function(){};console.log=noop;console.warn=noop;console.info=noop;console.debug=noop;molstar.Viewer.create('app',{layoutIsExpanded:false}).then(v=>{const pdbData=\`${design.pdb_content.replace(/`/g, '\\`').replace(/\$/g, '\\$')}\`;v.loadStructureFromData(pdbData,'pdb')})</script></body></html>`} className="w-full h-full border-0" title={design.name} />
+                              <SilentStructureViewer
+                                pdbContent={design.pdb_content}
+                                title={design.name}
+                                heightClassName="h-32"
+                              />
                             </div>
                           )}
                           <div className="mt-2 flex justify-end">
@@ -474,7 +479,11 @@ export function NewDesignPage() {
                       </div>
                       {seq.pdb_content && selectedMPNNSeq?.index === seq.index && (
                         <div className="mt-3 h-48 rounded-lg overflow-hidden border border-gray-100">
-                          <iframe srcDoc={`<!DOCTYPE html><html><head><script src="https://cdn.jsdelivr.net/npm/molstar@4.4.0/build/viewer/molstar.js"></script><style>body{margin:0;padding:0;overflow:hidden}#app{width:100%;height:100%}</style></head><body><div id="app"></div><script>var noop=function(){};console.log=noop;console.warn=noop;console.info=noop;console.debug=noop;molstar.Viewer.create('app',{layoutIsExpanded:false}).then(v=>{const pdbData=\`${seq.pdb_content.replace(/`/g, '\\`').replace(/\$/g, '\\$')}\`;v.loadStructureFromData(pdbData,'pdb')})</script></body></html>`} className="w-full h-full border-0" title={`Sequence ${seq.index + 1}`} />
+                          <SilentStructureViewer
+                            pdbContent={seq.pdb_content}
+                            title={`Sequence ${seq.index + 1}`}
+                            heightClassName="h-48"
+                          />
                         </div>
                       )}
                       {seq.pdb_content && selectedMPNNSeq?.index === seq.index && (
@@ -579,7 +588,12 @@ export function NewDesignPage() {
                   </div>
                   {selectedRFD3Design?.pdb_content && rf3Results.predicted_pdb ? (
                     <div className="h-96">
-                      <iframe srcDoc={`<!DOCTYPE html><html><head><script src="https://cdn.jsdelivr.net/npm/molstar@4.4.0/build/viewer/molstar.js"></script><style>body{margin:0;padding:0;overflow:hidden}#app{width:100%;height:100%}.legend{position:absolute;bottom:12px;left:12px;z-index:100;background:rgba(0,0,0,0.75);color:#fff;padding:8px 12px;border-radius:6px;font-family:sans-serif;font-size:12px;display:flex;gap:12px}</style></head><body><div id="app"></div><script>var noop=function(){};console.log=noop;console.warn=noop;console.info=noop;console.debug=noop;molstar.Viewer.create('app',{layoutIsExpanded:false,layoutShowControls:false}).then(v=>{const pdb1=\`${selectedRFD3Design.pdb_content.replace(/`/g,'\\\\`').replace(/\$/g,'\\\\$')}\`;const pdb2=\`${rf3Results.predicted_pdb.replace(/`/g,'\\\\`').replace(/\$/g,'\\\\$')}\`;Promise.all([v.loadStructureFromData(pdb1,'pdb'),v.loadStructureFromData(pdb2,'pdb')]).then(([s1,s2])=>{v.visual.update({structure:s1},{type:'cartoon',color:{r:245,g:158,b:11},opacity:0.7});v.visual.update({structure:s2},{type:'cartoon',color:{r:59,g:130,b:246},opacity:0.7})})})</script></body></html>`} className="w-full h-full border-0" title="RFD3 vs RF3 Comparison" />
+                      <SilentStructureViewer
+                        pdbContent={selectedRFD3Design.pdb_content}
+                        secondPdbContent={rf3Results.predicted_pdb}
+                        title="RFD3 vs RF3 Comparison"
+                        heightClassName="h-96"
+                      />
                     </div>
                   ) : (
                     <div className="h-64 flex items-center justify-center text-gray-400 text-sm">

@@ -6,6 +6,7 @@ import { LoginModal } from '@/pages/LoginPage'
 import { ExperimentsPage } from '@/pages/ExperimentsPage'
 import { ExperimentDetailPage } from '@/pages/ExperimentDetailPage'
 import { MonitorPage } from '@/pages/MonitorPage'
+import { DeNovoDesignPage } from '@/pages/DeNovoDesignPage'
 import { useAppStore } from '@/store/useAppStore'
 
 function App() {
@@ -20,6 +21,7 @@ function App() {
       <Sidebar />
       <main className="flex-1 overflow-auto relative">
         {currentPage === '新建设计' && <NewDesignPage />}
+        {currentPage === 'De Novo Design' && <DeNovoDesignPage />}
         {currentPage === '实验记录' && <ExperimentsPage />}
         {currentPage === '作业中心' && <JobCenterPage />}
         {currentPage === '系统监控' && <MonitorPage />}

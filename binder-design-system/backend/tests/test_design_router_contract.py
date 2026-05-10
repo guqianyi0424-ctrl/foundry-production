@@ -46,9 +46,39 @@ class FakePipelineService:
         )
 
 
+class FakeRFD3Service:
+    def __init__(self):
+        self.config = None
+
+    def run(self, config):
+        self.config = config
+        return AdapterResult(
+            success=True,
+            data={
+                "success": True,
+                "designs": [
+                    {
+                        "index": 0,
+                        "batch": 0,
+                        "design_in_batch": 0,
+                        "name": "denovo_0",
+                        "pdb_content": "ATOM",
+                        "pdb_path": "",
+                        "plddt": 88.0,
+                    }
+                ],
+                "batches": [],
+                "num_batches": 1,
+                "num_designs": 1,
+                "first_backbone_pdb": "ATOM",
+            },
+        )
+
+
 class FakeServices:
     hotspot_prediction = FakeHotspotService()
     pipeline = FakePipelineService()
+    rfd3 = FakeRFD3Service()
 
 
 def patch_services(monkeypatch):
@@ -94,3 +124,26 @@ def test_run_pipeline_contract(monkeypatch):
     assert data["rfd3_results"]["success"] is True
     assert data["mpnn_results"]["success"] is True
     assert data["rf3_results"]["success"] is True
+
+
+def test_run_rfd3_accepts_denovo_request_without_target(monkeypatch):
+    design_router = patch_services(monkeypatch)
+    services = FakeServices()
+    monkeypatch.setattr(design_router, "get_design_services", lambda: services)
+
+    data = asyncio.run(
+        design_router.run_rfd3(
+            design_router.RFD3Request(
+                binder_length=72,
+                diffusion_batch_size=1,
+                n_batches=1,
+            )
+        )
+    )
+
+    assert data["success"] is True
+    assert data["num_designs"] == 1
+    assert services.rfd3.config.pdb_content == ""
+    assert services.rfd3.config.target is None
+    assert services.rfd3.config.hotspots == []
+    assert services.rfd3.config.binder_length == 72

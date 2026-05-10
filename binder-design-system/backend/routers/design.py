@@ -18,7 +18,7 @@ class HotspotRequest(BaseModel):
 
 
 class RFD3Request(BaseModel):
-    pdb_content: str
+    pdb_content: str = ""
     target: Optional[str] = None
     hotspots: Optional[List[str]] = None
     binder_length: int = 80

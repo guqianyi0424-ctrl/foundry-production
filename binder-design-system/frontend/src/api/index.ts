@@ -121,6 +121,21 @@ export const runRFD3 = async (params: {
   return res.data
 }
 
+export const runDeNovoRFD3 = async (params: {
+  length: number
+  diffusion_batch_size?: number
+  n_batches?: number
+  experiment_id?: string
+}): Promise<RFD3Response> => {
+  const res = await api.post('/run-rfd3', {
+    binder_length: params.length,
+    diffusion_batch_size: params.diffusion_batch_size,
+    n_batches: params.n_batches,
+    experiment_id: params.experiment_id,
+  })
+  return res.data
+}
+
 export interface RF3Summary {
   chain_ptm: number[]
   overall_plddt: number
