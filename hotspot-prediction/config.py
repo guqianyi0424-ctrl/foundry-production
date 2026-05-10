@@ -19,6 +19,9 @@ for dir_path in [DATA_DIR, PDB_DIR, FEATURES_DIR, MODELS_DIR, RESULTS_DIR, LOGS_
 
 DATA_FILE = os.path.join(BASE_DIR, 'merged_train.xlsx')
 TEST_DATA_FILE = os.path.join(BASE_DIR, 'merged_test.xlsx')
+PROCESSED_DIR = os.path.join(BASE_DIR, 'processed')
+PROCESSED_TRAIN_FILE = os.path.join(PROCESSED_DIR, 'train_val_samples.csv')
+PROCESSED_TEST_FILE = os.path.join(PROCESSED_DIR, 'legacy_data2_test_samples.csv')
 
 ESM2_MODEL = 'facebook/esm2_t33_650M_UR50D'
 ESM2_DIM = 1280

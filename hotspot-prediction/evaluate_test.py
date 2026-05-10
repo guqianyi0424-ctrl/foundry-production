@@ -69,9 +69,12 @@ def evaluate_on_test_set(models, test_loader):
             
             probs = F.softmax(logits, dim=1)
             
+            node_slices = batch.get('node_slices')
+            if node_slices is None:
+                node_slices = [(0, len(labels_flat))]
+            
             for i, pdb_id in enumerate(pdb_ids):
-                start_idx = sum(len(batch['labels'][j]) for j in range(i))
-                end_idx = start_idx + len(batch['labels'][i])
+                start_idx, end_idx = node_slices[i]
                 
                 protein_labels = labels_flat[start_idx:end_idx]
                 protein_probs = probs[start_idx:end_idx, 1]

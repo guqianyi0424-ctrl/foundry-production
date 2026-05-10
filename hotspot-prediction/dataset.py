@@ -22,13 +22,22 @@ warnings.filterwarnings('ignore')
 from config import (
     DATA_FILE, TEST_DATA_FILE, PDB_DIR, FEATURES_DIR, AMINO_ACIDS, AA_PROPERTIES,
     MAP_CUTOFF, DIST_NORM, ESM2_MODEL, ESM2_DIM, DEVICE,
-    PSSM_DIM, DSSP_DIM, HMM_DIM, TRADITIONAL_DIM
+    PSSM_DIM, DSSP_DIM, HMM_DIM, TRADITIONAL_DIM,
+    PROCESSED_TRAIN_FILE, PROCESSED_TEST_FILE
 )
 
 
 def load_raw_data():
     """加载原始Excel数据"""
-    df = pd.read_excel(DATA_FILE)
+    if os.path.exists(PROCESSED_TRAIN_FILE):
+        df = pd.read_csv(PROCESSED_TRAIN_FILE)
+    elif os.path.exists(DATA_FILE):
+        df = pd.read_excel(DATA_FILE)
+    else:
+        raise FileNotFoundError(
+            f"找不到训练数据。请先运行: PYTHONPATH=src python scripts/prepare_data.py "
+            f"(期待 {PROCESSED_TRAIN_FILE} 或 {DATA_FILE})"
+        )
     df.columns = df.columns.str.strip()
     
     if 'hotspot_list' in df.columns:
@@ -751,10 +760,14 @@ def collate_fn(batch):
     """自定义批处理函数"""
     pdb_ids = [item['pdb_id'] for item in batch]
     sequences = [item['sequence'] for item in batch]
-    labels = torch.nn.utils.rnn.pad_sequence(
-        [item['labels'] for item in batch], batch_first=True, padding_value=-1
-    )
+    labels = torch.cat([item['labels'] for item in batch], dim=0)
     adj_matrices = [item['adj_matrix'] for item in batch]
+    node_slices = []
+    offset = 0
+    for item in batch:
+        n_nodes = item['node_features'].shape[0]
+        node_slices.append((offset, offset + n_nodes))
+        offset += n_nodes
     
     graphs = dgl.batch([item['graph'] for item in batch])
     
@@ -766,7 +779,8 @@ def collate_fn(batch):
         'node_features': node_features,
         'labels': labels,
         'graphs': graphs,
-        'adj_matrices': adj_matrices
+        'adj_matrices': adj_matrices,
+        'node_slices': node_slices
     }
 
 
@@ -858,7 +872,15 @@ def apply_smote_to_features(node_features, labels, k_neighbors=5):
 
 def load_test_data():
     """加载独立测试数据"""
-    df = pd.read_excel(TEST_DATA_FILE)
+    if os.path.exists(PROCESSED_TEST_FILE):
+        df = pd.read_csv(PROCESSED_TEST_FILE)
+    elif os.path.exists(TEST_DATA_FILE):
+        df = pd.read_excel(TEST_DATA_FILE)
+    else:
+        raise FileNotFoundError(
+            f"找不到测试数据。请先运行: PYTHONPATH=src python scripts/prepare_data.py "
+            f"(期待 {PROCESSED_TEST_FILE} 或 {TEST_DATA_FILE})"
+        )
     df.columns = df.columns.str.strip()
     
     if 'hotspot_list' in df.columns:

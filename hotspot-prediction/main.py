@@ -6,6 +6,7 @@ import os
 import sys
 import argparse
 import pickle
+import torch
 
 from config import FEATURES_DIR, MODELS_DIR, RESULTS_DIR, DEVICE
 from dataset import prepare_dataset, prepare_test_dataset, PPIHotspotDataset, collate_fn
@@ -29,8 +30,8 @@ def run_pipeline(args):
             'model': args.model,
             'model_path': None,
             'threshold': 0.5,
-            'find_threshold': True,
-            'force_reload': False
+            'find_threshold': False,
+            'force_reload': args.reprocess
         })()
         eval_test_main(eval_test_args)
         return
@@ -56,7 +57,7 @@ def run_pipeline(args):
         model = create_model(args.model)
         model_path = os.path.join(MODELS_DIR, args.checkpoint)
         if os.path.exists(model_path):
-            checkpoint = pickle.load(open(model_path, 'rb'))
+            checkpoint = torch.load(model_path, map_location=DEVICE)
             model.load_state_dict(checkpoint['model_state_dict'])
             print(f"加载模型: {model_path}")
         else:

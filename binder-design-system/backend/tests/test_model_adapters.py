@@ -21,6 +21,19 @@ class FakeFailingRunner:
         raise RuntimeError("boom")
 
 
+class FakeHotspotPredictor:
+    def __init__(self):
+        self.calls = []
+
+    def predict_hotspots(self, pdb_content, top_k=5):
+        self.calls.append((pdb_content, top_k))
+        return {
+            "method": "dl",
+            "model_loaded": True,
+            "hotspots_detail": [],
+        }
+
+
 def test_rfd3_adapter_wraps_successful_runner():
     from adapters.model_adapters import RFD3Adapter
     from schemas.domain import RFD3JobConfig
@@ -49,3 +62,24 @@ def test_rfd3_adapter_returns_structured_failure():
     assert result.success is False
     assert result.error_code == "rfd3_adapter_failed"
     assert "boom" in result.raw_error
+
+
+def test_hotspot_adapter_reuses_predictor_instance():
+    from adapters.model_adapters import HotspotModelAdapter
+
+    created = []
+
+    def factory():
+        predictor = FakeHotspotPredictor()
+        created.append(predictor)
+        return predictor
+
+    adapter = HotspotModelAdapter(predictor_factory=factory)
+
+    first = adapter.predict("ATOM 1", top_k=3)
+    second = adapter.predict("ATOM 2", top_k=4)
+
+    assert first.success is True
+    assert second.success is True
+    assert len(created) == 1
+    assert created[0].calls == [("ATOM 1", 3), ("ATOM 2", 4)]

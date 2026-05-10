@@ -136,13 +136,18 @@ class RF3Adapter:
 class HotspotModelAdapter:
     def __init__(self, predictor_factory: Callable[[], Any] | None = None):
         self.predictor_factory = predictor_factory
+        self._cached_predictor = None
 
     def _predictor(self):
+        if self._cached_predictor is not None:
+            return self._cached_predictor
         if self.predictor_factory:
-            return self.predictor_factory()
-        from utils.hotspot_predictor import HotspotPredictor
+            self._cached_predictor = self.predictor_factory()
+        else:
+            from utils.hotspot_predictor import HotspotPredictor
 
-        return HotspotPredictor(top_k=5)
+            self._cached_predictor = HotspotPredictor(top_k=5)
+        return self._cached_predictor
 
     def predict(self, pdb_content: str, top_k: int = 5) -> AdapterResult[dict[str, Any]]:
         try:

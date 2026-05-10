@@ -471,10 +471,6 @@ class HotspotPredictor:
                     src.extend([i, j])
                     dst.extend([j, i])
 
-        for i in range(n_residues - 1):
-            src.extend([i, i + 1])
-            dst.extend([i + 1, i])
-
         g = dgl.graph((src, dst), num_nodes=n_residues)
         return g
 
