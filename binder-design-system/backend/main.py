@@ -1,8 +1,9 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
-from fastapi.openapi.utils import get_openapi
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.exceptions import RequestValidationError
+from fastapi.encoders import jsonable_encoder
 import os
 
 from routers import design, upload, jobs
@@ -22,6 +23,40 @@ app = FastAPI(
     description="蛋白质Binder设计系统后端API - 支持用户认证、实验记录管理、系统监控",
     version="2.0.0",
 )
+
+
+def error_code_for_status(status_code: int) -> str:
+    return {
+        400: "bad_request",
+        401: "unauthorized",
+        403: "forbidden",
+        404: "not_found",
+        422: "validation_error",
+        429: "too_many_requests",
+        500: "internal_error",
+    }.get(status_code, "request_error")
+
+
+def error_response(status_code: int, message: str, details=None) -> JSONResponse:
+    payload = {
+        "code": error_code_for_status(status_code),
+        "message": message,
+        "details": details,
+        "detail": message,
+    }
+    return JSONResponse(status_code=status_code, content=jsonable_encoder(payload))
+
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    message = exc.detail if isinstance(exc.detail, str) else "请求处理失败"
+    details = None if isinstance(exc.detail, str) else exc.detail
+    return error_response(exc.status_code, message, details)
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    return error_response(422, "请求参数校验失败", exc.errors())
 
 app.add_middleware(
     CORSMiddleware,

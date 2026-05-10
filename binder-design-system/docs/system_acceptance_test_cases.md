@@ -21,8 +21,14 @@
 | SAT-017 | 实验记录对象级权限 | owner 创建实验，other 使用自己的 token 访问 owner 实验 | 1. owner 创建实验；2. other 调用详情、更新、添加设计、导出、对比接口 | other 对 owner 实验的访问全部返回 403 | 自动化测试断言所有越权响应为 403 | 是 | `backend/tests/test_security_robustness.py::test_researcher_cannot_read_or_mutate_another_users_experiment` |
 | SAT-018 | 实验接口匿名访问限制 | 无 token 请求实验详情、创建、更新、添加设计、导出、对比 | 1. 不携带 token 调用实验记录接口；2. 读取响应状态码 | 所有需要登录的实验接口返回 401 | 自动化测试断言所有匿名响应为 401 | 是 | `backend/tests/test_security_robustness.py::test_experiment_interfaces_require_login` |
 | SAT-019 | 注册输入校验 | 短用户名、非法用户名、弱密码、非法邮箱 | 1. 调用注册接口提交非法输入；2. 读取响应状态码 | 非法输入均返回 422，不写入用户数据 | 自动化测试断言非法注册请求被拒绝 | 是 | `backend/tests/test_security_robustness.py::test_register_rejects_invalid_identity_inputs` |
-| SAT-020 | 上传文件鲁棒性 | `.txt` 文件、空 `.pdb` 文件、超过大小限制的结构文件 | 1. 调用上传接口提交异常文件；2. 读取响应状态码 | 异常文件均返回 400 | 自动化测试断言非法扩展名、空文件和超限文件被拒绝 | 是 | `backend/tests/test_security_robustness.py::test_upload_rejects_invalid_file_types_empty_files_and_oversized_content` |
-| SAT-021 | CORS 白名单配置 | `DEEPBINDER_CORS_ORIGINS=https://deepbinder.example.edu,http://localhost:5173` | 1. 设置环境变量；2. 重新加载后端应用；3. 读取 CORS 中间件配置 | CORS 只允许环境变量中列出的源 | 自动化测试断言 CORS allow_origins 等于配置列表 | 是 | `backend/tests/test_security_robustness.py::test_cors_origin_configuration_uses_environment_allowlist` |
+| SAT-020 | 统一错误响应 | 无 token 请求 `/api/auth/me`，非法注册 payload | 1. 调用当前用户接口；2. 提交非法注册数据；3. 读取响应 JSON | 错误响应包含 `code`、`message`、`details`；401 为 `unauthorized`；422 为 `validation_error` | 自动化测试断言统一错误字段和状态码 | 是 | `backend/tests/test_security_robustness.py::test_error_responses_use_unified_shape_for_auth_and_validation` |
+| SAT-021 | 伪造 token 拒绝 | 使用错误密钥签发的 JWT | 1. 构造伪造 token；2. 调用 `GET /api/auth/me` | 返回 401，不返回用户信息 | 自动化测试断言伪造 token 被拒绝 | 是 | `backend/tests/test_security_robustness.py::test_forged_token_is_rejected_on_protected_endpoint` |
+| SAT-022 | 系统监控管理员权限 | 匿名、研究人员 token、管理员 token | 1. 分别调用 `/api/monitor/status`；2. 读取响应状态码 | 匿名返回 401；研究人员返回 403；管理员返回 200 | 自动化测试断言监控接口权限边界 | 是 | `backend/tests/test_security_robustness.py::test_monitor_endpoints_require_admin_role` |
+| SAT-023 | 登录失败限流 | 管理员用户名和错误密码连续提交 | 1. 设置测试限流阈值为 2；2. 连续三次提交错误密码 | 前两次返回 401；第三次返回 429 | 自动化测试断言登录限流触发 | 是 | `backend/tests/test_security_robustness.py::test_login_rate_limit_blocks_repeated_failures` |
+| SAT-024 | 上传文件鲁棒性 | `.txt` 文件、空 `.pdb` 文件、超过大小限制的结构文件 | 1. 调用上传接口提交异常文件；2. 读取响应状态码 | 异常文件均返回 400 | 自动化测试断言非法扩展名、空文件和超限文件被拒绝 | 是 | `backend/tests/test_security_robustness.py::test_upload_rejects_invalid_file_types_empty_files_and_oversized_content` |
+| SAT-025 | 上传解析失败信息收敛 | 无效 `.pdb` 内容 | 1. 调用上传接口提交无法解析的结构文件；2. 读取错误提示 | 返回 400，提示为固定用户友好信息，不暴露底层异常 | 自动化测试断言解析失败消息已收敛 | 是 | `backend/tests/test_security_robustness.py::test_upload_parse_failure_returns_sanitized_message` |
+| SAT-026 | CORS 白名单配置 | `DEEPBINDER_CORS_ORIGINS=https://deepbinder.example.edu,http://localhost:5173` | 1. 设置环境变量；2. 重新加载后端应用；3. 读取 CORS 中间件配置 | CORS 只允许环境变量中列出的源 | 自动化测试断言 CORS allow_origins 等于配置列表 | 是 | `backend/tests/test_security_robustness.py::test_cors_origin_configuration_uses_environment_allowlist` |
+| SAT-027 | 云平台安全配置模板 | `.env.example` 与部署命令 | 1. 查看 `.env.example`；2. 查看云平台部署命令 | 配置模板包含 JWT 密钥、CORS 白名单和登录限流变量；部署命令提示生产环境替换密钥和域名 | 已补充配置文件和云平台安全配置说明 | 是 | 文档检查 |
 
 ## 执行命令
 

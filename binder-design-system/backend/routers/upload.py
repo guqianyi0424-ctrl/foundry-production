@@ -64,8 +64,8 @@ async def upload_pdb(file: UploadFile = File(...)):
             ],
             "pdb_content": pdb_str,
         }
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"文件解析失败: {str(e)}")
+    except Exception:
+        raise HTTPException(status_code=400, detail="文件解析失败，请确认文件为有效的 PDB/CIF/mmCIF 结构文件")
     finally:
         if tmp_path:
             Path(tmp_path).unlink(missing_ok=True)

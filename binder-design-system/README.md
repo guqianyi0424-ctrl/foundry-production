@@ -64,9 +64,12 @@ python -m uvicorn main:app --host 0.0.0.0 --port 8000
 export DEEPBINDER_ENV=production
 export DEEPBINDER_SECRET_KEY="请替换为不少于32位的随机密钥"
 export DEEPBINDER_CORS_ORIGINS="https://your-domain.example.edu"
+export DEEPBINDER_MAX_LOGIN_FAILURES=5
+export DEEPBINDER_LOGIN_FAILURE_WINDOW_SECONDS=300
 ```
 
 其中 `DEEPBINDER_SECRET_KEY` 用于签发 JWT，生产环境不能使用默认开发密钥。`DEEPBINDER_CORS_ORIGINS` 用逗号分隔允许访问后端 API 的前端源。
+`DEEPBINDER_MAX_LOGIN_FAILURES` 和 `DEEPBINDER_LOGIN_FAILURE_WINDOW_SECONDS` 用于控制登录失败限流。配置模板见 [.env.example](.env.example)。
 
 ## 验证
 

@@ -1,7 +1,10 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 import platform
 import psutil
 import time
+
+from database import User
+from routers.auth import require_role
 
 router = APIRouter()
 
@@ -9,7 +12,7 @@ _start_time = time.time()
 
 
 @router.get("/monitor/status", summary="系统状态")
-async def system_status():
+async def system_status(current_user: User = Depends(require_role(["admin"]))):
     gpu_info = "N/A"
     gpu_mem = "N/A"
     try:
@@ -44,14 +47,14 @@ async def system_status():
 
 
 @router.get("/monitor/tasks", summary="当前运行任务")
-async def current_tasks():
+async def current_tasks(current_user: User = Depends(require_role(["admin"]))):
     from logger import task_history
     recent = task_history[-20:] if task_history else []
     return {"tasks": recent}
 
 
 @router.get("/monitor/history", summary="历史任务统计")
-async def task_history_stats():
+async def task_history_stats(current_user: User = Depends(require_role(["admin"]))):
     from logger import task_history
     total = len(task_history)
     success = sum(1 for t in task_history if t["status"] == "success")

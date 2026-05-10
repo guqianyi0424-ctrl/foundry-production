@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 import json
 import os
 import re
+import time
 import uuid
 from urllib.parse import parse_qs
 
@@ -19,6 +20,9 @@ ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 1440
 MIN_SECRET_KEY_LENGTH = 32
 DEFAULT_SECRET_KEY = "deepbinder_secret_key_2026_change_in_production"
+MAX_LOGIN_FAILURES = int(os.getenv("DEEPBINDER_MAX_LOGIN_FAILURES", "5"))
+LOGIN_FAILURE_WINDOW_SECONDS = int(os.getenv("DEEPBINDER_LOGIN_FAILURE_WINDOW_SECONDS", "300"))
+_login_failures: dict[str, list[float]] = {}
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login", auto_error=False)
 
@@ -38,6 +42,41 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
     expire = datetime.utcnow() + (expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
     to_encode.update({"exp": expire})
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+
+
+def _login_failure_key(request: Request, username: Optional[str]) -> str:
+    client_host = request.client.host if request.client else "unknown"
+    normalized_username = (username or "").strip().lower() or "<empty>"
+    return f"{client_host}:{normalized_username}"
+
+
+def _active_login_failures(key: str, now: Optional[float] = None) -> list[float]:
+    now = now if now is not None else time.monotonic()
+    cutoff = now - LOGIN_FAILURE_WINDOW_SECONDS
+    attempts = [timestamp for timestamp in _login_failures.get(key, []) if timestamp >= cutoff]
+    if attempts:
+        _login_failures[key] = attempts
+    else:
+        _login_failures.pop(key, None)
+    return attempts
+
+
+def _is_login_rate_limited(key: str) -> bool:
+    if MAX_LOGIN_FAILURES <= 0:
+        return False
+    return len(_active_login_failures(key)) >= MAX_LOGIN_FAILURES
+
+
+def _record_login_failure(key: str) -> None:
+    if MAX_LOGIN_FAILURES <= 0:
+        return
+    attempts = _active_login_failures(key)
+    attempts.append(time.monotonic())
+    _login_failures[key] = attempts
+
+
+def _clear_login_failures(key: str) -> None:
+    _login_failures.pop(key, None)
 
 
 async def get_current_user(token: Optional[str] = Depends(oauth2_scheme), db: Session = Depends(get_db)):
@@ -150,10 +189,16 @@ async def login(request: Request, db: Session = Depends(get_db)):
         username = payload.get("username", [""])[0]
         password = payload.get("password", [""])[0]
 
+    failure_key = _login_failure_key(request, username)
+    if _is_login_rate_limited(failure_key):
+        raise HTTPException(status_code=429, detail="登录失败次数过多，请稍后再试")
+
     user = db.query(User).filter(User.username == username).first()
     if not user or not verify_password(password or "", user.hashed_password):
+        _record_login_failure(failure_key)
         raise HTTPException(status_code=401, detail="用户名或密码错误")
 
+    _clear_login_failures(failure_key)
     user.last_login = datetime.utcnow()
     audit = AuditLog(id=str(uuid.uuid4()), user_id=user.id, action="login", target="auth", detail={"username": user.username})
     db.add(audit)

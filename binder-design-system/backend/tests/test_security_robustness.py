@@ -5,13 +5,14 @@ import sys
 
 import httpx
 import pytest
+from jose import jwt
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from database import Base, User, get_db
 from main import app
-from routers.auth import get_password_hash
+from routers.auth import ALGORITHM, get_password_hash
 
 
 PDB_CONTENT = """\
@@ -165,6 +166,88 @@ def test_register_rejects_invalid_identity_inputs(monkeypatch):
     asyncio.run(run_with_client(monkeypatch, scenario))
 
 
+def test_error_responses_use_unified_shape_for_auth_and_validation(monkeypatch):
+    async def scenario(client):
+        unauthorized = await client.get("/api/auth/me")
+        invalid_payload = await client.post(
+            "/api/auth/register",
+            json={"username": "ab", "password": "123", "email": "not-email"},
+        )
+
+        assert unauthorized.status_code == 401
+        assert unauthorized.json()["code"] == "unauthorized"
+        assert unauthorized.json()["message"] == "请先登录"
+        assert "details" in unauthorized.json()
+
+        assert invalid_payload.status_code == 422
+        data = invalid_payload.json()
+        assert data["code"] == "validation_error"
+        assert data["message"] == "请求参数校验失败"
+        assert isinstance(data["details"], list)
+
+    asyncio.run(run_with_client(monkeypatch, scenario))
+
+
+def test_forged_token_is_rejected_on_protected_endpoint(monkeypatch):
+    async def scenario(client):
+        forged_token = jwt.encode({"sub": "admin", "role": "admin"}, "wrong-secret", algorithm=ALGORITHM)
+        response = await client.get(
+            "/api/auth/me",
+            headers={"Authorization": f"Bearer {forged_token}"},
+        )
+
+        assert response.status_code == 401
+        assert response.json()["code"] == "unauthorized"
+
+    asyncio.run(run_with_client(monkeypatch, scenario))
+
+
+def test_monitor_endpoints_require_admin_role(monkeypatch):
+    async def scenario(client):
+        researcher = await register_and_login(client, "researcher")
+        researcher_headers = {"Authorization": f"Bearer {researcher['access_token']}"}
+        admin_login = await client.post(
+            "/api/auth/login",
+            data={"username": "admin", "password": "admin123"},
+        )
+        assert admin_login.status_code == 200
+        admin_headers = {"Authorization": f"Bearer {admin_login.json()['access_token']}"}
+
+        anonymous = await client.get("/api/monitor/status")
+        forbidden = await client.get("/api/monitor/status", headers=researcher_headers)
+        allowed = await client.get("/api/monitor/status", headers=admin_headers)
+
+        assert anonymous.status_code == 401
+        assert forbidden.status_code == 403
+        assert allowed.status_code == 200
+        assert allowed.json()["status"] == "running"
+
+    asyncio.run(run_with_client(monkeypatch, scenario))
+
+
+def test_login_rate_limit_blocks_repeated_failures(monkeypatch):
+    import routers.auth as auth_router
+
+    monkeypatch.setattr(auth_router, "MAX_LOGIN_FAILURES", 2)
+    monkeypatch.setattr(auth_router, "LOGIN_FAILURE_WINDOW_SECONDS", 300)
+    auth_router._login_failures.clear()
+
+    async def scenario(client):
+        responses = [
+            await client.post(
+                "/api/auth/login",
+                data={"username": "admin", "password": "wrong-password"},
+            )
+            for _ in range(3)
+        ]
+
+        assert [response.status_code for response in responses] == [401, 401, 429]
+        assert responses[-1].json()["code"] == "too_many_requests"
+
+    asyncio.run(run_with_client(monkeypatch, scenario))
+    auth_router._login_failures.clear()
+
+
 def test_upload_rejects_invalid_file_types_empty_files_and_oversized_content(monkeypatch):
     import routers.upload as upload_router
 
@@ -187,6 +270,19 @@ def test_upload_rejects_invalid_file_types_empty_files_and_oversized_content(mon
         assert invalid_ext.status_code == 400
         assert empty_file.status_code == 400
         assert oversized_content.status_code == 400
+
+    asyncio.run(run_with_client(monkeypatch, scenario))
+
+
+def test_upload_parse_failure_returns_sanitized_message(monkeypatch):
+    async def scenario(client):
+        response = await client.post(
+            "/api/upload",
+            files={"file": ("invalid.pdb", "not a pdb structure", "chemical/x-pdb")},
+        )
+
+        assert response.status_code == 400
+        assert response.json()["message"] == "文件解析失败，请确认文件为有效的 PDB/CIF/mmCIF 结构文件"
 
     asyncio.run(run_with_client(monkeypatch, scenario))
 

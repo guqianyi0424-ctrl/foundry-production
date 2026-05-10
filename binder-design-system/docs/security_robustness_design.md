@@ -17,6 +17,10 @@ DeepBinder 面向研究人员和管理员两类用户。系统需要保护实验
 
 这一策略避免了用户通过猜测实验 ID 访问他人数据。
 
+系统监控接口属于管理员能力范围，`/api/monitor/status`、`/api/monitor/tasks` 和 `/api/monitor/history` 均要求管理员 token。研究人员访问返回 403，匿名访问返回 401。
+
+伪造、签名错误或缺少 `sub` 的 JWT 不会解析为有效用户，受保护接口统一按未登录处理。
+
 ## 配置安全
 
 生产环境要求配置 `DEEPBINDER_SECRET_KEY`。当 `DEEPBINDER_ENV=production` 或 `DEEPBINDER_ENV=prod` 时，后端会检查密钥是否使用默认值以及长度是否不少于 32 位，避免生产环境使用开发密钥。
@@ -28,6 +32,33 @@ DEEPBINDER_CORS_ORIGINS=https://deepbinder.example.edu,http://localhost:5173
 ```
 
 默认只允许本地开发源，不再使用全开放的 `*` 配置。
+
+项目提供 `.env.example` 作为本地和云平台配置模板。生产部署时必须复制后替换密钥和 CORS 域名，不应提交真实 `.env`。
+
+## 登录防护
+
+登录接口增加简单内存限流。默认同一客户端 IP 与用户名组合在 300 秒窗口内失败 5 次后返回 429：
+
+```bash
+DEEPBINDER_MAX_LOGIN_FAILURES=5
+DEEPBINDER_LOGIN_FAILURE_WINDOW_SECONDS=300
+```
+
+该策略适合毕设演示和单实例云平台部署，可降低暴力猜测密码风险。多实例生产环境可进一步替换为 Redis 或网关级限流。
+
+## 错误响应
+
+后端对 `HTTPException` 和请求参数校验错误提供统一错误响应格式：
+
+```json
+{
+  "code": "unauthorized",
+  "message": "请先登录",
+  "details": null
+}
+```
+
+其中 `code` 便于前端分类处理，`message` 用于用户提示，`details` 保留参数校验细节。为兼容现有前端错误提示，响应中仍保留 `detail` 字段。
 
 ## 上传文件鲁棒性
 
@@ -58,8 +89,13 @@ PDB 上传接口增加以下校验：
 
 - 研究人员不能查看或修改他人实验。
 - 匿名用户不能访问实验记录接口。
+- 伪造 token 不能访问受保护接口。
+- 研究人员不能访问系统监控接口，管理员可以访问。
+- 登录连续失败后触发 429 限流。
+- 后端错误响应包含 `code`、`message`、`details`。
 - 非法用户名、弱密码和非法邮箱被拒绝。
 - 非法扩展名、空文件和超限上传被拒绝。
+- 上传解析失败返回固定提示，不暴露底层解析异常。
 - CORS 白名单可通过环境变量配置。
 
 测试文件：
