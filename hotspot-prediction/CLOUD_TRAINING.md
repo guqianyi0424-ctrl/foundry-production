@@ -21,8 +21,12 @@ export PYTHONPATH="$PWD/src:$PWD"
 # Default: keep all data1 train/validation samples and report overlap with data2.
 # This keeps training usable with the current small data1/data2 pair.
 python scripts/prepare_data.py --overlap-policy none
+python scripts/generate_reports.py
 python scripts/train.py --force-reload
 python scripts/evaluate_test.py
+
+# Add Top-K tables after evaluation has produced results/test_predictions.csv.
+python scripts/generate_reports.py --predictions-csv results/test_predictions.csv
 ```
 
 Expected outputs:
@@ -31,6 +35,7 @@ Expected outputs:
 - feature caches under `hotspot-prediction/data/features/`
 - fold checkpoints under `hotspot-prediction/models/`
 - evaluation reports under `hotspot-prediction/results/`
+- thesis tables under `hotspot-prediction/results/`
 
 For a CPU-only smoke test, run only:
 
@@ -52,3 +57,89 @@ python scripts/prepare_data.py --overlap-policy uniprot-or-pdb-chain
 ```
 
 For publishable comparison, use a larger training set or cluster all sequences at the benchmark threshold, for example 60% identity, and split by cluster.
+
+## Thesis ablation runs
+
+The older `ablation_study.py` edits `config.py` and clears checkpoint/cache files, so avoid it for repeated cloud runs. Use environment-variable profiles instead. Each run writes to its own feature, model, and result directory.
+
+```bash
+cd foundry-production/hotspot-prediction
+export PYTHONPATH="$PWD/src:$PWD"
+python scripts/prepare_data.py --overlap-policy none
+python scripts/generate_reports.py
+
+# 1) ESM-2 only
+HOTSPOT_PSSM_DIM=0 HOTSPOT_HMM_DIM=0 HOTSPOT_TRADITIONAL_DIM=0 \
+HOTSPOT_FEATURES_DIR=data/features/esm2_only \
+HOTSPOT_MODELS_DIR=models/esm2_only \
+HOTSPOT_RESULTS_DIR=results/esm2_only \
+python scripts/train.py --force-reload
+
+HOTSPOT_PSSM_DIM=0 HOTSPOT_HMM_DIM=0 HOTSPOT_TRADITIONAL_DIM=0 \
+HOTSPOT_FEATURES_DIR=data/features/esm2_only \
+HOTSPOT_MODELS_DIR=models/esm2_only \
+HOTSPOT_RESULTS_DIR=results/esm2_only \
+python scripts/evaluate_test.py
+
+python scripts/generate_reports.py \
+  --predictions-csv results/esm2_only/test_predictions.csv \
+  --output-dir results/esm2_only
+
+# 2) ESM-2 + PSSM
+HOTSPOT_PSSM_DIM=20 HOTSPOT_HMM_DIM=0 HOTSPOT_TRADITIONAL_DIM=0 \
+HOTSPOT_FEATURES_DIR=data/features/esm2_pssm \
+HOTSPOT_MODELS_DIR=models/esm2_pssm \
+HOTSPOT_RESULTS_DIR=results/esm2_pssm \
+python scripts/train.py --force-reload
+
+HOTSPOT_PSSM_DIM=20 HOTSPOT_HMM_DIM=0 HOTSPOT_TRADITIONAL_DIM=0 \
+HOTSPOT_FEATURES_DIR=data/features/esm2_pssm \
+HOTSPOT_MODELS_DIR=models/esm2_pssm \
+HOTSPOT_RESULTS_DIR=results/esm2_pssm \
+python scripts/evaluate_test.py
+
+python scripts/generate_reports.py \
+  --predictions-csv results/esm2_pssm/test_predictions.csv \
+  --output-dir results/esm2_pssm
+
+# 3) ESM-2 + HMM
+HOTSPOT_PSSM_DIM=0 HOTSPOT_HMM_DIM=30 HOTSPOT_TRADITIONAL_DIM=0 \
+HOTSPOT_FEATURES_DIR=data/features/esm2_hmm \
+HOTSPOT_MODELS_DIR=models/esm2_hmm \
+HOTSPOT_RESULTS_DIR=results/esm2_hmm \
+python scripts/train.py --force-reload
+
+HOTSPOT_PSSM_DIM=0 HOTSPOT_HMM_DIM=30 HOTSPOT_TRADITIONAL_DIM=0 \
+HOTSPOT_FEATURES_DIR=data/features/esm2_hmm \
+HOTSPOT_MODELS_DIR=models/esm2_hmm \
+HOTSPOT_RESULTS_DIR=results/esm2_hmm \
+python scripts/evaluate_test.py
+
+python scripts/generate_reports.py \
+  --predictions-csv results/esm2_hmm/test_predictions.csv \
+  --output-dir results/esm2_hmm
+
+# 4) Main model: ESM-2 + PSSM + HMM
+HOTSPOT_PSSM_DIM=20 HOTSPOT_HMM_DIM=30 HOTSPOT_TRADITIONAL_DIM=0 \
+HOTSPOT_FEATURES_DIR=data/features/esm2_pssm_hmm \
+HOTSPOT_MODELS_DIR=models/esm2_pssm_hmm \
+HOTSPOT_RESULTS_DIR=results/esm2_pssm_hmm \
+python scripts/train.py --force-reload
+
+HOTSPOT_PSSM_DIM=20 HOTSPOT_HMM_DIM=30 HOTSPOT_TRADITIONAL_DIM=0 \
+HOTSPOT_FEATURES_DIR=data/features/esm2_pssm_hmm \
+HOTSPOT_MODELS_DIR=models/esm2_pssm_hmm \
+HOTSPOT_RESULTS_DIR=results/esm2_pssm_hmm \
+python scripts/evaluate_test.py
+
+python scripts/generate_reports.py \
+  --predictions-csv results/esm2_pssm_hmm/test_predictions.csv \
+  --output-dir results/esm2_pssm_hmm
+
+# Aggregate real completed ablation metrics into one table.
+python scripts/generate_reports.py \
+  --ablation-results-root results \
+  --output-dir results
+```
+
+Report these as exploratory ablations for a small undergraduate dataset. The key presentation is the trend across feature groups plus the independent data2 result, not claiming a large-scale benchmark.

@@ -9,10 +9,10 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 DATA_DIR = os.path.join(BASE_DIR, 'data')
 PDB_DIR = os.path.join(DATA_DIR, 'pdb_files')
-FEATURES_DIR = os.path.join(DATA_DIR, 'features')
-MODELS_DIR = os.path.join(BASE_DIR, 'models')
-RESULTS_DIR = os.path.join(BASE_DIR, 'results')
-LOGS_DIR = os.path.join(BASE_DIR, 'logs')
+FEATURES_DIR = os.environ.get('HOTSPOT_FEATURES_DIR', os.path.join(DATA_DIR, 'features'))
+MODELS_DIR = os.environ.get('HOTSPOT_MODELS_DIR', os.path.join(BASE_DIR, 'models'))
+RESULTS_DIR = os.environ.get('HOTSPOT_RESULTS_DIR', os.path.join(BASE_DIR, 'results'))
+LOGS_DIR = os.environ.get('HOTSPOT_LOGS_DIR', os.path.join(BASE_DIR, 'logs'))
 
 for dir_path in [DATA_DIR, PDB_DIR, FEATURES_DIR, MODELS_DIR, RESULTS_DIR, LOGS_DIR]:
     os.makedirs(dir_path, exist_ok=True)
@@ -26,10 +26,10 @@ PROCESSED_TEST_FILE = os.path.join(PROCESSED_DIR, 'legacy_data2_test_samples.csv
 ESM2_MODEL = 'facebook/esm2_t33_650M_UR50D'
 ESM2_DIM = 1280
 
-PSSM_DIM = 20
-DSSP_DIM = 0
-HMM_DIM = 30
-TRADITIONAL_DIM = 0
+PSSM_DIM = int(os.environ.get('HOTSPOT_PSSM_DIM', '20'))
+DSSP_DIM = int(os.environ.get('HOTSPOT_DSSP_DIM', '0'))
+HMM_DIM = int(os.environ.get('HOTSPOT_HMM_DIM', '30'))
+TRADITIONAL_DIM = int(os.environ.get('HOTSPOT_TRADITIONAL_DIM', '0'))
 
 INPUT_DIM = ESM2_DIM + PSSM_DIM + DSSP_DIM + HMM_DIM + TRADITIONAL_DIM
 

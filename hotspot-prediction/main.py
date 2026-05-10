@@ -31,7 +31,9 @@ def run_pipeline(args):
             'model_path': None,
             'threshold': 0.5,
             'find_threshold': False,
-            'force_reload': args.reprocess
+            'force_reload': args.reprocess,
+            'predictions_csv': None,
+            'metrics_csv': None,
         })()
         eval_test_main(eval_test_args)
         return

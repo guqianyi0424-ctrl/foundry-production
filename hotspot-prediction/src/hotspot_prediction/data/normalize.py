@@ -1,7 +1,7 @@
 """Normalize hotspot prediction source datasets.
 
 The training source is data1, where labels are derived from mutation ddG:
-hotspot if ddG > 2 kcal/mol. The independent test source is data2, where
+hotspot if ddG >= 2 kcal/mol. The independent test source is data2, where
 hotspot lists are provided in UniProt numbering and mapped to PDB-relative
 residue numbering through the structure range in the spreadsheet.
 """
@@ -42,7 +42,7 @@ def _first_present(row: dict[str, Any], names: Iterable[str]) -> Any:
 
 
 def label_from_ddg(ddg: Any, threshold: float = DDG_HOTSPOT_THRESHOLD) -> int:
-    """Return 1 when ddG is strictly above the hotspot threshold."""
+    """Return 1 when ddG reaches the hotspot threshold."""
     parsed = parse_float(ddg)
     if parsed is None:
         return 0

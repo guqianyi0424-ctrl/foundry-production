@@ -7,6 +7,8 @@
 """
 import os
 import argparse
+import sys
+from pathlib import Path
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -22,6 +24,12 @@ from tqdm import tqdm
 from config import MODELS_DIR, RESULTS_DIR, DEVICE, INPUT_DIM, HIDDEN_DIM, NUM_HEADS, NUM_LAYERS, DROPOUT
 from dataset import prepare_test_dataset, PPIHotspotDataset, collate_fn
 from model import create_model
+
+SRC_DIR = Path(__file__).resolve().parent / "src"
+if str(SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(SRC_DIR))
+
+from hotspot_prediction.evaluation_exports import export_metrics_table, export_prediction_table
 
 
 def load_best_model(model_path, model_type='gat'):
@@ -275,6 +283,8 @@ def main(args=None):
         parser.add_argument('--threshold', type=float, default=0.5, help='分类阈值')
         parser.add_argument('--find-threshold', action='store_true', help='自动寻找最优阈值')
         parser.add_argument('--force-reload', action='store_true', help='强制重新处理数据')
+        parser.add_argument('--predictions-csv', type=str, default=None, help='保存逐残基预测CSV')
+        parser.add_argument('--metrics-csv', type=str, default=None, help='保存独立测试指标CSV')
         args = parser.parse_args()
     
     print("\n" + "=" * 60)
@@ -340,6 +350,13 @@ def main(args=None):
     generate_report(metrics, balanced_metrics, report_path, model_paths[0], threshold)
     plot_roc_curve(labels, probs, roc_path)
     plot_pr_curve(labels, probs, pr_path)
+
+    predictions_csv = args.predictions_csv or os.path.join(RESULTS_DIR, 'test_predictions.csv')
+    metrics_csv = args.metrics_csv or os.path.join(RESULTS_DIR, 'test_metrics.csv')
+    export_prediction_table(predictions_csv, pdb_ids, labels, probs)
+    export_metrics_table(metrics_csv, metrics, balanced_metrics, threshold)
+    print(f"预测明细CSV已保存: {predictions_csv}")
+    print(f"测试指标CSV已保存: {metrics_csv}")
     
     np.save(os.path.join(RESULTS_DIR, 'test_predictions.npy'), {
         'labels': labels,
