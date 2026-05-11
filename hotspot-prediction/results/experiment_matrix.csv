@@ -1,0 +1,6 @@
+method,input,purpose,status
+Rule-based baseline,residue type + simple exposure/center heuristics,engineering fallback and lower bound,run on cloud or backend
+Traditional ML / PPI-hotspotID-style,"aa type, SASA, conservation, energy-like features",baseline inspired by PPI-hotspotID,optional if feature extraction is available
+ESM-2 embedding + MLP,frozen ESM-2 residue embeddings,test value of pretrained sequence features,recommended ablation
+ESM-2 + GAT,frozen ESM-2 plus residue distance graph,main single model,implemented training path
+ESM-2 + GAT ensemble,5-fold GAT checkpoints,main reported model,implemented evaluation path
