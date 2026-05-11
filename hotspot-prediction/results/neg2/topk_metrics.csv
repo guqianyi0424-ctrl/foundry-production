@@ -1,0 +1,4 @@
+top_k,proteins_with_hotspots,proteins_hit,topk_hit_rate,total_hotspots,hotspots_found,hotspot_recall,selected_residues
+3,60,20,0.3333333333333333,191,29,0.1518324607329843,180
+5,60,24,0.4,191,39,0.20418848167539266,300
+10,60,27,0.45,191,58,0.3036649214659686,600
