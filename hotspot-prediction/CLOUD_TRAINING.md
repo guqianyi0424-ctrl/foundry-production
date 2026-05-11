@@ -23,7 +23,7 @@ export PYTHONPATH="$PWD/src:$PWD"
 python scripts/prepare_data.py --overlap-policy none
 python scripts/generate_reports.py
 python scripts/train.py --force-reload
-python scripts/evaluate_test.py
+python scripts/evaluate_test.py --threshold 0.5
 
 # Add Top-K tables after evaluation has produced results/test_predictions.csv.
 python scripts/generate_reports.py --predictions-csv results/test_predictions.csv
@@ -79,7 +79,7 @@ HOTSPOT_PSSM_DIM=0 HOTSPOT_HMM_DIM=0 HOTSPOT_TRADITIONAL_DIM=0 \
 HOTSPOT_FEATURES_DIR=data/features/esm2_only \
 HOTSPOT_MODELS_DIR=models/esm2_only \
 HOTSPOT_RESULTS_DIR=results/esm2_only \
-python scripts/evaluate_test.py
+python scripts/evaluate_test.py --threshold 0.5
 
 python scripts/generate_reports.py \
   --predictions-csv results/esm2_only/test_predictions.csv \
@@ -96,7 +96,7 @@ HOTSPOT_PSSM_DIM=20 HOTSPOT_HMM_DIM=0 HOTSPOT_TRADITIONAL_DIM=0 \
 HOTSPOT_FEATURES_DIR=data/features/esm2_pssm \
 HOTSPOT_MODELS_DIR=models/esm2_pssm \
 HOTSPOT_RESULTS_DIR=results/esm2_pssm \
-python scripts/evaluate_test.py
+python scripts/evaluate_test.py --threshold 0.5
 
 python scripts/generate_reports.py \
   --predictions-csv results/esm2_pssm/test_predictions.csv \
@@ -113,7 +113,7 @@ HOTSPOT_PSSM_DIM=0 HOTSPOT_HMM_DIM=30 HOTSPOT_TRADITIONAL_DIM=0 \
 HOTSPOT_FEATURES_DIR=data/features/esm2_hmm \
 HOTSPOT_MODELS_DIR=models/esm2_hmm \
 HOTSPOT_RESULTS_DIR=results/esm2_hmm \
-python scripts/evaluate_test.py
+python scripts/evaluate_test.py --threshold 0.5
 
 python scripts/generate_reports.py \
   --predictions-csv results/esm2_hmm/test_predictions.csv \
@@ -130,7 +130,7 @@ HOTSPOT_PSSM_DIM=20 HOTSPOT_HMM_DIM=30 HOTSPOT_TRADITIONAL_DIM=0 \
 HOTSPOT_FEATURES_DIR=data/features/esm2_pssm_hmm \
 HOTSPOT_MODELS_DIR=models/esm2_pssm_hmm \
 HOTSPOT_RESULTS_DIR=results/esm2_pssm_hmm \
-python scripts/evaluate_test.py
+python scripts/evaluate_test.py --threshold 0.5
 
 python scripts/generate_reports.py \
   --predictions-csv results/esm2_pssm_hmm/test_predictions.csv \
@@ -143,3 +143,11 @@ python scripts/generate_reports.py \
 ```
 
 Report these as exploratory ablations for a small undergraduate dataset. The key presentation is the trend across feature groups plus the independent data2 result, not claiming a large-scale benchmark.
+
+## Paper-safe evaluation rules
+
+Do not use `--find-threshold` for the paper's main independent-test table. That option searches the test labels and is only acceptable as an oracle analysis in an appendix. For the main result, use a fixed threshold such as `0.5` or a threshold selected from validation folds and recorded before running `scripts/evaluate_test.py`.
+
+Before writing the thesis tables, deduplicate or report data2 at the PDB-chain level. The raw data2 source contains repeated records; the paper should present independent-test metrics on the normalized PDB-chain samples and Top-K metrics from `results/test_predictions.csv`.
+
+The current bundled data is small and overlapping: strict removal of data2-overlapping data1 proteins leaves too few training samples for normal GAT retraining. Treat strict non-overlap as an audit table, and present the normal data1-train/data2-test experiment as an undergraduate exploratory study rather than a publication-grade benchmark.
