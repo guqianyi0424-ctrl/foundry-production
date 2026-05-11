@@ -1,0 +1,270 @@
+============================================================
+5折交叉验证
+============================================================
+
+数据不平衡分析:
+  正样本权重: 24.3843
+  负样本权重: 0.5105
+  不平衡比例: 47.77:1
+
+============================================================
+Fold 1/5
+============================================================
+  使用加权采样器
+  使用类别权重: pos_weight=24.3843
+Epoch 1/200 - Loss: 0.1463 - Val AUC: 0.6777 - Val AUPRC: 0.6487 - Val F1: 0.0000
+Epoch 2/200 - Loss: 0.1370 - Val AUC: 0.6904 - Val AUPRC: 0.6288 - Val F1: 0.0000
+Epoch 3/200 - Loss: 0.1281 - Val AUC: 0.6846 - Val AUPRC: 0.6543 - Val F1: 0.0000
+Epoch 4/200 - Loss: 0.0945 - Val AUC: 0.7080 - Val AUPRC: 0.6792 - Val F1: 0.3721
+Epoch 5/200 - Loss: 0.0991 - Val AUC: 0.7812 - Val AUPRC: 0.7474 - Val F1: 0.0606
+Epoch 6/200 - Loss: 0.0543 - Val AUC: 0.8154 - Val AUPRC: 0.7519 - Val F1: 0.1143
+Epoch 7/200 - Loss: 0.0686 - Val AUC: 0.7031 - Val AUPRC: 0.6795 - Val F1: 0.1176
+Epoch 8/200 - Loss: 0.0568 - Val AUC: 0.6504 - Val AUPRC: 0.5596 - Val F1: 0.0000
+Epoch 9/200 - Loss: 0.0238 - Val AUC: 0.6787 - Val AUPRC: 0.7409 - Val F1: 0.0000
+Epoch 10/200 - Loss: 0.0070 - Val AUC: 0.7090 - Val AUPRC: 0.6976 - Val F1: 0.0000
+Epoch 11/200 - Loss: 0.1430 - Val AUC: 0.7471 - Val AUPRC: 0.6924 - Val F1: 0.2632
+Epoch 12/200 - Loss: 0.0273 - Val AUC: 0.6719 - Val AUPRC: 0.5931 - Val F1: 0.1622
+Epoch 13/200 - Loss: 0.0250 - Val AUC: 0.7461 - Val AUPRC: 0.7333 - Val F1: 0.0606
+Epoch 14/200 - Loss: 0.0130 - Val AUC: 0.7471 - Val AUPRC: 0.7185 - Val F1: 0.2105
+Epoch 15/200 - Loss: 0.0238 - Val AUC: 0.7607 - Val AUPRC: 0.6686 - Val F1: 0.0000
+Epoch 16/200 - Loss: 0.0081 - Val AUC: 0.7021 - Val AUPRC: 0.6088 - Val F1: 0.0000
+Epoch 17/200 - Loss: 0.0056 - Val AUC: 0.6807 - Val AUPRC: 0.5900 - Val F1: 0.1143
+Epoch 18/200 - Loss: 0.0910 - Val AUC: 0.7354 - Val AUPRC: 0.6402 - Val F1: 0.1667
+Epoch 19/200 - Loss: 0.0035 - Val AUC: 0.7969 - Val AUPRC: 0.7148 - Val F1: 0.0000
+Epoch 20/200 - Loss: 0.0128 - Val AUC: 0.7363 - Val AUPRC: 0.6535 - Val F1: 0.0000
+Epoch 21/200 - Loss: 0.0057 - Val AUC: 0.6191 - Val AUPRC: 0.5801 - Val F1: 0.0588
+Early stopping at epoch 21
+
+Fold 1 结果:
+  ROC-AUC: 0.7924
+  PR-AUC: 0.0921
+  F1: 0.0833
+  Precision (PRE): 0.1250
+  Recall (SEN): 0.0625
+  Specificity (SPE): 0.9858
+  MCC: 0.0678
+  平衡评估 Precision: 0.6667
+  平衡评估 F1: 0.1143
+  平衡评估 Recall: 0.0625
+  平衡评估 Specificity: 0.9688
+  最优阈值: 0.22
+
+============================================================
+Fold 2/5
+============================================================
+  使用加权采样器
+  使用类别权重: pos_weight=24.3843
+Epoch 1/200 - Loss: 0.1358 - Val AUC: 0.6394 - Val AUPRC: 0.1290 - Val F1: 0.0000
+Epoch 2/200 - Loss: 0.1156 - Val AUC: 0.7637 - Val AUPRC: 0.1867 - Val F1: 0.0000
+Epoch 3/200 - Loss: 0.1344 - Val AUC: 0.6409 - Val AUPRC: 0.0928 - Val F1: 0.1505
+Epoch 4/200 - Loss: 0.2385 - Val AUC: 0.7234 - Val AUPRC: 0.1284 - Val F1: 0.2128
+Epoch 5/200 - Loss: 0.0939 - Val AUC: 0.7794 - Val AUPRC: 0.1850 - Val F1: 0.2927
+Epoch 6/200 - Loss: 0.0374 - Val AUC: 0.7600 - Val AUPRC: 0.2226 - Val F1: 0.2887
+Epoch 7/200 - Loss: 0.0589 - Val AUC: 0.7339 - Val AUPRC: 0.1646 - Val F1: 0.2222
+Epoch 8/200 - Loss: 0.0808 - Val AUC: 0.8154 - Val AUPRC: 0.2944 - Val F1: 0.3415
+Epoch 9/200 - Loss: 0.0599 - Val AUC: 0.8562 - Val AUPRC: 0.3047 - Val F1: 0.3721
+Epoch 10/200 - Loss: 0.0639 - Val AUC: 0.8350 - Val AUPRC: 0.2771 - Val F1: 0.2162
+Epoch 11/200 - Loss: 0.0155 - Val AUC: 0.8593 - Val AUPRC: 0.3314 - Val F1: 0.3810
+Epoch 12/200 - Loss: 0.0225 - Val AUC: 0.8702 - Val AUPRC: 0.4203 - Val F1: 0.3636
+Epoch 13/200 - Loss: 0.0964 - Val AUC: 0.8787 - Val AUPRC: 0.4027 - Val F1: 0.2353
+Epoch 14/200 - Loss: 0.0521 - Val AUC: 0.8650 - Val AUPRC: 0.3602 - Val F1: 0.4255
+Epoch 15/200 - Loss: 0.0058 - Val AUC: 0.8821 - Val AUPRC: 0.4437 - Val F1: 0.2500
+Epoch 16/200 - Loss: 0.0127 - Val AUC: 0.8749 - Val AUPRC: 0.4392 - Val F1: 0.4103
+Epoch 17/200 - Loss: 0.0113 - Val AUC: 0.8658 - Val AUPRC: 0.3995 - Val F1: 0.1429
+Epoch 18/200 - Loss: 0.0501 - Val AUC: 0.8284 - Val AUPRC: 0.3252 - Val F1: 0.1875
+Epoch 19/200 - Loss: 0.0045 - Val AUC: 0.8001 - Val AUPRC: 0.2876 - Val F1: 0.3077
+Epoch 20/200 - Loss: 0.0118 - Val AUC: 0.8534 - Val AUPRC: 0.3355 - Val F1: 0.1429
+Epoch 21/200 - Loss: 0.0041 - Val AUC: 0.8408 - Val AUPRC: 0.3435 - Val F1: 0.1935
+Epoch 22/200 - Loss: 0.0034 - Val AUC: 0.8587 - Val AUPRC: 0.3896 - Val F1: 0.3590
+Epoch 23/200 - Loss: 0.0012 - Val AUC: 0.8559 - Val AUPRC: 0.3685 - Val F1: 0.3030
+Epoch 24/200 - Loss: 0.0054 - Val AUC: 0.8621 - Val AUPRC: 0.3988 - Val F1: 0.0741
+Epoch 25/200 - Loss: 0.0316 - Val AUC: 0.8311 - Val AUPRC: 0.2840 - Val F1: 0.1290
+Epoch 26/200 - Loss: 0.0088 - Val AUC: 0.8578 - Val AUPRC: 0.3446 - Val F1: 0.2857
+Epoch 27/200 - Loss: 0.0033 - Val AUC: 0.8584 - Val AUPRC: 0.3356 - Val F1: 0.1429
+Epoch 28/200 - Loss: 0.5564 - Val AUC: 0.8536 - Val AUPRC: 0.3517 - Val F1: 0.1379
+Epoch 29/200 - Loss: 0.0025 - Val AUC: 0.8420 - Val AUPRC: 0.2708 - Val F1: 0.1379
+Epoch 30/200 - Loss: 0.3394 - Val AUC: 0.8502 - Val AUPRC: 0.3717 - Val F1: 0.1429
+Early stopping at epoch 30
+
+Fold 2 结果:
+  ROC-AUC: 0.8620
+  PR-AUC: 0.1592
+  F1: 0.1860
+  Precision (PRE): 0.2353
+  Recall (SEN): 0.1538
+  Specificity (SPE): 0.9906
+  MCC: 0.1780
+  平衡评估 Precision: 0.5714
+  平衡评估 F1: 0.2424
+  平衡评估 Recall: 0.1538
+  平衡评估 Specificity: 0.9926
+  最优阈值: 0.36
+
+============================================================
+Fold 3/5
+============================================================
+  使用加权采样器
+  使用类别权重: pos_weight=24.3843
+Epoch 1/200 - Loss: 0.1497 - Val AUC: 0.8066 - Val AUPRC: 0.4710 - Val F1: 0.0000
+Epoch 2/200 - Loss: 0.1403 - Val AUC: 0.8517 - Val AUPRC: 0.5254 - Val F1: 0.0000
+Epoch 3/200 - Loss: 0.1331 - Val AUC: 0.8862 - Val AUPRC: 0.5826 - Val F1: 0.5128
+Epoch 4/200 - Loss: 0.0891 - Val AUC: 0.8092 - Val AUPRC: 0.5058 - Val F1: 0.3871
+Epoch 5/200 - Loss: 0.0731 - Val AUC: 0.6928 - Val AUPRC: 0.3475 - Val F1: 0.1538
+Epoch 6/200 - Loss: 0.0303 - Val AUC: 0.7721 - Val AUPRC: 0.4688 - Val F1: 0.2581
+Epoch 7/200 - Loss: 0.0183 - Val AUC: 0.7710 - Val AUPRC: 0.4279 - Val F1: 0.1481
+Epoch 8/200 - Loss: 0.0303 - Val AUC: 0.8040 - Val AUPRC: 0.6057 - Val F1: 0.3448
+Epoch 9/200 - Loss: 0.1170 - Val AUC: 0.7698 - Val AUPRC: 0.4210 - Val F1: 0.2143
+Epoch 10/200 - Loss: 0.0684 - Val AUC: 0.7075 - Val AUPRC: 0.3875 - Val F1: 0.2143
+Epoch 11/200 - Loss: 0.0447 - Val AUC: 0.7103 - Val AUPRC: 0.4396 - Val F1: 0.2143
+Epoch 12/200 - Loss: 0.0300 - Val AUC: 0.7983 - Val AUPRC: 0.5006 - Val F1: 0.1481
+Epoch 13/200 - Loss: 0.0031 - Val AUC: 0.7739 - Val AUPRC: 0.4408 - Val F1: 0.1481
+Epoch 14/200 - Loss: 0.0397 - Val AUC: 0.7583 - Val AUPRC: 0.4399 - Val F1: 0.3226
+Epoch 15/200 - Loss: 0.0118 - Val AUC: 0.7928 - Val AUPRC: 0.5104 - Val F1: 0.1538
+Epoch 16/200 - Loss: 0.0038 - Val AUC: 0.7807 - Val AUPRC: 0.4783 - Val F1: 0.1538
+Epoch 17/200 - Loss: 0.0826 - Val AUC: 0.7908 - Val AUPRC: 0.5412 - Val F1: 0.2857
+Epoch 18/200 - Loss: 0.0396 - Val AUC: 0.7905 - Val AUPRC: 0.4498 - Val F1: 0.3030
+Early stopping at epoch 18
+
+Fold 3 结果:
+  ROC-AUC: 0.8032
+  PR-AUC: 0.0550
+  F1: 0.0769
+  Precision (PRE): 0.0424
+  Recall (SEN): 0.4167
+  Specificity (SPE): 0.8616
+  MCC: 0.0951
+  平衡评估 Precision: 0.8333
+  平衡评估 F1: 0.5556
+  平衡评估 Recall: 0.4167
+  平衡评估 Specificity: 0.9862
+  最优阈值: 0.39
+
+============================================================
+Fold 4/5
+============================================================
+  使用加权采样器
+  使用类别权重: pos_weight=24.3843
+Epoch 1/200 - Loss: 0.1977 - Val AUC: 0.6508 - Val AUPRC: 0.3008 - Val F1: 0.0000
+Epoch 2/200 - Loss: 0.1222 - Val AUC: 0.8600 - Val AUPRC: 0.6550 - Val F1: 0.0000
+Epoch 3/200 - Loss: 0.0992 - Val AUC: 0.6803 - Val AUPRC: 0.4184 - Val F1: 0.3333
+Epoch 4/200 - Loss: 0.1620 - Val AUC: 0.6963 - Val AUPRC: 0.3617 - Val F1: 0.3250
+Epoch 5/200 - Loss: 0.0262 - Val AUC: 0.7271 - Val AUPRC: 0.4196 - Val F1: 0.2941
+Epoch 6/200 - Loss: 0.0589 - Val AUC: 0.7882 - Val AUPRC: 0.4975 - Val F1: 0.3030
+Epoch 7/200 - Loss: 0.0573 - Val AUC: 0.8554 - Val AUPRC: 0.5991 - Val F1: 0.4878
+Epoch 8/200 - Loss: 0.0510 - Val AUC: 0.8777 - Val AUPRC: 0.5284 - Val F1: 0.0690
+Epoch 9/200 - Loss: 0.0067 - Val AUC: 0.9044 - Val AUPRC: 0.6334 - Val F1: 0.1875
+Epoch 10/200 - Loss: 0.0232 - Val AUC: 0.7780 - Val AUPRC: 0.4426 - Val F1: 0.1935
+Epoch 11/200 - Loss: 0.0093 - Val AUC: 0.8088 - Val AUPRC: 0.5611 - Val F1: 0.4324
+Epoch 12/200 - Loss: 0.0313 - Val AUC: 0.7776 - Val AUPRC: 0.4770 - Val F1: 0.3684
+Epoch 13/200 - Loss: 0.0345 - Val AUC: 0.8415 - Val AUPRC: 0.5367 - Val F1: 0.2857
+Epoch 14/200 - Loss: 0.0112 - Val AUC: 0.7799 - Val AUPRC: 0.5539 - Val F1: 0.4762
+Epoch 15/200 - Loss: 0.1244 - Val AUC: 0.8135 - Val AUPRC: 0.5946 - Val F1: 0.4000
+Epoch 16/200 - Loss: 0.0038 - Val AUC: 0.7954 - Val AUPRC: 0.5433 - Val F1: 0.3030
+Epoch 17/200 - Loss: 0.0042 - Val AUC: 0.7651 - Val AUPRC: 0.4079 - Val F1: 0.3243
+Epoch 18/200 - Loss: 0.0094 - Val AUC: 0.7867 - Val AUPRC: 0.5748 - Val F1: 0.3030
+Epoch 19/200 - Loss: 0.0040 - Val AUC: 0.7462 - Val AUPRC: 0.4972 - Val F1: 0.4615
+Epoch 20/200 - Loss: 0.0600 - Val AUC: 0.6703 - Val AUPRC: 0.3217 - Val F1: 0.2703
+Epoch 21/200 - Loss: 0.0026 - Val AUC: 0.6871 - Val AUPRC: 0.3688 - Val F1: 0.3429
+Epoch 22/200 - Loss: 0.0076 - Val AUC: 0.7640 - Val AUPRC: 0.5071 - Val F1: 0.2500
+Epoch 23/200 - Loss: 0.0032 - Val AUC: 0.7910 - Val AUPRC: 0.5390 - Val F1: 0.3529
+Epoch 24/200 - Loss: 0.0019 - Val AUC: 0.8006 - Val AUPRC: 0.5385 - Val F1: 0.2500
+Early stopping at epoch 24
+
+Fold 4 结果:
+  ROC-AUC: 0.7895
+  PR-AUC: 0.0599
+  F1: 0.1071
+  Precision (PRE): 0.1071
+  Recall (SEN): 0.1071
+  Specificity (SPE): 0.9822
+  MCC: 0.0894
+  平衡评估 Precision: 0.7500
+  平衡评估 F1: 0.1875
+  平衡评估 Recall: 0.1071
+  平衡评估 Specificity: 0.9947
+  最优阈值: 0.18
+
+============================================================
+Fold 5/5
+============================================================
+  使用加权采样器
+  使用类别权重: pos_weight=24.3843
+Epoch 1/200 - Loss: 0.1407 - Val AUC: 0.7653 - Val AUPRC: 0.2034 - Val F1: 0.0000
+Epoch 2/200 - Loss: 0.1132 - Val AUC: 0.7294 - Val AUPRC: 0.3126 - Val F1: 0.0000
+Epoch 3/200 - Loss: 0.0631 - Val AUC: 0.7957 - Val AUPRC: 0.2312 - Val F1: 0.2439
+Epoch 4/200 - Loss: 0.1734 - Val AUC: 0.7567 - Val AUPRC: 0.2438 - Val F1: 0.3137
+Epoch 5/200 - Loss: 0.0979 - Val AUC: 0.7517 - Val AUPRC: 0.3363 - Val F1: 0.2667
+Epoch 6/200 - Loss: 0.0852 - Val AUC: 0.8582 - Val AUPRC: 0.4636 - Val F1: 0.3784
+Epoch 7/200 - Loss: 0.0248 - Val AUC: 0.8532 - Val AUPRC: 0.4435 - Val F1: 0.1481
+Epoch 8/200 - Loss: 0.0399 - Val AUC: 0.8782 - Val AUPRC: 0.4391 - Val F1: 0.1481
+Epoch 9/200 - Loss: 0.0503 - Val AUC: 0.9033 - Val AUPRC: 0.6080 - Val F1: 0.2222
+Epoch 10/200 - Loss: 0.0661 - Val AUC: 0.8668 - Val AUPRC: 0.5392 - Val F1: 0.0800
+Epoch 11/200 - Loss: 0.0263 - Val AUC: 0.8677 - Val AUPRC: 0.5311 - Val F1: 0.2667
+Epoch 12/200 - Loss: 0.0096 - Val AUC: 0.8811 - Val AUPRC: 0.4404 - Val F1: 0.0000
+Epoch 13/200 - Loss: 0.0162 - Val AUC: 0.8832 - Val AUPRC: 0.5426 - Val F1: 0.0000
+Epoch 14/200 - Loss: 0.0156 - Val AUC: 0.8870 - Val AUPRC: 0.5793 - Val F1: 0.0000
+Epoch 15/200 - Loss: 0.0048 - Val AUC: 0.8907 - Val AUPRC: 0.6053 - Val F1: 0.0000
+Epoch 16/200 - Loss: 0.0032 - Val AUC: 0.8882 - Val AUPRC: 0.5149 - Val F1: 0.1481
+Epoch 17/200 - Loss: 0.0044 - Val AUC: 0.8572 - Val AUPRC: 0.4550 - Val F1: 0.0800
+Epoch 18/200 - Loss: 0.1434 - Val AUC: 0.8725 - Val AUPRC: 0.4688 - Val F1: 0.0800
+Epoch 19/200 - Loss: 0.0461 - Val AUC: 0.9157 - Val AUPRC: 0.5640 - Val F1: 0.0000
+Epoch 20/200 - Loss: 0.0298 - Val AUC: 0.9220 - Val AUPRC: 0.5728 - Val F1: 0.1538
+Epoch 21/200 - Loss: 0.0149 - Val AUC: 0.9071 - Val AUPRC: 0.5150 - Val F1: 0.1429
+Epoch 22/200 - Loss: 0.0126 - Val AUC: 0.8796 - Val AUPRC: 0.4585 - Val F1: 0.2222
+Epoch 23/200 - Loss: 0.0041 - Val AUC: 0.8947 - Val AUPRC: 0.5467 - Val F1: 0.0800
+Epoch 24/200 - Loss: 0.0027 - Val AUC: 0.8796 - Val AUPRC: 0.4667 - Val F1: 0.2069
+Epoch 25/200 - Loss: 0.0022 - Val AUC: 0.8847 - Val AUPRC: 0.5096 - Val F1: 0.0800
+Epoch 26/200 - Loss: 0.0111 - Val AUC: 0.8746 - Val AUPRC: 0.4541 - Val F1: 0.2143
+Epoch 27/200 - Loss: 0.0031 - Val AUC: 0.8618 - Val AUPRC: 0.4908 - Val F1: 0.1538
+Epoch 28/200 - Loss: 0.0022 - Val AUC: 0.8662 - Val AUPRC: 0.4368 - Val F1: 0.0000
+Epoch 29/200 - Loss: 0.0119 - Val AUC: 0.8821 - Val AUPRC: 0.5122 - Val F1: 0.0000
+Epoch 30/200 - Loss: 0.2863 - Val AUC: 0.8891 - Val AUPRC: 0.4573 - Val F1: 0.0000
+Epoch 31/200 - Loss: 0.0116 - Val AUC: 0.8423 - Val AUPRC: 0.3358 - Val F1: 0.2000
+Epoch 32/200 - Loss: 0.0020 - Val AUC: 0.8595 - Val AUPRC: 0.4012 - Val F1: 0.1481
+Epoch 33/200 - Loss: 0.0039 - Val AUC: 0.8568 - Val AUPRC: 0.3475 - Val F1: 0.0769
+Epoch 34/200 - Loss: 0.0018 - Val AUC: 0.8576 - Val AUPRC: 0.3999 - Val F1: 0.1538
+Epoch 35/200 - Loss: 0.0018 - Val AUC: 0.8704 - Val AUPRC: 0.4496 - Val F1: 0.1429
+Early stopping at epoch 35
+
+Fold 5 结果:
+  ROC-AUC: 0.8624
+  PR-AUC: 0.1197
+  F1: 0.1111
+  Precision (PRE): 0.1667
+  Recall (SEN): 0.0833
+  Specificity (SPE): 0.9900
+  MCC: 0.1030
+  平衡评估 Precision: 1.0000
+  平衡评估 F1: 0.1538
+  平衡评估 Recall: 0.0833
+  平衡评估 Specificity: 1.0000
+  最优阈值: 0.20
+
+============================================================
+交叉验证总结
+============================================================
+
+【原始数据集评估】
+----------------------------------------
+平均 TP: 4
+平均 FN: 23
+平均 TN: 1223
+平均 FP: 58
+总样本数: 1307 (正样本: 27, 负样本: 1280)
+平均 Precision: 0.0680 (6.80%)
+平均 Recall (SEN): 0.1567 (15.67%)
+平均 Specificity (SPE): 0.9550 (95.50%)
+平均 Accuracy: 0.9386 (93.86%)
+平均 MCC: 0.0746
+
+【平衡采样评估 (DeepHotResi方式)】
+----------------------------------------
+平均 ROC-AUC: 0.8537 (+/- 0.0999)
+平均 PR-AUC:  0.5776 (+/- 0.0998)
+平均 F1:      0.2507 (+/- 0.1768)
+平均 MCC:     0.2852 (+/- 0.1693)
+平均 Precision: 0.7643
+平均 Recall:    0.1647
+平均 Specificity: 0.9884
+
+日志已保存到: /workspace/foundry-production/hotspot-prediction/logs/training_20260511_060156.log

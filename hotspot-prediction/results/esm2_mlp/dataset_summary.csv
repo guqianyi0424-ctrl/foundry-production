@@ -1,0 +1,6 @@
+dataset,role,records,pdb_chains,hotspots,definition
+data1,mutation source,690,,271,ddG >= 2.0 kcal/mol
+data1_train_val,train/validation,,49,134,aggregated from data1
+data2,raw independent test source,686,,,curated hotspot list
+data2_test,independent test,,74,235,UniProt numbering mapped to PDB-relative numbering
+strict_non_overlap,audit only,,7,18,data1 train after removing data2 UniProt/PDB-chain overlap

@@ -19,7 +19,15 @@ if str(ROOT) not in sys.path:
 
 from config import RESULTS_DIR
 from dataset import prepare_test_dataset
-from evaluate_test import calculate_balanced_metrics, calculate_metrics
+import importlib.util as _importlib_util
+def _import_from_file(name, path):
+    spec = _importlib_util.spec_from_file_location(name, path)
+    mod = _importlib_util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+_eval_test = _import_from_file("evaluate_test", str(ROOT / "evaluate_test.py"))
+calculate_metrics = _eval_test.calculate_metrics
+calculate_balanced_metrics = _eval_test.calculate_balanced_metrics
 from hotspot_prediction.baselines.rule_based import predict_rule_based_records
 from hotspot_prediction.evaluation_exports import export_metrics_table
 from hotspot_prediction.reporting import compute_topk_metrics, write_table
