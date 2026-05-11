@@ -23,8 +23,8 @@ PROCESSED_DIR = os.path.join(BASE_DIR, 'processed')
 PROCESSED_TRAIN_FILE = os.path.join(PROCESSED_DIR, 'train_val_samples.csv')
 PROCESSED_TEST_FILE = os.path.join(PROCESSED_DIR, 'legacy_data2_test_samples.csv')
 
-ESM2_MODEL = 'facebook/esm2_t33_650M_UR50D'
-ESM2_DIM = 1280
+ESM2_MODEL = os.environ.get('HOTSPOT_ESM2_MODEL', 'facebook/esm2_t33_650M_UR50D')
+ESM2_DIM = int(os.environ.get('HOTSPOT_ESM2_DIM', '1280'))
 
 PSSM_DIM = int(os.environ.get('HOTSPOT_PSSM_DIM', '20'))
 DSSP_DIM = int(os.environ.get('HOTSPOT_DSSP_DIM', '0'))
@@ -57,11 +57,12 @@ FOCAL_GAMMA = 2.0
 LABEL_SMOOTHING = 0.05
 USE_LABEL_SMOOTHING = True
 
-USE_WEIGHTED_SAMPLER = True
-USE_CLASS_WEIGHTS = True
+USE_WEIGHTED_SAMPLER = os.environ.get('HOTSPOT_USE_WEIGHTED_SAMPLER', '0') == '1'
+USE_CLASS_WEIGHTS = os.environ.get('HOTSPOT_USE_CLASS_WEIGHTS', '0') == '1'
 USE_SMOTE = False
 
 POS_WEIGHT_RATIO = 20.0
+TRAIN_NEGATIVE_RATIO = int(os.environ.get('HOTSPOT_TRAIN_NEGATIVE_RATIO', '1'))
 
 NOISE_FACTOR = 0
 ACCUMULATION_STEPS = 1

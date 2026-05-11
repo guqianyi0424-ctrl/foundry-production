@@ -227,20 +227,26 @@ def build_data1_train_samples(mutation_rows: Iterable[dict[str, Any]]) -> list[d
                 "partner_id": _clean_cell(row.get("partner_id")),
                 "pdb_id": f"{pdb_id}-{chain_id}",
                 "hotspots": set(),
+                "nonhotspots": set(),
                 "source": "data1",
             }
 
         if int(row.get("label", 0)) == 1 and row.get("pdb_residue") is not None:
             grouped[key]["hotspots"].add(int(row["pdb_residue"]))
+        elif row.get("pdb_residue") is not None:
+            grouped[key]["nonhotspots"].add(int(row["pdb_residue"]))
 
     samples: list[dict[str, Any]] = []
     for value in grouped.values():
         hotspots = sorted(value.pop("hotspots"))
+        nonhotspots = sorted(value.pop("nonhotspots"))
         samples.append(
             {
                 **value,
                 "hotspot_list": ",".join(str(pos) for pos in hotspots),
+                "nonhotspot_list": ",".join(str(pos) for pos in nonhotspots),
                 "n_hotspots": len(hotspots),
+                "n_nonhotspots": len(nonhotspots),
             }
         )
     return samples

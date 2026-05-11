@@ -101,10 +101,25 @@ class NormalizeTests(unittest.TestCase):
                 "partner_id": "P2",
                 "pdb_id": "1abc-A",
                 "hotspot_list": "10,12",
+                "nonhotspot_list": "11",
                 "n_hotspots": 2,
+                "n_nonhotspots": 1,
                 "source": "data1",
             }
         ])
+
+    def test_build_data1_train_samples_preserves_experimental_nonhotspots(self):
+        mutations = [
+            {"uniprot_id": "P1", "partner_id": "P2", "pdb_id": "1abc", "chain_id": "A", "pdb_residue": 7, "label": 0},
+            {"uniprot_id": "P1", "partner_id": "P2", "pdb_id": "1abc", "chain_id": "A", "pdb_residue": 3, "label": 0},
+            {"uniprot_id": "P1", "partner_id": "P2", "pdb_id": "1abc", "chain_id": "A", "pdb_residue": 5, "label": 1},
+        ]
+
+        samples = build_data1_train_samples(mutations)
+
+        self.assertEqual(samples[0]["hotspot_list"], "5")
+        self.assertEqual(samples[0]["nonhotspot_list"], "3,7")
+        self.assertEqual(samples[0]["n_nonhotspots"], 2)
 
     def test_build_data2_test_samples_exports_legacy_hotspot_list_column(self):
         normalized = [

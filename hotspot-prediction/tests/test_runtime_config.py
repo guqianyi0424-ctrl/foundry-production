@@ -20,6 +20,11 @@ class RuntimeConfigTests(unittest.TestCase):
                 "HOTSPOT_MODELS_DIR": str(Path(tmp) / "models" / "esm2_hmm"),
                 "HOTSPOT_RESULTS_DIR": str(Path(tmp) / "results" / "esm2_hmm"),
                 "HOTSPOT_FEATURES_DIR": str(Path(tmp) / "features" / "esm2_hmm"),
+                "HOTSPOT_TRAIN_NEGATIVE_RATIO": "3",
+                "HOTSPOT_USE_WEIGHTED_SAMPLER": "1",
+                "HOTSPOT_USE_CLASS_WEIGHTS": "1",
+                "HOTSPOT_ESM2_MODEL": "facebook/esm2_t6_8M_UR50D",
+                "HOTSPOT_ESM2_DIM": "320",
             }
             old_env = {key: os.environ.get(key) for key in env}
             old_torch = sys.modules.get("torch")
@@ -47,10 +52,15 @@ class RuntimeConfigTests(unittest.TestCase):
         self.assertEqual(module.PSSM_DIM, 0)
         self.assertEqual(module.HMM_DIM, 30)
         self.assertEqual(module.TRADITIONAL_DIM, 7)
+        self.assertEqual(module.ESM2_MODEL, "facebook/esm2_t6_8M_UR50D")
+        self.assertEqual(module.ESM2_DIM, 320)
         self.assertEqual(module.INPUT_DIM, module.ESM2_DIM + 30 + 7)
         self.assertTrue(module.MODELS_DIR.endswith("models/esm2_hmm"))
         self.assertTrue(module.RESULTS_DIR.endswith("results/esm2_hmm"))
         self.assertTrue(module.FEATURES_DIR.endswith("features/esm2_hmm"))
+        self.assertEqual(module.TRAIN_NEGATIVE_RATIO, 3)
+        self.assertTrue(module.USE_WEIGHTED_SAMPLER)
+        self.assertTrue(module.USE_CLASS_WEIGHTS)
 
 
 if __name__ == "__main__":

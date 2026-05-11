@@ -36,7 +36,8 @@ print("导入其他模块完成")
 from config import (
     MODELS_DIR, RESULTS_DIR, LOGS_DIR, FEATURES_DIR,
     BATCH_SIZE, NUM_EPOCHS, PATIENCE, N_FOLDS, RANDOM_SEED, DEVICE,
-    USE_WEIGHTED_SAMPLER, USE_CLASS_WEIGHTS, USE_SMOTE, POS_WEIGHT_RATIO
+    USE_WEIGHTED_SAMPLER, USE_CLASS_WEIGHTS, USE_SMOTE, POS_WEIGHT_RATIO,
+    TRAIN_NEGATIVE_RATIO
 )
 from dataset import (
     PPIHotspotDataset, collate_fn, prepare_dataset,
@@ -44,6 +45,12 @@ from dataset import (
     calculate_class_weights, apply_smote_to_features
 )
 from model import create_model, PPIHotspotGAT, FocalLoss, WeightedFocalLoss
+
+SRC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'src')
+if SRC_DIR not in sys.path:
+    sys.path.insert(0, SRC_DIR)
+
+from hotspot_prediction.training.selection import should_save_checkpoint
 
 
 class Logger:
@@ -85,7 +92,29 @@ def set_seed(seed=RANDOM_SEED):
         torch.backends.cudnn.benchmark = False
 
 
-def train_one_epoch(model, data_loader, device):
+def _sample_valid_indices(labels, node_slices, negative_ratio=1):
+    """Sample all positives and limited negatives per protein for loss."""
+    sampled = []
+    for start, end in node_slices:
+        protein_labels = labels[start:end]
+        pos_indices = (protein_labels == 1).nonzero(as_tuple=True)[0] + start
+        neg_indices = (protein_labels == 0).nonzero(as_tuple=True)[0] + start
+
+        if len(pos_indices) > 0 and len(neg_indices) > 0:
+            n_neg = min(len(neg_indices), len(pos_indices) * max(int(negative_ratio), 1))
+            chosen_neg = neg_indices[torch.randperm(len(neg_indices), device=labels.device)[:n_neg]]
+            sampled.append(torch.cat([pos_indices, chosen_neg]))
+        elif len(pos_indices) > 0:
+            sampled.append(pos_indices)
+        elif len(neg_indices) > 0:
+            sampled.append(neg_indices)
+
+    if not sampled:
+        return torch.empty(0, dtype=torch.long, device=labels.device)
+    return torch.cat(sampled)
+
+
+def train_one_epoch(model, data_loader, device, negative_ratio=1):
     """训练一个epoch"""
     model.train()
     total_loss = 0
@@ -99,12 +128,16 @@ def train_one_epoch(model, data_loader, device):
         logits = model(graphs, node_features)
         
         labels_flat = labels.flatten()
-        valid_mask = labels_flat >= 0
-        valid_logits = logits[valid_mask]
-        valid_labels = labels_flat[valid_mask]
+        sampled_indices = _sample_valid_indices(
+            labels_flat,
+            batch.get('node_slices', [(0, len(labels_flat))]),
+            negative_ratio=negative_ratio,
+        )
         
-        if len(valid_labels) == 0:
+        if len(sampled_indices) == 0:
             continue
+        valid_logits = logits[sampled_indices]
+        valid_labels = labels_flat[sampled_indices]
         
         loss = model.criterion(valid_logits, valid_labels)
         
@@ -205,7 +238,7 @@ def evaluate_balanced(model, data_loader, device):
 
 def calculate_metrics(y_true, y_pred, y_prob):
     """计算评估指标"""
-    tn, fp, fn, tp = metrics.confusion_matrix(y_true, y_pred).ravel()
+    tn, fp, fn, tp = metrics.confusion_matrix(y_true, y_pred, labels=[0, 1]).ravel()
     
     specificity = tn / (tn + fp) if (tn + fp) > 0 else 0
     
@@ -246,8 +279,8 @@ def find_optimal_threshold(y_true, y_prob):
 
 
 def train_model(model, train_loader, val_loader, device, fold=0, epochs=NUM_EPOCHS):
-    """训练模型 - 基于ROC-AUC选择最优模型"""
-    best_val_auc = 0
+    """训练模型 - 基于验证集AUPRC选择最优模型"""
+    best_val_auprc = None
     best_epoch = 0
     patience_counter = 0
     
@@ -259,9 +292,9 @@ def train_model(model, train_loader, val_loader, device, fold=0, epochs=NUM_EPOC
     }
     
     for epoch in range(epochs):
-        train_loss = train_one_epoch(model, train_loader, device)
+        train_loss = train_one_epoch(model, train_loader, device, negative_ratio=TRAIN_NEGATIVE_RATIO)
         
-        y_true, y_pred, y_prob = evaluate_balanced(model, val_loader, device)
+        y_true, y_pred, y_prob = evaluate(model, val_loader, device)
         val_metrics = calculate_metrics(y_true, y_pred, y_prob)
         
         history['train_loss'].append(train_loss)
@@ -272,8 +305,8 @@ def train_model(model, train_loader, val_loader, device, fold=0, epochs=NUM_EPOC
         print(f"Epoch {epoch+1}/{epochs} - Loss: {train_loss:.4f} - "
               f"Val AUC: {val_metrics['roc_auc']:.4f} - Val AUPRC: {val_metrics['pr_auc']:.4f} - Val F1: {val_metrics['f1']:.4f}")
         
-        if val_metrics['roc_auc'] > best_val_auc:
-            best_val_auc = val_metrics['roc_auc']
+        if should_save_checkpoint(val_metrics, best_val_auprc, metric='pr_auc'):
+            best_val_auprc = val_metrics['pr_auc']
             best_epoch = epoch + 1
             patience_counter = 0
             
@@ -282,18 +315,19 @@ def train_model(model, train_loader, val_loader, device, fold=0, epochs=NUM_EPOC
                 'epoch': epoch,
                 'model_state_dict': model.state_dict(),
                 'optimizer_state_dict': model.optimizer.state_dict(),
-                'val_auc': best_val_auc,
+                'val_auc': val_metrics['roc_auc'],
+                'val_auprc': best_val_auprc,
             }, model_path)
         else:
             patience_counter += 1
         
-        model.scheduler.step(val_metrics['roc_auc'])
+        model.scheduler.step(val_metrics['pr_auc'])
         
         if patience_counter >= PATIENCE:
             print(f"Early stopping at epoch {epoch+1}")
             break
     
-    return model, history, best_epoch, best_val_auc
+    return model, history, best_epoch, best_val_auprc
 
 
 def cross_validation(data_list, n_folds=N_FOLDS, model_type='gat'):
@@ -350,7 +384,7 @@ def cross_validation(data_list, n_folds=N_FOLDS, model_type='gat'):
             )
             print(f"  使用类别权重: pos_weight={class_weights_info['pos_weight']:.4f}")
         
-        model, history, best_epoch, best_val_auc = train_model(
+        model, history, best_epoch, best_val_auprc = train_model(
             model, train_loader, val_loader, DEVICE, fold=fold+1
         )
         

@@ -605,6 +605,25 @@ def parse_hotspot_list(hotspot_str):
     return hotspots
 
 
+def assign_residue_labels(protein_data, hotspots, nonhotspots=None, unknown_unobserved=True):
+    """Assign observed residue labels, leaving untested residues masked as -1."""
+    fill_value = -1 if unknown_unobserved else 0
+    labels = np.full(len(protein_data['sequence']), fill_value, dtype=np.int64)
+    residue_indices = protein_data['residue_indices']
+
+    for nonhotspot_pos in nonhotspots or []:
+        if nonhotspot_pos in residue_indices:
+            idx = residue_indices.index(nonhotspot_pos)
+            labels[idx] = 0
+
+    for hotspot_pos in hotspots:
+        if hotspot_pos in residue_indices:
+            idx = residue_indices.index(hotspot_pos)
+            labels[idx] = 1
+
+    return labels
+
+
 def prepare_dataset():
     """准备完整数据集"""
     print("=" * 60)
@@ -671,12 +690,14 @@ def prepare_dataset():
                 
                 adj_matrix = normalize_adjacency(dist_matrix)
                 
-                labels = np.zeros(len(protein_data['sequence']), dtype=np.int64)
                 hotspots = parse_hotspot_list(row['hotspot_list'])
-                for hotspot_pos in hotspots:
-                    if hotspot_pos in protein_data['residue_indices']:
-                        idx = protein_data['residue_indices'].index(hotspot_pos)
-                        labels[idx] = 1
+                nonhotspots = parse_hotspot_list(row.get('nonhotspot_list', ''))
+                labels = assign_residue_labels(
+                    protein_data,
+                    hotspots,
+                    nonhotspots,
+                    unknown_unobserved='nonhotspot_list' in df.columns,
+                )
                 
                 data_list.append({
                     'pdb_id': f"{pdb_id}_{chain_id}",
@@ -724,7 +745,7 @@ def prepare_dataset():
                 
                 adj_matrix = normalize_adjacency(dist_matrix)
                 
-                labels = np.zeros(len(protein_data['sequence']), dtype=np.int64)
+                labels = np.full(len(protein_data['sequence']), -1, dtype=np.int64)
                 for _, row in group.iterrows():
                     res_num = row['residue_num']
                     if res_num in protein_data['residue_indices']:
