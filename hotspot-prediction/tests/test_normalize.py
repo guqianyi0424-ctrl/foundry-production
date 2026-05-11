@@ -3,6 +3,7 @@ import unittest
 from hotspot_prediction.data.normalize import (
     build_data1_train_samples,
     build_data2_test_samples,
+    deduplicate_data2_rows,
     exclude_overlapping_train_samples,
     label_from_ddg,
     normalize_data1_rows,
@@ -143,6 +144,49 @@ class NormalizeTests(unittest.TestCase):
 
         self.assertEqual(len(samples), 1)
         self.assertEqual(samples[0]["hotspot_list"], "130,131,133")
+
+    def test_deduplicate_data2_rows_removes_exact_repeated_source_records(self):
+        normalized = [
+            {
+                "uniprot_id": "O15118",
+                "partner_id": "P87666",
+                "pdb_id": "5f18",
+                "chain_id": "A",
+                "uniprot_start": 374,
+                "uniprot_end": 620,
+                "hotspots_uniprot": [503, 504, 506],
+                "hotspots_pdb": [130, 131, 133],
+                "source": "data2",
+            },
+            {
+                "uniprot_id": "O15118",
+                "partner_id": "P87666",
+                "pdb_id": "5f18",
+                "chain_id": "A",
+                "uniprot_start": 374,
+                "uniprot_end": 620,
+                "hotspots_uniprot": [503, 504, 506],
+                "hotspots_pdb": [130, 131, 133],
+                "source": "data2",
+            },
+            {
+                "uniprot_id": "O15118",
+                "partner_id": "P87666",
+                "pdb_id": "5f18",
+                "chain_id": "A",
+                "uniprot_start": 374,
+                "uniprot_end": 620,
+                "hotspots_uniprot": [503, 506],
+                "hotspots_pdb": [130, 133],
+                "source": "data2",
+            },
+        ]
+
+        deduped, removed = deduplicate_data2_rows(normalized)
+
+        self.assertEqual(removed, 1)
+        self.assertEqual(len(deduped), 2)
+        self.assertEqual(deduped[0]["hotspots_pdb"], [130, 131, 133])
 
     def test_exclude_overlapping_train_samples_removes_test_uniprot_and_pdb_chain(self):
         train_samples = [

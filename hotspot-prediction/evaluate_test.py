@@ -9,6 +9,7 @@ import os
 import argparse
 import sys
 from pathlib import Path
+import csv
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -30,6 +31,7 @@ if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
 from hotspot_prediction.evaluation_exports import export_metrics_table, export_prediction_table
+from hotspot_prediction.evaluation.paper import resolve_test_threshold
 
 
 def load_best_model(model_path, model_type='gat'):
@@ -278,9 +280,16 @@ def generate_report(metrics, balanced_metrics, save_path, model_path, threshold)
 def main(args=None):
     if args is None:
         parser = argparse.ArgumentParser(description='独立测试集评估')
-        parser.add_argument('--model', type=str, default='gat', help='模型类型')
+        parser.add_argument('--model', type=str, default='gat', choices=['gat', 'gat_v2', 'ensemble', 'mlp'], help='模型类型')
         parser.add_argument('--model-path', type=str, default=None, help='模型路径')
         parser.add_argument('--threshold', type=float, default=0.5, help='分类阈值')
+        parser.add_argument(
+            '--threshold-source',
+            type=str,
+            default='fixed',
+            choices=['fixed', 'validation-mcc'],
+            help='阈值来源: fixed=使用 --threshold; validation-mcc=使用交叉验证MCC最优阈值均值',
+        )
         parser.add_argument('--find-threshold', action='store_true', help='自动寻找最优阈值')
         parser.add_argument('--force-reload', action='store_true', help='强制重新处理数据')
         parser.add_argument('--predictions-csv', type=str, default=None, help='保存逐残基预测CSV')
@@ -334,8 +343,22 @@ def main(args=None):
     if args.find_threshold:
         threshold = find_optimal_threshold(labels, probs)
         print(f"\n自动找到最优阈值: {threshold:.4f}")
+        print("警告: --find-threshold 使用测试集标签，只能作为oracle分析，不能作为论文主结果。")
     else:
-        threshold = args.threshold
+        cv_path = os.path.join(RESULTS_DIR, 'cross_validation_results.csv')
+        cv_rows = []
+        if args.threshold_source == 'validation-mcc' and os.path.exists(cv_path):
+            with open(cv_path, newline='', encoding='utf-8') as handle:
+                cv_rows = list(csv.DictReader(handle))
+        threshold = resolve_test_threshold(
+            source=args.threshold_source,
+            fixed_threshold=args.threshold,
+            cv_rows=cv_rows,
+        )
+        if args.threshold_source == 'validation-mcc':
+            print(f"\n使用验证集MCC阈值均值: {threshold:.4f}")
+        else:
+            print(f"\n使用固定阈值: {threshold:.4f}")
     
     metrics = calculate_metrics(labels, probs, threshold)
     

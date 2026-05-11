@@ -337,6 +337,33 @@ class PPIHotspotEnsemble(nn.Module):
         return logits
 
 
+class PPIHotspotMLP(nn.Module):
+    """Residue-wise MLP ablation using the same node features without graph message passing."""
+
+    def __init__(self, input_dim=INPUT_DIM, hidden_dim=HIDDEN_DIM,
+                 dropout=DROPOUT, num_classes=NUM_CLASSES):
+        super(PPIHotspotMLP, self).__init__()
+
+        self.classifier = nn.Sequential(
+            nn.Linear(input_dim, hidden_dim * 2),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim * 2, hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(dropout * 0.5),
+            nn.Linear(hidden_dim, num_classes),
+        )
+
+        self.criterion = FocalLoss(alpha=FOCAL_ALPHA, gamma=FOCAL_GAMMA)
+        self.optimizer = torch.optim.Adam(self.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY)
+        self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            self.optimizer, mode='max', factor=0.6, patience=10, min_lr=1e-6
+        )
+
+    def forward(self, g, node_features):
+        return self.classifier(node_features.float())
+
+
 def create_model(model_type='gat', **kwargs):
     """创建模型工厂函数"""
     if model_type == 'gat':
@@ -345,6 +372,8 @@ def create_model(model_type='gat', **kwargs):
         return PPIHotspotGAT_v2(**kwargs)
     elif model_type == 'ensemble':
         return PPIHotspotEnsemble(**kwargs)
+    elif model_type == 'mlp':
+        return PPIHotspotMLP(**kwargs)
     else:
         raise ValueError(f"Unknown model type: {model_type}")
 

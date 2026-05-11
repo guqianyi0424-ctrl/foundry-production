@@ -30,6 +30,7 @@ def run_pipeline(args):
             'model': args.model,
             'model_path': None,
             'threshold': 0.5,
+            'threshold_source': 'fixed',
             'find_threshold': False,
             'force_reload': args.reprocess,
             'predictions_csv': None,
@@ -82,7 +83,7 @@ def main():
                        choices=['train', 'test', 'inference', 'eval_test'],
                        help='运行模式: train=训练, test=测试, inference=推理, eval_test=独立测试集评估')
     parser.add_argument('--model', type=str, default='gat',
-                       choices=['gat', 'gat_v2', 'ensemble'],
+                       choices=['gat', 'gat_v2', 'ensemble', 'mlp'],
                        help='模型类型')
     parser.add_argument('--n-folds', type=int, default=5,
                        help='交叉验证折数')

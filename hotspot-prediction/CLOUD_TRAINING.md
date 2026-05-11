@@ -22,8 +22,9 @@ export PYTHONPATH="$PWD/src:$PWD"
 # This keeps training usable with the current small data1/data2 pair.
 python scripts/prepare_data.py --overlap-policy none
 python scripts/generate_reports.py
-python scripts/train.py --force-reload
-python scripts/evaluate_test.py --threshold 0.5
+python scripts/run_rule_baseline.py --threshold 0.5
+python scripts/train.py --model gat --force-reload
+python scripts/evaluate_test.py --model gat --threshold 0.5
 
 # Add Top-K tables after evaluation has produced results/test_predictions.csv.
 python scripts/generate_reports.py --predictions-csv results/test_predictions.csv
@@ -68,69 +69,86 @@ export PYTHONPATH="$PWD/src:$PWD"
 python scripts/prepare_data.py --overlap-policy none
 python scripts/generate_reports.py
 
-# 1) ESM-2 only
+# 1) ESM-2 + MLP
+HOTSPOT_PSSM_DIM=0 HOTSPOT_HMM_DIM=0 HOTSPOT_TRADITIONAL_DIM=0 \
+HOTSPOT_FEATURES_DIR=data/features/esm2_mlp \
+HOTSPOT_MODELS_DIR=models/esm2_mlp \
+HOTSPOT_RESULTS_DIR=results/esm2_mlp \
+python scripts/train.py --model mlp --force-reload
+
+HOTSPOT_PSSM_DIM=0 HOTSPOT_HMM_DIM=0 HOTSPOT_TRADITIONAL_DIM=0 \
+HOTSPOT_FEATURES_DIR=data/features/esm2_mlp \
+HOTSPOT_MODELS_DIR=models/esm2_mlp \
+HOTSPOT_RESULTS_DIR=results/esm2_mlp \
+python scripts/evaluate_test.py --model mlp --threshold 0.5
+
+python scripts/generate_reports.py \
+  --predictions-csv results/esm2_mlp/test_predictions.csv \
+  --output-dir results/esm2_mlp
+
+# 2) ESM-2 + GAT
 HOTSPOT_PSSM_DIM=0 HOTSPOT_HMM_DIM=0 HOTSPOT_TRADITIONAL_DIM=0 \
 HOTSPOT_FEATURES_DIR=data/features/esm2_only \
 HOTSPOT_MODELS_DIR=models/esm2_only \
 HOTSPOT_RESULTS_DIR=results/esm2_only \
-python scripts/train.py --force-reload
+python scripts/train.py --model gat --force-reload
 
 HOTSPOT_PSSM_DIM=0 HOTSPOT_HMM_DIM=0 HOTSPOT_TRADITIONAL_DIM=0 \
 HOTSPOT_FEATURES_DIR=data/features/esm2_only \
 HOTSPOT_MODELS_DIR=models/esm2_only \
 HOTSPOT_RESULTS_DIR=results/esm2_only \
-python scripts/evaluate_test.py --threshold 0.5
+python scripts/evaluate_test.py --model gat --threshold 0.5
 
 python scripts/generate_reports.py \
   --predictions-csv results/esm2_only/test_predictions.csv \
   --output-dir results/esm2_only
 
-# 2) ESM-2 + PSSM
+# 3) ESM-2 + PSSM
 HOTSPOT_PSSM_DIM=20 HOTSPOT_HMM_DIM=0 HOTSPOT_TRADITIONAL_DIM=0 \
 HOTSPOT_FEATURES_DIR=data/features/esm2_pssm \
 HOTSPOT_MODELS_DIR=models/esm2_pssm \
 HOTSPOT_RESULTS_DIR=results/esm2_pssm \
-python scripts/train.py --force-reload
+python scripts/train.py --model gat --force-reload
 
 HOTSPOT_PSSM_DIM=20 HOTSPOT_HMM_DIM=0 HOTSPOT_TRADITIONAL_DIM=0 \
 HOTSPOT_FEATURES_DIR=data/features/esm2_pssm \
 HOTSPOT_MODELS_DIR=models/esm2_pssm \
 HOTSPOT_RESULTS_DIR=results/esm2_pssm \
-python scripts/evaluate_test.py --threshold 0.5
+python scripts/evaluate_test.py --model gat --threshold 0.5
 
 python scripts/generate_reports.py \
   --predictions-csv results/esm2_pssm/test_predictions.csv \
   --output-dir results/esm2_pssm
 
-# 3) ESM-2 + HMM
+# 4) ESM-2 + HMM
 HOTSPOT_PSSM_DIM=0 HOTSPOT_HMM_DIM=30 HOTSPOT_TRADITIONAL_DIM=0 \
 HOTSPOT_FEATURES_DIR=data/features/esm2_hmm \
 HOTSPOT_MODELS_DIR=models/esm2_hmm \
 HOTSPOT_RESULTS_DIR=results/esm2_hmm \
-python scripts/train.py --force-reload
+python scripts/train.py --model gat --force-reload
 
 HOTSPOT_PSSM_DIM=0 HOTSPOT_HMM_DIM=30 HOTSPOT_TRADITIONAL_DIM=0 \
 HOTSPOT_FEATURES_DIR=data/features/esm2_hmm \
 HOTSPOT_MODELS_DIR=models/esm2_hmm \
 HOTSPOT_RESULTS_DIR=results/esm2_hmm \
-python scripts/evaluate_test.py --threshold 0.5
+python scripts/evaluate_test.py --model gat --threshold 0.5
 
 python scripts/generate_reports.py \
   --predictions-csv results/esm2_hmm/test_predictions.csv \
   --output-dir results/esm2_hmm
 
-# 4) Main model: ESM-2 + PSSM + HMM
+# 5) Main model: ESM-2 + PSSM + HMM
 HOTSPOT_PSSM_DIM=20 HOTSPOT_HMM_DIM=30 HOTSPOT_TRADITIONAL_DIM=0 \
 HOTSPOT_FEATURES_DIR=data/features/esm2_pssm_hmm \
 HOTSPOT_MODELS_DIR=models/esm2_pssm_hmm \
 HOTSPOT_RESULTS_DIR=results/esm2_pssm_hmm \
-python scripts/train.py --force-reload
+python scripts/train.py --model gat --force-reload
 
 HOTSPOT_PSSM_DIM=20 HOTSPOT_HMM_DIM=30 HOTSPOT_TRADITIONAL_DIM=0 \
 HOTSPOT_FEATURES_DIR=data/features/esm2_pssm_hmm \
 HOTSPOT_MODELS_DIR=models/esm2_pssm_hmm \
 HOTSPOT_RESULTS_DIR=results/esm2_pssm_hmm \
-python scripts/evaluate_test.py --threshold 0.5
+python scripts/evaluate_test.py --model gat --threshold 0.5
 
 python scripts/generate_reports.py \
   --predictions-csv results/esm2_pssm_hmm/test_predictions.csv \

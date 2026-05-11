@@ -189,6 +189,31 @@ def normalize_data2_rows(rows: Iterable[dict[str, Any]]) -> list[dict[str, Any]]
     return normalized_rows
 
 
+def _hashable_value(value: Any) -> Any:
+    if isinstance(value, list):
+        return tuple(value)
+    if isinstance(value, dict):
+        return tuple(sorted((key, _hashable_value(item)) for key, item in value.items()))
+    return value
+
+
+def deduplicate_data2_rows(rows: Iterable[dict[str, Any]]) -> tuple[list[dict[str, Any]], int]:
+    """Remove exact repeated normalized data2 records while preserving order."""
+    deduped: list[dict[str, Any]] = []
+    seen: set[tuple[tuple[str, Any], ...]] = set()
+    removed = 0
+
+    for row in rows:
+        key = tuple(sorted((str(field), _hashable_value(value)) for field, value in row.items()))
+        if key in seen:
+            removed += 1
+            continue
+        seen.add(key)
+        deduped.append(dict(row))
+
+    return deduped, removed
+
+
 def build_data1_train_samples(mutation_rows: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
     """Aggregate data1 mutation rows into legacy PDB-chain sample rows."""
     grouped: dict[tuple[str, str], dict[str, Any]] = {}

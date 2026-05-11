@@ -86,9 +86,11 @@ class ReportingTests(unittest.TestCase):
         rows = build_ablation_plan()
         profiles = [row["profile"] for row in rows]
 
+        self.assertIn("esm2_mlp", profiles)
         self.assertIn("esm2_only", profiles)
         self.assertIn("esm2_pssm_hmm", profiles)
         for row in rows:
+            self.assertIn("train_args", row)
             self.assertIn("HOTSPOT_FEATURES_DIR", row["cloud_env"])
             self.assertIn("HOTSPOT_MODELS_DIR", row["cloud_env"])
             self.assertIn("HOTSPOT_RESULTS_DIR", row["cloud_env"])

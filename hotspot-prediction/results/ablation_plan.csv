@@ -1,5 +1,6 @@
-profile,features,pssm_dim,hmm_dim,traditional_dim,model,cloud_env,status
-esm2_only,ESM-2,0,0,0,GAT,HOTSPOT_PSSM_DIM=0 HOTSPOT_HMM_DIM=0 HOTSPOT_TRADITIONAL_DIM=0 HOTSPOT_FEATURES_DIR=data/features/esm2_only HOTSPOT_MODELS_DIR=models/esm2_only HOTSPOT_RESULTS_DIR=results/esm2_only,planned
-esm2_pssm,ESM-2 + PSSM,20,0,0,GAT,HOTSPOT_PSSM_DIM=20 HOTSPOT_HMM_DIM=0 HOTSPOT_TRADITIONAL_DIM=0 HOTSPOT_FEATURES_DIR=data/features/esm2_pssm HOTSPOT_MODELS_DIR=models/esm2_pssm HOTSPOT_RESULTS_DIR=results/esm2_pssm,planned
-esm2_hmm,ESM-2 + HMM,0,30,0,GAT,HOTSPOT_PSSM_DIM=0 HOTSPOT_HMM_DIM=30 HOTSPOT_TRADITIONAL_DIM=0 HOTSPOT_FEATURES_DIR=data/features/esm2_hmm HOTSPOT_MODELS_DIR=models/esm2_hmm HOTSPOT_RESULTS_DIR=results/esm2_hmm,planned
-esm2_pssm_hmm,ESM-2 + PSSM + HMM,20,30,0,GAT,HOTSPOT_PSSM_DIM=20 HOTSPOT_HMM_DIM=30 HOTSPOT_TRADITIONAL_DIM=0 HOTSPOT_FEATURES_DIR=data/features/esm2_pssm_hmm HOTSPOT_MODELS_DIR=models/esm2_pssm_hmm HOTSPOT_RESULTS_DIR=results/esm2_pssm_hmm,planned
+profile,features,pssm_dim,hmm_dim,traditional_dim,model,train_args,cloud_env,status
+esm2_mlp,ESM-2,0,0,0,MLP,--model mlp,HOTSPOT_PSSM_DIM=0 HOTSPOT_HMM_DIM=0 HOTSPOT_TRADITIONAL_DIM=0 HOTSPOT_FEATURES_DIR=data/features/esm2_mlp HOTSPOT_MODELS_DIR=models/esm2_mlp HOTSPOT_RESULTS_DIR=results/esm2_mlp,planned
+esm2_only,ESM-2,0,0,0,GAT,--model gat,HOTSPOT_PSSM_DIM=0 HOTSPOT_HMM_DIM=0 HOTSPOT_TRADITIONAL_DIM=0 HOTSPOT_FEATURES_DIR=data/features/esm2_only HOTSPOT_MODELS_DIR=models/esm2_only HOTSPOT_RESULTS_DIR=results/esm2_only,planned
+esm2_pssm,ESM-2 + PSSM,20,0,0,GAT,--model gat,HOTSPOT_PSSM_DIM=20 HOTSPOT_HMM_DIM=0 HOTSPOT_TRADITIONAL_DIM=0 HOTSPOT_FEATURES_DIR=data/features/esm2_pssm HOTSPOT_MODELS_DIR=models/esm2_pssm HOTSPOT_RESULTS_DIR=results/esm2_pssm,planned
+esm2_hmm,ESM-2 + HMM,0,30,0,GAT,--model gat,HOTSPOT_PSSM_DIM=0 HOTSPOT_HMM_DIM=30 HOTSPOT_TRADITIONAL_DIM=0 HOTSPOT_FEATURES_DIR=data/features/esm2_hmm HOTSPOT_MODELS_DIR=models/esm2_hmm HOTSPOT_RESULTS_DIR=results/esm2_hmm,planned
+esm2_pssm_hmm,ESM-2 + PSSM + HMM,20,30,0,GAT,--model gat,HOTSPOT_PSSM_DIM=20 HOTSPOT_HMM_DIM=30 HOTSPOT_TRADITIONAL_DIM=0 HOTSPOT_FEATURES_DIR=data/features/esm2_pssm_hmm HOTSPOT_MODELS_DIR=models/esm2_pssm_hmm HOTSPOT_RESULTS_DIR=results/esm2_pssm_hmm,planned

@@ -79,7 +79,7 @@ def build_experiment_matrix() -> list[dict[str, str]]:
             "method": "Rule-based baseline",
             "input": "residue type + simple exposure/center heuristics",
             "purpose": "engineering fallback and lower bound",
-            "status": "run on cloud or backend",
+            "status": "implemented script: scripts/run_rule_baseline.py",
         },
         {
             "method": "Traditional ML / PPI-hotspotID-style",
@@ -91,7 +91,7 @@ def build_experiment_matrix() -> list[dict[str, str]]:
             "method": "ESM-2 embedding + MLP",
             "input": "frozen ESM-2 residue embeddings",
             "purpose": "test value of pretrained sequence features",
-            "status": "recommended ablation",
+            "status": "implemented training path: --model mlp",
         },
         {
             "method": "ESM-2 + GAT",
@@ -116,11 +116,20 @@ def build_ablation_plan() -> list[dict[str, str]]:
     """
     profiles = [
         {
+            "profile": "esm2_mlp",
+            "features": "ESM-2",
+            "pssm_dim": "0",
+            "hmm_dim": "0",
+            "traditional_dim": "0",
+            "model": "MLP",
+        },
+        {
             "profile": "esm2_only",
             "features": "ESM-2",
             "pssm_dim": "0",
             "hmm_dim": "0",
             "traditional_dim": "0",
+            "model": "GAT",
         },
         {
             "profile": "esm2_pssm",
@@ -128,6 +137,7 @@ def build_ablation_plan() -> list[dict[str, str]]:
             "pssm_dim": "20",
             "hmm_dim": "0",
             "traditional_dim": "0",
+            "model": "GAT",
         },
         {
             "profile": "esm2_hmm",
@@ -135,6 +145,7 @@ def build_ablation_plan() -> list[dict[str, str]]:
             "pssm_dim": "0",
             "hmm_dim": "30",
             "traditional_dim": "0",
+            "model": "GAT",
         },
         {
             "profile": "esm2_pssm_hmm",
@@ -142,6 +153,7 @@ def build_ablation_plan() -> list[dict[str, str]]:
             "pssm_dim": "20",
             "hmm_dim": "30",
             "traditional_dim": "0",
+            "model": "GAT",
         },
     ]
 
@@ -159,7 +171,8 @@ def build_ablation_plan() -> list[dict[str, str]]:
         rows.append(
             {
                 **profile,
-                "model": "GAT",
+                "model": profile["model"],
+                "train_args": "--model mlp" if profile["model"] == "MLP" else "--model gat",
                 "cloud_env": " ".join(env_parts),
                 "status": "planned",
             }
@@ -319,6 +332,6 @@ def write_table(path: str | Path, rows: list[dict[str, Any]]) -> None:
         return
     fieldnames = list(rows[0].keys())
     with path.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer = csv.DictWriter(handle, fieldnames=fieldnames, lineterminator="\n")
         writer.writeheader()
         writer.writerows(rows)

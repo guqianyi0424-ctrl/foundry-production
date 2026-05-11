@@ -105,16 +105,22 @@ python scripts/prepare_data.py --overlap-policy none
 python scripts/generate_reports.py
 ```
 
+Run the implemented rule-based lower-bound baseline:
+
+```bash
+python scripts/run_rule_baseline.py --threshold 0.5
+```
+
 Train the main ESM-2 + GAT model:
 
 ```bash
-python scripts/train.py --force-reload
+python scripts/train.py --model gat --force-reload
 ```
 
 Evaluate the 5-fold checkpoint ensemble on data2 with a paper-safe fixed threshold:
 
 ```bash
-python scripts/evaluate_test.py --threshold 0.5
+python scripts/evaluate_test.py --model gat --threshold 0.5
 python scripts/generate_reports.py --predictions-csv results/test_predictions.csv
 ```
 
@@ -132,45 +138,67 @@ Expected key artifacts:
 | `results/topk_metrics.csv` | Top-K recommendation metrics |
 | `results/test_roc_curve.png` | ROC figure |
 | `results/test_pr_curve.png` | PR figure |
+| `results/rule_baseline/test_metrics.csv` | rule baseline metrics |
+| `results/rule_baseline/topk_metrics.csv` | rule baseline Top-K metrics |
 
 ## 7. Ablation Runs
 
 Use isolated directories so one run does not overwrite another.
 
-### 7.1 ESM-2 Only
+### 7.1 ESM-2 + MLP
+
+```bash
+HOTSPOT_PSSM_DIM=0 HOTSPOT_HMM_DIM=0 HOTSPOT_TRADITIONAL_DIM=0 \
+HOTSPOT_FEATURES_DIR=data/features/esm2_mlp \
+HOTSPOT_MODELS_DIR=models/esm2_mlp \
+HOTSPOT_RESULTS_DIR=results/esm2_mlp \
+python scripts/train.py --model mlp --force-reload
+
+HOTSPOT_PSSM_DIM=0 HOTSPOT_HMM_DIM=0 HOTSPOT_TRADITIONAL_DIM=0 \
+HOTSPOT_FEATURES_DIR=data/features/esm2_mlp \
+HOTSPOT_MODELS_DIR=models/esm2_mlp \
+HOTSPOT_RESULTS_DIR=results/esm2_mlp \
+python scripts/evaluate_test.py --model mlp --threshold 0.5
+
+python scripts/generate_reports.py \
+  --predictions-csv results/esm2_mlp/test_predictions.csv \
+  --output-dir results/esm2_mlp
+```
+
+### 7.2 ESM-2 + GAT
 
 ```bash
 HOTSPOT_PSSM_DIM=0 HOTSPOT_HMM_DIM=0 HOTSPOT_TRADITIONAL_DIM=0 \
 HOTSPOT_FEATURES_DIR=data/features/esm2_only \
 HOTSPOT_MODELS_DIR=models/esm2_only \
 HOTSPOT_RESULTS_DIR=results/esm2_only \
-python scripts/train.py --force-reload
+python scripts/train.py --model gat --force-reload
 
 HOTSPOT_PSSM_DIM=0 HOTSPOT_HMM_DIM=0 HOTSPOT_TRADITIONAL_DIM=0 \
 HOTSPOT_FEATURES_DIR=data/features/esm2_only \
 HOTSPOT_MODELS_DIR=models/esm2_only \
 HOTSPOT_RESULTS_DIR=results/esm2_only \
-python scripts/evaluate_test.py --threshold 0.5
+python scripts/evaluate_test.py --model gat --threshold 0.5
 
 python scripts/generate_reports.py \
   --predictions-csv results/esm2_only/test_predictions.csv \
   --output-dir results/esm2_only
 ```
 
-### 7.2 Main Profile
+### 7.3 Main Profile
 
 ```bash
 HOTSPOT_PSSM_DIM=20 HOTSPOT_HMM_DIM=30 HOTSPOT_TRADITIONAL_DIM=0 \
 HOTSPOT_FEATURES_DIR=data/features/esm2_pssm_hmm \
 HOTSPOT_MODELS_DIR=models/esm2_pssm_hmm \
 HOTSPOT_RESULTS_DIR=results/esm2_pssm_hmm \
-python scripts/train.py --force-reload
+python scripts/train.py --model gat --force-reload
 
 HOTSPOT_PSSM_DIM=20 HOTSPOT_HMM_DIM=30 HOTSPOT_TRADITIONAL_DIM=0 \
 HOTSPOT_FEATURES_DIR=data/features/esm2_pssm_hmm \
 HOTSPOT_MODELS_DIR=models/esm2_pssm_hmm \
 HOTSPOT_RESULTS_DIR=results/esm2_pssm_hmm \
-python scripts/evaluate_test.py --threshold 0.5
+python scripts/evaluate_test.py --model gat --threshold 0.5
 
 python scripts/generate_reports.py \
   --predictions-csv results/esm2_pssm_hmm/test_predictions.csv \
@@ -198,6 +226,12 @@ Use simple residue-level scoring as a lower bound:
 - residues near the interface or protein center can be ranked if structure-derived distances are available.
 
 Report it as an engineering fallback, not a scientific state-of-the-art method.
+
+Implemented command:
+
+```bash
+python scripts/run_rule_baseline.py --threshold 0.5
+```
 
 ### 8.2 PPI-HotspotID-Style Baseline
 
@@ -250,6 +284,8 @@ ls -lh results/test_predictions.csv
 ls -lh results/topk_metrics.csv
 ls -lh results/test_roc_curve.png
 ls -lh results/test_pr_curve.png
+ls -lh results/rule_baseline/test_metrics.csv
+ls -lh results/rule_baseline/topk_metrics.csv
 ```
 
 Then copy the key numeric values into the thesis tables and describe the limitations honestly.
