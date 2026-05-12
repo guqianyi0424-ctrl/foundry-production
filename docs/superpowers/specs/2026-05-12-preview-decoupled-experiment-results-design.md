@@ -15,7 +15,7 @@ Because those flows share the same endpoints and persistence path, frontend acti
 
 ## Desired Behavior
 
-When a user starts a design task, the backend should run the configured real workload. If the user requests eight batches, the backend records and tracks that full job. The frontend can still show only a small preview, such as four designs, for usability and visualization speed.
+When a user starts a design task, the backend should run the configured real workload. If the user requests eight batches, the backend records and tracks that full job. The frontend should show only a small preview, capped at two designs, for usability and visualization speed.
 
 When the user clicks a preview design and runs MPNN/RF3 from the frontend, that operation is preview-only. It may update the current UI state, but it must not overwrite formal experiment results or add formal candidates unless a future explicit "save as official result" action is added.
 
@@ -38,7 +38,7 @@ Only backend-owned task execution and explicit formal save operations write thes
 
 Preview data is derived from formal results and limited for frontend display:
 
-- `preview_designs`: at most four RFD3 designs selected from full RFD3 output.
+- `preview_designs`: at most two RFD3 designs selected from full RFD3 output.
 - `preview_summary`: planned batch count, planned design count, available preview count, and whether the backend is still running.
 
 Preview data can be returned by the experiment detail endpoint or a helper transformation in the existing response. It should not require a new database table for the first implementation because it is derived from persisted formal results.
@@ -75,10 +75,10 @@ If schema churn is too high for the first pass, the UI can infer provenance from
 
 The "新建任务" action should submit the full backend workload parameters. It should not reduce `n_batches`, `diffusion_batch_size`, or other real generation settings for frontend convenience.
 
-After submission, the UI should show task status and a preview panel. The panel may display only four designs, but the status text should make the distinction visible:
+After submission, the UI should show task status and a preview panel. The panel may display only two designs, but the status text should make the distinction visible:
 
 - "后台按完整参数生成：8 batch"
-- "当前仅展示 4 个预览 design"
+- "当前仅展示 2 个预览 design"
 
 ### Preview Interaction
 
@@ -124,12 +124,12 @@ Backend tests:
 - Preview-only MPNN/RF3 does not call formal save helpers.
 - Candidate metric building fills fallback pLDDT/ranking fields when RF3 metrics are absent.
 - Full task parameters are preserved in formal RFD3 config.
-- Preview list is capped at four without truncating persisted formal results.
+- Preview list is capped at two without truncating persisted formal results.
 
 Frontend tests:
 
 - Experiment detail top-three cards show fallback metric values and unavailable labels.
-- RFD3 preview panel displays only four designs while showing the full planned/generated count.
+- RFD3 preview panel displays only two designs while showing the full planned/generated count.
 - Preview-only MPNN/RF3 calls include `preview_only=true`.
 - Preview-only results update visualization state without navigating away or implying formal save.
 
@@ -139,7 +139,7 @@ In scope:
 
 - Fix candidate metrics for confidence-ranked design cards.
 - Add preview-only API semantics for interactive runs.
-- Cap frontend preview rendering to four designs.
+- Cap frontend preview rendering to two designs.
 - Preserve full backend generation parameters and formal result persistence.
 
 Out of scope:
