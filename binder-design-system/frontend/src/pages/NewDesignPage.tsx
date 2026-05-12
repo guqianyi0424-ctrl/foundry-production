@@ -9,6 +9,9 @@ import type { PredictHotspotResponse, RFD3Design, MPNNSequence, RF3Response } fr
 import type { HotspotResidue } from '@/types'
 import { parseStructureFile } from '@/utils/pdbParser'
 import { Upload, Play, RotateCcw, Sparkles, Scissors, Target, RefreshCw, X, CheckCircle2, Dna, FlaskConical, ChevronRight, Shield, TrendingUp, AlertTriangle } from 'lucide-react'
+import type { RFD3Response } from '@/api'
+
+const PREVIEW_DESIGN_LIMIT = 2
 
 const splitHotspotConfig = (input: string): string[] =>
   input
@@ -42,6 +45,19 @@ const mergeHotspotSelections = (...groups: HotspotResidue[][]): HotspotResidue[]
   }
 
   return merged
+}
+
+const getPreviewBatches = (results: RFD3Response | null) => {
+  if (!results?.batches) return []
+
+  let remaining = PREVIEW_DESIGN_LIMIT
+  return results.batches
+    .map((batch) => {
+      const designs = batch.designs.slice(0, Math.max(remaining, 0))
+      remaining -= designs.length
+      return { ...batch, designs }
+    })
+    .filter((batch) => batch.designs.length > 0)
 }
 
 interface HotspotPredictionModalProps {
@@ -216,6 +232,8 @@ export function NewDesignPage() {
   const pendingHotspots = mergeHotspotSelections(predictedHotspots, selectedHotspots)
   const committedHotspotItems = splitHotspotConfig(rfd3Config.hotspots)
   const committedHotspotTokens = committedHotspotItems.map(toRfd3HotspotToken)
+  const visibleRFD3Batches = getPreviewBatches(rfd3Results)
+  const previewDesignCount = visibleRFD3Batches.reduce((total, batch) => total + batch.designs.length, 0)
 
   const handleUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -294,11 +312,10 @@ export function NewDesignPage() {
           status: 'rfd3_completed',
           time: new Date().toLocaleString('zh-CN'),
         })
-        setCurrentPage(`experiment_${res.experiment_id}`)
       }
     } catch (err) { alert('RFD3运行失败: ' + String(err)) }
     finally { setIsRFD3Running(false) }
-  }, [pdbContent, rfd3Config, committedHotspotTokens, setRfd3Results, targetFile, setCurrentExperimentId, addJob, setCurrentPage])
+  }, [pdbContent, rfd3Config, committedHotspotTokens, setRfd3Results, targetFile, setCurrentExperimentId, addJob])
 
   const handleRunMPNN = useCallback(async (backbonePdb: string, designIdx: number) => {
     const design = rfd3Results?.designs.find(item => item.index === designIdx)
@@ -314,6 +331,8 @@ export function NewDesignPage() {
         backbone_pdb_content: backbonePdb,
         batch_size: 10,
         fixed_chains: targetChains.length > 0 ? targetChains : undefined,
+        ...(rfd3Results?.experiment_id ? { experiment_id: rfd3Results.experiment_id } : {}),
+        preview_only: true,
       })
       setMpnnResults(res)
       setSelectedMPNNSeq(res.sequences?.[0] ?? null)
@@ -330,12 +349,14 @@ export function NewDesignPage() {
         mpnn_pdb_content: mpnnPdb,
         rfd3_pdb_content: rfd3Pdb,
         example_id: 'binder_design',
+        ...(rfd3Results?.experiment_id ? { experiment_id: rfd3Results.experiment_id } : {}),
+        preview_only: true,
       })
       setRf3Results(res)
       setActiveStep(2)
     } catch (err) { alert('RF3运行失败: ' + String(err)) }
     finally { setIsRF3Running(false) }
-  }, [selectedRFD3Design, setRf3Results])
+  }, [rfd3Results?.experiment_id, selectedRFD3Design, setRf3Results])
 
   const handleSubmitPipeline = useCallback(async () => {
     if (!pdbContent) {
@@ -477,13 +498,14 @@ export function NewDesignPage() {
                   <div className="text-sm text-gray-600">
                     生成 <span className="font-semibold text-gray-900">{rfd3Results.num_designs}</span> 个骨架结构
                     ({rfd3Results.num_batches} batch × {rfd3Results.batches?.[0]?.num_structures || '?'} 结构)
+                    <span className="ml-2 text-blue-600">当前仅展示 {previewDesignCount} 个预览 design，不影响后台完整生成</span>
                     {rfd3Results.mock && <span className="ml-2 text-amber-500">(mock模式)</span>}
                   </div>
                   <button onClick={() => setShowRFD3Modal(true)} className="px-3 py-1.5 rounded-lg border border-blue-200 text-blue-600 text-xs hover:bg-blue-50 transition-all">
                     重新生成
                   </button>
                 </div>
-                {rfd3Results.batches?.map((batch) => (
+                {visibleRFD3Batches.map((batch) => (
                   <div key={batch.batch_idx} className="border border-gray-100 rounded-xl p-4">
                     <h4 className="text-sm font-semibold text-gray-700 mb-3">Batch {batch.batch_idx}</h4>
                     <div className="grid grid-cols-2 gap-3">

@@ -174,6 +174,7 @@ export const runRF3 = async (params: {
   rfd3_pdb_content?: string
   example_id?: string
   experiment_id?: string
+  preview_only?: boolean
 }): Promise<RF3Response> => {
   const res = await api.post('/run-rf3', params)
   return res.data
@@ -186,6 +187,7 @@ export const runMPNN = async (params: {
   fixed_chains?: string[]
   model_type?: string
   experiment_id?: string
+  preview_only?: boolean
 }): Promise<MPNNResponse> => {
   const res = await api.post('/run-mpnn', params)
   return res.data

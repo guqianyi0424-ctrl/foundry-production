@@ -316,6 +316,104 @@ describe('system acceptance page flows', () => {
     expect(screen.queryAllByRole('button', { name: /送入MPNN/ })).toHaveLength(0)
   })
 
+  it('shows only two RFD3 preview designs and sends preview-only MPNN/RF3 calls', async () => {
+    useAppStore.getState().setAuth('researcher-token', researcher)
+    useAppStore.getState().setPdbContent('TARGET_PDB')
+    useAppStore.getState().setRfd3Config({
+      targetStructure: 'A/1-100',
+      hotspots: 'A/42',
+    })
+    mockRunRFD3.mockResolvedValue({
+      success: true,
+      experiment_id: 'exp-preview',
+      designs: [
+        { index: 0, batch: 0, design_in_batch: 0, name: 'rfd3_0', pdb_path: '', pdb_content: 'RFD3_0', plddt: 80 },
+        { index: 1, batch: 0, design_in_batch: 1, name: 'rfd3_1', pdb_path: '', pdb_content: 'RFD3_1', plddt: 81 },
+        { index: 2, batch: 0, design_in_batch: 2, name: 'rfd3_2', pdb_path: '', pdb_content: 'RFD3_2', plddt: 82 },
+      ],
+      batches: [
+        {
+          batch_idx: 0,
+          num_structures: 3,
+          designs: [
+            { index: 0, batch: 0, design_in_batch: 0, name: 'rfd3_0', pdb_path: '', pdb_content: 'RFD3_0', plddt: 80 },
+            { index: 1, batch: 0, design_in_batch: 1, name: 'rfd3_1', pdb_path: '', pdb_content: 'RFD3_1', plddt: 81 },
+            { index: 2, batch: 0, design_in_batch: 2, name: 'rfd3_2', pdb_path: '', pdb_content: 'RFD3_2', plddt: 82 },
+          ],
+        },
+      ],
+      num_batches: 1,
+      num_designs: 3,
+      first_backbone_pdb: 'RFD3_0',
+      output_dir: '',
+    })
+    mockRunMPNN.mockResolvedValue({
+      success: true,
+      sequences: [
+        { index: 0, name: 'seq_0', sequence: 'ACDEFGHIK', pdb_path: '', pdb_content: 'MPNN_PDB', score: -0.3 },
+      ],
+      num_sequences: 1,
+      first_sequence_pdb: 'MPNN_PDB',
+      output_dir: '',
+    })
+    mockRunRF3.mockResolvedValue({
+      success: true,
+      predicted_pdb: 'RF3_PDB',
+      predicted_pdb_path: '',
+      num_models: 1,
+      summary: {
+        chain_ptm: [0.8],
+        overall_plddt: 91.2,
+        overall_pde: 0.2,
+        overall_pae: 1.3,
+        ptm: 0.81,
+        iptm: 0.78,
+        has_clash: false,
+        ranking_score: 0.85,
+      },
+      pae: null,
+      plddt: [91.2],
+      avg_plddt: 91.2,
+      rmsd: 1.35,
+      rmsd_interpretation: 'Excellent',
+      per_res_rmsd: [1.0],
+      passed: true,
+      output_dir: '',
+    })
+
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(screen.getByRole('button', { name: '新建任务' }))
+    await user.click(screen.getByRole('button', { name: '开始生成' }))
+    await user.click(await screen.findByRole('button', { name: /① RFD3 骨架生成/ }))
+
+    expect(screen.getByText('rfd3_0')).toBeInTheDocument()
+    expect(screen.getByText('rfd3_1')).toBeInTheDocument()
+    expect(screen.queryByText('rfd3_2')).not.toBeInTheDocument()
+    expect(screen.getByText(/当前仅展示 2 个预览 design/)).toBeInTheDocument()
+
+    await user.click(screen.getAllByRole('button', { name: /送入MPNN/ })[0])
+    await screen.findByText('Sequence 1')
+    expect(mockRunMPNN).toHaveBeenCalledWith({
+      backbone_pdb_content: 'RFD3_0',
+      batch_size: 10,
+      fixed_chains: ['A'],
+      experiment_id: 'exp-preview',
+      preview_only: true,
+    })
+
+    await user.click(screen.getByRole('button', { name: /送入RF3验证/ }))
+    await screen.findByText('验证通过 ✅')
+    expect(mockRunRF3).toHaveBeenCalledWith({
+      mpnn_pdb_content: 'MPNN_PDB',
+      rfd3_pdb_content: 'RFD3_0',
+      example_id: 'binder_design',
+      experiment_id: 'exp-preview',
+      preview_only: true,
+    })
+  })
+
   it('loads experiment records through the experiments page', async () => {
     useAppStore.getState().setAuth('researcher-token', researcher)
     mockGetExperiments.mockResolvedValue({
