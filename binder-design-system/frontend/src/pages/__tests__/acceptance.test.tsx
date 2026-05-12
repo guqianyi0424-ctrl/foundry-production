@@ -290,10 +290,10 @@ describe('system acceptance page flows', () => {
     mockRunMPNN.mockResolvedValue({
       success: true,
       sequences: [
-        { index: 0, name: 'seq_0', sequence: 'ACDEFGHIK', pdb_path: '', pdb_content: 'MPNN_FOR_RFD3_2', score: -0.3 },
+        { index: 0, name: 'seq_0', sequence: 'ACDEFGHIK', pdb_path: '', pdb_content: 'MPNN_FOR_RFD3_1', score: -0.3 },
       ],
       num_sequences: 1,
-      first_sequence_pdb: 'MPNN_FOR_RFD3_2',
+      first_sequence_pdb: 'MPNN_FOR_RFD3_1',
       output_dir: '',
     })
 
@@ -303,15 +303,17 @@ describe('system acceptance page flows', () => {
     await user.click(screen.getByRole('button', { name: '新建任务' }))
     await user.click(screen.getByRole('button', { name: '开始生成' }))
     await user.click(await screen.findByRole('button', { name: /① RFD3 骨架生成/ }))
-    await screen.findByText('rfd3_2')
+    await screen.findByText('rfd3_1')
+    expect(screen.queryByText('rfd3_2')).not.toBeInTheDocument()
 
-    await user.click(screen.getAllByRole('button', { name: /送入MPNN/ })[2])
+    await user.click(screen.getAllByRole('button', { name: /送入MPNN/ })[1])
 
     await screen.findByText('Sequence 1')
     expect(mockRunMPNN).toHaveBeenCalledWith({
-      backbone_pdb_content: 'RFD3_2',
+      backbone_pdb_content: 'RFD3_1',
       batch_size: 10,
       fixed_chains: ['A'],
+      preview_only: true,
     })
     expect(screen.queryAllByRole('button', { name: /送入MPNN/ })).toHaveLength(0)
   })

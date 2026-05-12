@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Any
 import uuid
 
-from database import Experiment, ExperimentDesign
+from database import Experiment, ExperimentDesign, ensure_schema_compatibility
 
 
 class ExperimentRepository:
@@ -82,6 +82,7 @@ class ExperimentRepository:
     def save_designs(self, experiment_id: str, designs: list[dict[str, Any]]) -> None:
         if not designs:
             return
+        ensure_schema_compatibility()
         db = self.session_factory()
         try:
             for data in designs:

@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, Column, String, Integer, Float, Boolean, Text, DateTime, ForeignKey, JSON
+from sqlalchemy import create_engine, Column, String, Integer, Float, Boolean, Text, DateTime, ForeignKey, JSON, inspect, text
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 from datetime import datetime
 import os
@@ -96,8 +96,33 @@ class AuditLog(Base):
     user = relationship("User", back_populates="audit_logs")
 
 
+def ensure_schema_compatibility():
+    inspector = inspect(engine)
+    if "experiment_designs" not in inspector.get_table_names():
+        return
+
+    existing_columns = {column["name"] for column in inspector.get_columns("experiment_designs")}
+    required_columns = {
+        "plddt_source": "VARCHAR",
+        "ranking_source": "VARCHAR",
+        "validation_status": "VARCHAR",
+    }
+    missing_columns = {
+        name: column_type
+        for name, column_type in required_columns.items()
+        if name not in existing_columns
+    }
+    if not missing_columns:
+        return
+
+    with engine.begin() as connection:
+        for name, column_type in missing_columns.items():
+            connection.execute(text(f"ALTER TABLE experiment_designs ADD COLUMN {name} {column_type}"))
+
+
 def init_db():
     Base.metadata.create_all(bind=engine)
+    ensure_schema_compatibility()
     db = SessionLocal()
     try:
         from routers.auth import get_password_hash

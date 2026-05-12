@@ -5,7 +5,7 @@ from typing import List, Optional
 import time
 import uuid
 
-from database import SessionLocal, Experiment, ExperimentDesign, User
+from database import SessionLocal, Experiment, ExperimentDesign, User, ensure_schema_compatibility
 from routers.auth import get_current_user
 from logger import logger, record_task
 from schemas.domain import RFD3JobConfig
@@ -93,6 +93,7 @@ def _save_experiment_step(experiment_id: str, step: str, results: dict, config: 
 def _save_designs(experiment_id: str, designs: list):
     if not experiment_id or not designs:
         return
+    ensure_schema_compatibility()
     db = SessionLocal()
     try:
         for d in designs:
