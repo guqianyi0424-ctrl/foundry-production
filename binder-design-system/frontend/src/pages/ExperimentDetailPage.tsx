@@ -19,6 +19,32 @@ const hasRmsd = (value: unknown): value is number =>
 const metric = (value: unknown, digits = 2) =>
   typeof value === 'number' && Number.isFinite(value) ? value.toFixed(digits) : '-'
 
+type CandidateDesign = ExperimentDetail['designs'][number]
+
+const plddtSourceLabel = (source: CandidateDesign['plddt_source']) => {
+  if (source === 'rf3') return 'RF3 验证'
+  if (source === 'rfd3') return 'RFD3 预筛选'
+  return '无'
+}
+
+const rankingSourceLabel = (source: CandidateDesign['ranking_source']) => {
+  if (source === 'rf3') return 'RF3 ranking'
+  if (source === 'mpnn') return 'MPNN score'
+  return '无'
+}
+
+const validationLabel = (design: CandidateDesign) => {
+  if (design.validation_status === 'validated') return design.passed_validation ? 'RF3 已验证' : 'RF3 未通过'
+  if (design.validation_status === 'failed') return '验证失败'
+  return '未验证'
+}
+
+const candidateSortScore = (design: CandidateDesign) => {
+  if (typeof design.plddt === 'number' && Number.isFinite(design.plddt)) return design.plddt
+  if (typeof design.ranking_score === 'number' && Number.isFinite(design.ranking_score)) return design.ranking_score
+  return Number.NEGATIVE_INFINITY
+}
+
 const sanitizeForDisplay = (value: any): any => {
   if (Array.isArray(value)) return value.map(sanitizeForDisplay)
   if (!value || typeof value !== 'object') return value
@@ -35,7 +61,7 @@ const sanitizeForDisplay = (value: any): any => {
 
 const topCandidates = (experiment: ExperimentDetail) =>
   [...(experiment.designs || [])]
-    .sort((a, b) => (b.plddt ?? b.ranking_score ?? 0) - (a.plddt ?? a.ranking_score ?? 0))
+    .sort((a, b) => candidateSortScore(b) - candidateSortScore(a))
     .slice(0, 3)
 
 function InfoRow({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) {
@@ -335,6 +361,11 @@ export function ExperimentDetailPage({ experimentId }: { experimentId: string })
                       <div className="mt-2 text-xs text-gray-500">
                         RMSD {hasRmsd(d.rmsd) ? `${d.rmsd.toFixed(2)} Å` : '未计算'} · Ranking {metric(d.ranking_score, 3)}
                       </div>
+                      <div className="mt-2 flex flex-wrap gap-1.5 text-[11px] text-gray-600">
+                        <span className="rounded-full bg-blue-50 px-2 py-0.5 text-blue-700">pLDDT 来源: {plddtSourceLabel(d.plddt_source)}</span>
+                        <span className="rounded-full bg-slate-50 px-2 py-0.5 text-slate-700">Ranking 来源: {rankingSourceLabel(d.ranking_source)}</span>
+                        <span className="rounded-full bg-gray-50 px-2 py-0.5 text-gray-700">{validationLabel(d)}</span>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -347,6 +378,8 @@ export function ExperimentDetailPage({ experimentId }: { experimentId: string })
                   <th className="text-left px-4 py-3 font-medium text-gray-600">pLDDT</th>
                   <th className="text-left px-4 py-3 font-medium text-gray-600">RMSD</th>
                   <th className="text-left px-4 py-3 font-medium text-gray-600">Ranking</th>
+                  <th className="text-left px-4 py-3 font-medium text-gray-600">指标来源</th>
+                  <th className="text-left px-4 py-3 font-medium text-gray-600">验证状态</th>
                   <th className="text-left px-4 py-3 font-medium text-gray-600">验证</th>
                 </tr>
               </thead>
@@ -360,6 +393,10 @@ export function ExperimentDetailPage({ experimentId }: { experimentId: string })
                     <td className="px-4 py-3">{d.plddt?.toFixed(1) || '-'}</td>
                     <td className="px-4 py-3">{hasRmsd(d.rmsd) ? `${d.rmsd.toFixed(2)} Å` : '-'}</td>
                     <td className="px-4 py-3">{d.ranking_score?.toFixed(3) || '-'}</td>
+                    <td className="px-4 py-3 text-xs text-gray-600">
+                      {plddtSourceLabel(d.plddt_source)} / {rankingSourceLabel(d.ranking_source)}
+                    </td>
+                    <td className="px-4 py-3 text-xs text-gray-600">{validationLabel(d)}</td>
                     <td className="px-4 py-3">
                       {d.passed_validation ? (
                         <CheckCircle size={16} className="text-green-600" />

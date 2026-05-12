@@ -490,6 +490,91 @@ describe('system acceptance page flows', () => {
     expect(screen.queryByText('-1.00 Å')).not.toBeInTheDocument()
   })
 
+  it('shows fallback metric provenance in top confidence design cards', async () => {
+    useAppStore.getState().setAuth('researcher-token', researcher)
+    mockGetExperiment.mockResolvedValue({
+      id: 'exp-provenance',
+      name: '指标来源实验',
+      status: 'completed',
+      created_at: '2026-05-10T12:00:00',
+      updated_at: '2026-05-10T12:10:00',
+      input_pdb: 'ATOM',
+      target: 'A/1-2',
+      hotspots: [{ chain: 'A', residue: 1 }],
+      rfd3_config: { task_type: 'protein', protein_chain: 'A/1-2' },
+      mpnn_config: null,
+      rf3_config: null,
+      rfd3_results: null,
+      mpnn_results: null,
+      rf3_results: null,
+      duration_seconds: 10,
+      gpu_info: null,
+      user_id: 'u-researcher',
+      designs: [
+        {
+          id: 'd1',
+          design_name: 'rf3_validated',
+          sequence: 'ACDEFG',
+          pdb_content: 'RF3_PDB',
+          plddt: 91.2,
+          rmsd: 1.2,
+          ranking_score: 0.85,
+          passed_validation: true,
+          plddt_source: 'rf3',
+          ranking_source: 'rf3',
+          validation_status: 'validated',
+        },
+        {
+          id: 'd2',
+          design_name: 'rfd3_fallback',
+          sequence: 'HIKLMN',
+          pdb_content: 'RFD3_PDB',
+          plddt: 82.4,
+          rmsd: null,
+          ranking_score: -1.2,
+          passed_validation: false,
+          plddt_source: 'rfd3',
+          ranking_source: 'mpnn',
+          validation_status: 'not_validated',
+        },
+        {
+          id: 'd3',
+          design_name: 'missing_metrics',
+          sequence: 'PQRSTV',
+          pdb_content: null,
+          plddt: null,
+          rmsd: null,
+          ranking_score: null,
+          passed_validation: false,
+          plddt_source: 'none',
+          ranking_source: 'none',
+          validation_status: 'not_validated',
+        },
+      ],
+    })
+
+    useAppStore.getState().setCurrentPage('experiment_exp-provenance')
+    const user = userEvent.setup()
+    render(<App />)
+
+    expect(await screen.findByText('指标来源实验')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: /设计结果/ }))
+
+    const topSection = screen.getByText('置信度最高的三个设计结果').closest('div')
+    expect(topSection).not.toBeNull()
+    expect(within(topSection as HTMLElement).getByText('rf3_validated')).toBeInTheDocument()
+    expect(within(topSection as HTMLElement).getByText('rfd3_fallback')).toBeInTheDocument()
+    expect(within(topSection as HTMLElement).getByText('pLDDT 来源: RF3 验证')).toBeInTheDocument()
+    expect(within(topSection as HTMLElement).getByText('pLDDT 来源: RFD3 预筛选')).toBeInTheDocument()
+    expect(within(topSection as HTMLElement).getByText('Ranking 来源: MPNN score')).toBeInTheDocument()
+    expect(within(topSection as HTMLElement).getAllByText('未验证')[0]).toBeInTheDocument()
+
+    const table = screen.getByRole('table')
+    expect(within(table).getByText('指标来源')).toBeInTheDocument()
+    expect(within(table).getByText('验证状态')).toBeInTheDocument()
+    expect(within(table).getByText('RFD3 预筛选 / MPNN score')).toBeInTheDocument()
+  })
+
   it('shows a login-required message instead of not-found when experiment detail returns 401', async () => {
     useAppStore.getState().setAuth('expired-token', researcher)
     mockGetExperiment.mockRejectedValue({

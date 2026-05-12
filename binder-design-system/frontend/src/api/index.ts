@@ -258,6 +258,9 @@ export interface ExperimentDetail extends ExperimentItem {
     rmsd: number | null
     ranking_score: number | null
     passed_validation: boolean
+    plddt_source?: 'rf3' | 'rfd3' | 'none' | null
+    ranking_source?: 'rf3' | 'mpnn' | 'none' | null
+    validation_status?: 'validated' | 'not_validated' | 'failed' | null
   }>
 }
 
