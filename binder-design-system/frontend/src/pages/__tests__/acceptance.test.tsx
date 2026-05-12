@@ -145,10 +145,11 @@ describe('system acceptance page flows', () => {
     expect(screen.getByRole('button', { name: /系统监控/ })).toBeInTheDocument()
   })
 
-  it('runs the De Novo RFD3 to MPNN to RF3 page flow with mocked APIs', async () => {
+  it('runs the De Novo preview task without mutating formal MPNN/RF3 results', async () => {
     useAppStore.getState().setAuth('researcher-token', researcher)
     mockRunDeNovoRFD3.mockResolvedValue({
       success: true,
+      experiment_id: 'exp-denovo-preview',
       designs: [
         {
           index: 0,
@@ -159,10 +160,62 @@ describe('system acceptance page flows', () => {
           pdb_content: 'RFD3_PDB',
           plddt: 88.4,
         },
+        {
+          index: 1,
+          batch: 0,
+          design_in_batch: 1,
+          name: 'denovo_1',
+          pdb_path: '',
+          pdb_content: 'RFD3_PDB_1',
+          plddt: 87.2,
+        },
+        {
+          index: 2,
+          batch: 0,
+          design_in_batch: 2,
+          name: 'denovo_2',
+          pdb_path: '',
+          pdb_content: 'RFD3_PDB_2',
+          plddt: 86.1,
+        },
       ],
-      batches: [],
+      batches: [
+        {
+          batch_idx: 0,
+          num_structures: 3,
+          designs: [
+            {
+              index: 0,
+              batch: 0,
+              design_in_batch: 0,
+              name: 'denovo_0',
+              pdb_path: '',
+              pdb_content: 'RFD3_PDB',
+              plddt: 88.4,
+            },
+            {
+              index: 1,
+              batch: 0,
+              design_in_batch: 1,
+              name: 'denovo_1',
+              pdb_path: '',
+              pdb_content: 'RFD3_PDB_1',
+              plddt: 87.2,
+            },
+            {
+              index: 2,
+              batch: 0,
+              design_in_batch: 2,
+              name: 'denovo_2',
+              pdb_path: '',
+              pdb_content: 'RFD3_PDB_2',
+              plddt: 86.1,
+            },
+          ],
+        },
+      ],
       num_batches: 1,
-      num_designs: 1,
+      num_designs: 3,
       first_backbone_pdb: 'RFD3_PDB',
       output_dir: '',
     })
@@ -211,9 +264,13 @@ describe('system acceptance page flows', () => {
     render(<App />)
 
     await user.click(screen.getByRole('button', { name: 'de novo protein' }))
-    await user.click(screen.getByRole('button', { name: /运行 RFD3/ }))
+    expect(screen.queryByRole('button', { name: /运行 RFD3/ })).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: /新建任务/ }))
 
     await screen.findByText('denovo_0')
+    expect(screen.getByText('denovo_1')).toBeInTheDocument()
+    expect(screen.queryByText('denovo_2')).not.toBeInTheDocument()
+    expect(screen.getByText(/当前仅展示 2 个预览 design/)).toBeInTheDocument()
     expect(mockRunDeNovoRFD3).toHaveBeenCalledWith({
       length: 80,
       diffusion_batch_size: 2,
@@ -225,6 +282,8 @@ describe('system acceptance page flows', () => {
     expect(mockRunMPNN).toHaveBeenCalledWith({
       backbone_pdb_content: 'RFD3_PDB',
       batch_size: 10,
+      experiment_id: 'exp-denovo-preview',
+      preview_only: true,
     })
     expect(screen.getByText(/ProteinMPNN 生成的是氨基酸序列/)).toBeInTheDocument()
 
@@ -234,6 +293,8 @@ describe('system acceptance page flows', () => {
       mpnn_pdb_content: 'MPNN_PDB',
       rfd3_pdb_content: 'RFD3_PDB',
       example_id: 'denovo_design',
+      experiment_id: 'exp-denovo-preview',
+      preview_only: true,
     })
     expect(screen.getByText('1.35 Å')).toBeInTheDocument()
   })

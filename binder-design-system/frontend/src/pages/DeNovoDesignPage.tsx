@@ -12,6 +12,8 @@ const shortSequence = (sequence: string, max = 140) =>
 const hasRmsd = (value: unknown): value is number =>
   typeof value === 'number' && Number.isFinite(value) && value >= 0
 
+const PREVIEW_DESIGN_LIMIT = 2
+
 export function DeNovoDesignPage() {
   const [length, setLength] = useState(80)
   const [diffusionBatchSize, setDiffusionBatchSize] = useState(2)
@@ -26,6 +28,10 @@ export function DeNovoDesignPage() {
 
   const expectedBackbones = useMemo(() => diffusionBatchSize * nBatches, [diffusionBatchSize, nBatches])
   const isRunning = runningStep !== null
+  const visibleBackbones = useMemo(
+    () => (rfd3Results?.designs ?? []).slice(0, PREVIEW_DESIGN_LIMIT),
+    [rfd3Results?.designs],
+  )
 
   const handleRunRFD3 = async () => {
     setRunningStep('rfd3')
@@ -59,6 +65,8 @@ export function DeNovoDesignPage() {
       const result = await runMPNN({
         backbone_pdb_content: selectedBackbone.pdb_content,
         batch_size: clampNumber(mpnnBatchSize, 1, 50),
+        ...(rfd3Results?.experiment_id ? { experiment_id: rfd3Results.experiment_id } : {}),
+        preview_only: true,
       })
       setMpnnResults(result)
       setSelectedSequence(result.sequences?.[0] ?? null)
@@ -78,6 +86,8 @@ export function DeNovoDesignPage() {
         mpnn_pdb_content: selectedSequence.pdb_content,
         rfd3_pdb_content: selectedBackbone?.pdb_content,
         example_id: 'denovo_design',
+        ...(rfd3Results?.experiment_id ? { experiment_id: rfd3Results.experiment_id } : {}),
+        preview_only: true,
       })
       setRf3Results(result)
     } catch (err) {
@@ -135,7 +145,7 @@ export function DeNovoDesignPage() {
             className="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-400"
           >
             <Play size={16} />
-            {runningStep === 'rfd3' ? 'RFD3 生成中...' : '运行 RFD3'}
+            {runningStep === 'rfd3' ? 'RFD3 生成中...' : '新建任务'}
           </button>
         </div>
       </section>
@@ -160,25 +170,30 @@ export function DeNovoDesignPage() {
             {!rfd3Results && runningStep !== 'rfd3' && <EmptyRow text="设置参数后运行 RFD3，无需上传靶点结构。" />}
             {rfd3Results?.mock && <MockNotice label="RFD3" />}
             {rfd3Results?.designs && rfd3Results.designs.length > 0 && (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                {rfd3Results.designs.map((design) => (
-                  <button
-                    key={`${design.batch}-${design.index}`}
-                    onClick={() => setSelectedBackbone(design)}
-                    className={`text-left rounded-xl border p-3 transition-all ${
-                      selectedBackbone?.index === design.index
-                        ? 'border-blue-400 bg-blue-50 ring-1 ring-blue-200'
-                        : 'border-gray-100 hover:border-gray-200 hover:bg-gray-50'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-sm font-semibold text-gray-900 truncate">{design.name}</span>
-                      <span className="shrink-0 rounded-full bg-blue-100 px-2 py-0.5 text-xs text-blue-700">#{design.index + 1}</span>
-                    </div>
-                    <div className="mt-2 text-xs text-gray-500">Batch {design.batch} · pLDDT {(design.plddt ?? 0).toFixed(1)}</div>
-                  </button>
-                ))}
-              </div>
+              <>
+                <div className="rounded-lg bg-blue-50 px-3 py-2 text-xs text-blue-700">
+                  生成 {rfd3Results.num_designs} 个骨架结构，当前仅展示 {visibleBackbones.length} 个预览 design，不影响后台完整生成。
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {visibleBackbones.map((design) => (
+                    <button
+                      key={`${design.batch}-${design.index}`}
+                      onClick={() => setSelectedBackbone(design)}
+                      className={`text-left rounded-xl border p-3 transition-all ${
+                        selectedBackbone?.index === design.index
+                          ? 'border-blue-400 bg-blue-50 ring-1 ring-blue-200'
+                          : 'border-gray-100 hover:border-gray-200 hover:bg-gray-50'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-sm font-semibold text-gray-900 truncate">{design.name}</span>
+                        <span className="shrink-0 rounded-full bg-blue-100 px-2 py-0.5 text-xs text-blue-700">#{design.index + 1}</span>
+                      </div>
+                      <div className="mt-2 text-xs text-gray-500">Batch {design.batch} · pLDDT {(design.plddt ?? 0).toFixed(1)}</div>
+                    </button>
+                  ))}
+                </div>
+              </>
             )}
           </WorkflowBlock>
 
