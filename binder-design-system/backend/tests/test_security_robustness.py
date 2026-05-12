@@ -202,6 +202,32 @@ def test_forged_token_is_rejected_on_protected_endpoint(monkeypatch):
     asyncio.run(run_with_client(monkeypatch, scenario))
 
 
+def test_run_rfd3_rejects_invalid_bearer_token(monkeypatch):
+    import routers.design as design_router
+
+    class FakeRFD3Service:
+        def run(self, config):
+            pytest.fail("RFD3 should not run when bearer token is invalid")
+
+    class FakeServices:
+        rfd3 = FakeRFD3Service()
+
+    monkeypatch.setattr(design_router, "get_design_services", lambda: FakeServices())
+
+    async def scenario(client):
+        forged_token = jwt.encode({"sub": "admin", "role": "admin"}, "wrong-secret", algorithm=ALGORITHM)
+        response = await client.post(
+            "/api/run-rfd3",
+            headers={"Authorization": f"Bearer {forged_token}"},
+            json={"binder_length": 72, "diffusion_batch_size": 1, "n_batches": 1},
+        )
+
+        assert response.status_code == 401
+        assert response.json()["code"] == "unauthorized"
+
+    asyncio.run(run_with_client(monkeypatch, scenario))
+
+
 def test_monitor_endpoints_require_admin_role(monkeypatch):
     async def scenario(client):
         researcher = await register_and_login(client, "researcher")

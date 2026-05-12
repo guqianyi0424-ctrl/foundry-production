@@ -392,6 +392,25 @@ describe('system acceptance page flows', () => {
     expect(screen.queryByText('-1.00 Å')).not.toBeInTheDocument()
   })
 
+  it('shows a login-required message instead of not-found when experiment detail returns 401', async () => {
+    useAppStore.getState().setAuth('expired-token', researcher)
+    mockGetExperiment.mockRejectedValue({
+      response: {
+        status: 401,
+        data: { message: '请先登录' },
+      },
+    })
+
+    useAppStore.getState().setCurrentPage('experiment_exp-auth')
+    render(<App />)
+
+    expect(await screen.findByText('请先登录后查看实验记录')).toBeInTheDocument()
+    expect(screen.getByText('当前登录已失效，请重新登录后再试。')).toBeInTheDocument()
+    expect(screen.queryByText('实验记录不存在')).not.toBeInTheDocument()
+    expect(useAppStore.getState().token).toBeNull()
+    expect(screen.getByRole('heading', { name: '登录 DeepBinder' })).toBeInTheDocument()
+  })
+
   it('documents roles and ProteinMPNN visualization limits in help page', async () => {
     useAppStore.getState().setAuth('researcher-token', researcher)
 

@@ -49,24 +49,31 @@ function InfoRow({ label, value, mono = false }: { label: string; value: string;
 
 export function ExperimentDetailPage({ experimentId }: { experimentId: string }) {
   const setCurrentPage = useAppStore((s) => s.setCurrentPage)
+  const clearAuth = useAppStore((s) => s.clearAuth)
   const [experiment, setExperiment] = useState<ExperimentDetail | null>(null)
+  const [errorStatus, setErrorStatus] = useState<number | null>(null)
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState<'overview' | 'rfd3' | 'mpnn' | 'rf3' | 'designs'>('overview')
 
   useEffect(() => {
     const fetchDetail = async () => {
       setLoading(true)
+      setErrorStatus(null)
       try {
         const data = await getExperiment(experimentId)
         setExperiment(data)
-      } catch (err) {
+      } catch (err: any) {
         console.error('获取实验详情失败:', err)
+        const status = err?.response?.status ?? null
+        setErrorStatus(status)
+        setExperiment(null)
+        if (status === 401) clearAuth()
       } finally {
         setLoading(false)
       }
     }
     fetchDetail()
-  }, [experimentId])
+  }, [experimentId, clearAuth])
 
   const handleExport = async () => {
     if (!experiment) return
@@ -113,6 +120,30 @@ export function ExperimentDetailPage({ experimentId }: { experimentId: string })
   }
 
   if (!experiment) {
+    if (errorStatus === 401) {
+      return (
+        <div className="flex h-full items-center justify-center text-gray-500">
+          <div className="text-center">
+            <XCircle size={32} className="mx-auto mb-3 text-amber-500" />
+            <div className="text-base font-medium text-gray-700">请先登录后查看实验记录</div>
+            <div className="mt-1 text-sm text-gray-400">当前登录已失效，请重新登录后再试。</div>
+          </div>
+        </div>
+      )
+    }
+
+    if (errorStatus === 403) {
+      return (
+        <div className="flex h-full items-center justify-center text-gray-500">
+          <div className="text-center">
+            <XCircle size={32} className="mx-auto mb-3 text-red-500" />
+            <div className="text-base font-medium text-gray-700">无权访问此实验</div>
+            <div className="mt-1 text-sm text-gray-400">该实验属于其他用户或当前账号权限不足。</div>
+          </div>
+        </div>
+      )
+    }
+
     return (
       <div className="flex items-center justify-center h-full text-gray-400">
         <XCircle size={32} className="mr-3" /> 实验记录不存在

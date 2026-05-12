@@ -86,10 +86,12 @@ async def get_current_user(token: Optional[str] = Depends(oauth2_scheme), db: Se
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         username: str = payload.get("sub")
         if username is None:
-            return None
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="请先登录")
     except JWTError:
-        return None
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="请先登录")
     user = db.query(User).filter(User.username == username).first()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="请先登录")
     return user
 
 
