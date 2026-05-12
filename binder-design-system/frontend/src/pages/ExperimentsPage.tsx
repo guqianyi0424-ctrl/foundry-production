@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useAppStore } from '@/store/useAppStore'
-import { getExperiments, deleteExperiment, exportExperiment, type ExperimentItem } from '@/api'
+import { getExperiments, deleteExperiment, exportExperiment, exportExperimentCsv, type ExperimentItem } from '@/api'
 import { FlaskConical, Trash2, Download, Search, RefreshCw, Clock, Cpu, CheckCircle, XCircle, Loader, FileText } from 'lucide-react'
 
 const statusConfig: Record<string, { label: string; color: string; icon: any }> = {
@@ -61,6 +61,20 @@ export function ExperimentsPage() {
       URL.revokeObjectURL(url)
     } catch (err) {
       console.error('导出失败:', err)
+    }
+  }
+
+  const handleExportCsv = async (id: string, name: string) => {
+    try {
+      const blob = await exportExperimentCsv(id)
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${name}_candidates.csv`
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch (err) {
+      console.error('导出CSV失败:', err)
     }
   }
 
@@ -196,6 +210,13 @@ export function ExperimentsPage() {
                           title="导出报告"
                         >
                           <Download size={14} />
+                        </button>
+                        <button
+                          onClick={() => handleExportCsv(exp.id, exp.name)}
+                          className="p-1.5 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded transition-colors"
+                          title="导出候选CSV"
+                        >
+                          <FileText size={14} />
                         </button>
                         <button
                           onClick={() => handleDelete(exp.id)}

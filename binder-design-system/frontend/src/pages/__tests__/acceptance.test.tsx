@@ -27,6 +27,7 @@ vi.mock('@/components/SilentStructureViewer', () => ({
 
 const mockAuthLogin = vi.fn()
 const mockAuthRegister = vi.fn()
+const mockRunRFD3 = vi.fn()
 const mockRunDeNovoRFD3 = vi.fn()
 const mockRunMPNN = vi.fn()
 const mockRunRF3 = vi.fn()
@@ -38,6 +39,7 @@ vi.mock('@/api', async () => {
     ...actual,
     authLogin: (...args: unknown[]) => mockAuthLogin(...args),
     authRegister: (...args: unknown[]) => mockAuthRegister(...args),
+    runRFD3: (...args: unknown[]) => mockRunRFD3(...args),
     runDeNovoRFD3: (...args: unknown[]) => mockRunDeNovoRFD3(...args),
     runMPNN: (...args: unknown[]) => mockRunMPNN(...args),
     runRF3: (...args: unknown[]) => mockRunRF3(...args),
@@ -63,6 +65,7 @@ beforeEach(() => {
   useAppStore.getState().resetAll()
   mockAuthLogin.mockReset()
   mockAuthRegister.mockReset()
+  mockRunRFD3.mockReset()
   mockRunDeNovoRFD3.mockReset()
   mockRunMPNN.mockReset()
   mockRunRF3.mockReset()
@@ -75,7 +78,9 @@ describe('system acceptance page flows', () => {
 
     expect(screen.getByRole('heading', { name: '登录 DeepBinder' })).toBeInTheDocument()
     expect(screen.getByText('目标结构')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /De Novo Design/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'de novo protein' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'protein to protein' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /De Novo Design/ })).not.toBeInTheDocument()
   })
 
   it('logs in a researcher and hides administrator-only system monitor', async () => {
@@ -96,8 +101,36 @@ describe('system acceptance page flows', () => {
       expect(screen.queryByRole('heading', { name: '登录 DeepBinder' })).not.toBeInTheDocument()
     })
     expect(screen.getByText('研究员')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /De Novo Design/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /新建设计/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'de novo protein' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /系统监控/ })).not.toBeInTheDocument()
+  })
+
+  it('renders backend auth error responses as readable messages', async () => {
+    mockAuthLogin.mockRejectedValue({
+      response: {
+        data: {
+          code: 'validation_error',
+          message: '请求参数校验失败',
+          details: [
+            { loc: ['body', 'username'], msg: '用户名不能为空' },
+            { loc: ['body', 'password'], msg: '密码至少需要 8 位' },
+          ],
+        },
+      },
+    })
+
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.type(screen.getByLabelText(/用户名/), 'a')
+    await user.type(screen.getByLabelText(/密码/), 'secret123')
+    await user.click(screen.getByRole('button', { name: '登 录' }))
+
+    expect(await screen.findByText(/请求参数校验失败/)).toBeInTheDocument()
+    expect(screen.getByText(/用户名不能为空/)).toBeInTheDocument()
+    expect(screen.getByText(/密码至少需要 8 位/)).toBeInTheDocument()
+    expect(screen.queryByText(/\{"code"/)).not.toBeInTheDocument()
   })
 
   it('shows system monitor navigation for administrators', () => {
@@ -174,7 +207,7 @@ describe('system acceptance page flows', () => {
     const user = userEvent.setup()
     render(<App />)
 
-    await user.click(screen.getByRole('button', { name: /De Novo Design/ }))
+    await user.click(screen.getByRole('button', { name: 'de novo protein' }))
     await user.click(screen.getByRole('button', { name: /运行 RFD3/ }))
 
     await screen.findByText('denovo_0')
@@ -200,6 +233,67 @@ describe('system acceptance page flows', () => {
       example_id: 'denovo_design',
     })
     expect(screen.getByText('1.35 Å')).toBeInTheDocument()
+  })
+
+  it('sends the clicked protein-to-protein RFD3 design into MPNN', async () => {
+    useAppStore.getState().setAuth('researcher-token', researcher)
+    useAppStore.getState().setPdbContent('TARGET_PDB')
+    useAppStore.getState().setRfd3Config({
+      targetStructure: 'A/1-100',
+      hotspots: 'A/42',
+    })
+    mockRunRFD3.mockResolvedValue({
+      success: true,
+      designs: [
+        { index: 0, batch: 0, design_in_batch: 0, name: 'rfd3_0', pdb_path: '', pdb_content: 'RFD3_0', plddt: 80 },
+        { index: 1, batch: 0, design_in_batch: 1, name: 'rfd3_1', pdb_path: '', pdb_content: 'RFD3_1', plddt: 81 },
+        { index: 2, batch: 0, design_in_batch: 2, name: 'rfd3_2', pdb_path: '', pdb_content: 'RFD3_2', plddt: 82 },
+        { index: 3, batch: 0, design_in_batch: 3, name: 'rfd3_3', pdb_path: '', pdb_content: 'RFD3_3', plddt: 83 },
+      ],
+      batches: [
+        {
+          batch_idx: 0,
+          num_structures: 4,
+          designs: [
+            { index: 0, batch: 0, design_in_batch: 0, name: 'rfd3_0', pdb_path: '', pdb_content: 'RFD3_0', plddt: 80 },
+            { index: 1, batch: 0, design_in_batch: 1, name: 'rfd3_1', pdb_path: '', pdb_content: 'RFD3_1', plddt: 81 },
+            { index: 2, batch: 0, design_in_batch: 2, name: 'rfd3_2', pdb_path: '', pdb_content: 'RFD3_2', plddt: 82 },
+            { index: 3, batch: 0, design_in_batch: 3, name: 'rfd3_3', pdb_path: '', pdb_content: 'RFD3_3', plddt: 83 },
+          ],
+        },
+      ],
+      num_batches: 1,
+      num_designs: 4,
+      first_backbone_pdb: 'RFD3_0',
+      output_dir: '',
+    })
+    mockRunMPNN.mockResolvedValue({
+      success: true,
+      sequences: [
+        { index: 0, name: 'seq_0', sequence: 'ACDEFGHIK', pdb_path: '', pdb_content: 'MPNN_FOR_RFD3_2', score: -0.3 },
+      ],
+      num_sequences: 1,
+      first_sequence_pdb: 'MPNN_FOR_RFD3_2',
+      output_dir: '',
+    })
+
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(screen.getByRole('button', { name: 'RFD3 骨架生成' }))
+    await user.click(screen.getByRole('button', { name: '开始生成' }))
+    await user.click(await screen.findByRole('button', { name: /① RFD3 骨架生成/ }))
+    await screen.findByText('rfd3_2')
+
+    await user.click(screen.getAllByRole('button', { name: /送入MPNN/ })[2])
+
+    await screen.findByText('Sequence 1')
+    expect(mockRunMPNN).toHaveBeenCalledWith({
+      backbone_pdb_content: 'RFD3_2',
+      batch_size: 10,
+      fixed_chains: ['A'],
+    })
+    expect(screen.queryAllByRole('button', { name: /送入MPNN/ })).toHaveLength(0)
   })
 
   it('loads experiment records through the experiments page', async () => {

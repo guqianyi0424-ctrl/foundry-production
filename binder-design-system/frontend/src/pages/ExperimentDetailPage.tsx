@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useAppStore } from '@/store/useAppStore'
-import { getExperiment, exportExperiment, type ExperimentDetail } from '@/api'
+import { getExperiment, exportExperiment, exportExperimentCsv, type ExperimentDetail } from '@/api'
 import { ArrowLeft, Download, Clock, Cpu, CheckCircle, XCircle, FlaskConical, Activity, FileText, Dna, Box } from 'lucide-react'
 
 const statusConfig: Record<string, { label: string; color: string }> = {
@@ -46,6 +46,21 @@ export function ExperimentDetailPage({ experimentId }: { experimentId: string })
       URL.revokeObjectURL(url)
     } catch (err) {
       console.error('导出失败:', err)
+    }
+  }
+
+  const handleExportCsv = async () => {
+    if (!experiment) return
+    try {
+      const blob = await exportExperimentCsv(experiment.id)
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${experiment.name}_candidates.csv`
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch (err) {
+      console.error('导出CSV失败:', err)
     }
   }
 
@@ -99,12 +114,20 @@ export function ExperimentDetailPage({ experimentId }: { experimentId: string })
             )}
           </div>
         </div>
-        <button
-          onClick={handleExport}
-          className="flex items-center gap-1.5 px-4 py-2 text-sm bg-primary-600 text-white rounded-lg hover:bg-primary-700"
-        >
-          <Download size={14} /> 导出报告
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleExportCsv}
+            className="flex items-center gap-1.5 px-4 py-2 text-sm border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
+          >
+            <FileText size={14} /> 候选CSV
+          </button>
+          <button
+            onClick={handleExport}
+            className="flex items-center gap-1.5 px-4 py-2 text-sm bg-primary-600 text-white rounded-lg hover:bg-primary-700"
+          >
+            <Download size={14} /> 导出报告
+          </button>
+        </div>
       </div>
 
       <div className="flex gap-2 mb-6 border-b border-gray-200">

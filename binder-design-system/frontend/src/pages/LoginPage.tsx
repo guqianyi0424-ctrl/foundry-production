@@ -3,6 +3,30 @@ import { useAppStore } from '@/store/useAppStore'
 import { authLogin, authRegister } from '@/api'
 import { X, Eye, EyeOff } from 'lucide-react'
 
+const formatBackendError = (err: any): string => {
+  const data = err?.response?.data
+  if (!data) return '操作失败'
+
+  const message = typeof data.message === 'string'
+    ? data.message
+    : typeof data.detail === 'string'
+      ? data.detail
+      : '操作失败'
+
+  const details = Array.isArray(data.details)
+    ? data.details
+        .map((item: any) => {
+          if (typeof item === 'string') return item
+          if (typeof item?.msg === 'string') return item.msg
+          if (typeof item?.message === 'string') return item.message
+          return null
+        })
+        .filter((item: string | null): item is string => Boolean(item))
+    : []
+
+  return details.length > 0 ? `${message}：${details.join('；')}` : message
+}
+
 export function LoginModal() {
   const setAuth = useAppStore((s) => s.setAuth)
   const [mode, setMode] = useState<'login' | 'register'>('login')
@@ -28,8 +52,7 @@ export function LoginModal() {
         setAuth(res.access_token, res.user)
       }
     } catch (err: any) {
-      const detail = err.response?.data?.detail || '操作失败'
-      setError(typeof detail === 'string' ? detail : JSON.stringify(detail))
+      setError(formatBackendError(err))
     } finally {
       setLoading(false)
     }

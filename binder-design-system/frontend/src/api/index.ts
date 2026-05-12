@@ -88,6 +88,7 @@ export interface MPNNResponse {
 
 export interface RunPipelineResponse {
   job_id: string
+  experiment_id: string
   status: string
   rfd3_results?: RFD3Response
   mpnn_results?: MPNNResponse
@@ -281,6 +282,11 @@ export const deleteExperiment = async (id: string) => {
 export const exportExperiment = async (id: string) => {
   const res = await api.get(`/experiments/${id}/export`)
   return res.data
+}
+
+export const exportExperimentCsv = async (id: string) => {
+  const res = await api.get(`/experiments/${id}/export/csv`, { responseType: 'blob' })
+  return res.data as Blob
 }
 
 export const compareExperiments = async (ids: string[]) => {

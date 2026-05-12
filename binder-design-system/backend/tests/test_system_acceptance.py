@@ -26,7 +26,7 @@ END
 """
 
 
-async def run_with_acceptance_client(monkeypatch, scenario):
+async def run_with_acceptance_client(monkeypatch, scenario, tmp_path=None):
     engine = create_engine(
         "sqlite://",
         connect_args={"check_same_thread": False},
@@ -58,9 +58,26 @@ async def run_with_acceptance_client(monkeypatch, scenario):
             db.close()
 
     import routers.design as design_router
+    import routers.experiments as experiments_router
+    from config.settings import AppSettings, get_settings
 
     app.dependency_overrides[get_db] = override_db
     monkeypatch.setattr(design_router, "get_design_services", lambda: FakeDesignServices())
+    if tmp_path is not None:
+        settings = get_settings()
+        test_settings = AppSettings(
+            paths=settings.paths.__class__(
+                backend_root=settings.paths.backend_root,
+                app_root=settings.paths.app_root,
+                repo_root=settings.paths.repo_root,
+                foundry_root=settings.paths.foundry_root,
+                hotspot_dl_root=settings.paths.hotspot_dl_root,
+                ppihotspotid_root=settings.paths.ppihotspotid_root,
+                output_root=tmp_path,
+            ),
+            runtime=settings.runtime,
+        )
+        monkeypatch.setattr(experiments_router, "get_settings", lambda: test_settings)
 
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
@@ -184,7 +201,7 @@ def test_login_and_role_permissions_for_researcher_and_admin(monkeypatch):
     asyncio.run(run_with_acceptance_client(monkeypatch, scenario))
 
 
-def test_experiment_record_lifecycle_acceptance(monkeypatch):
+def test_experiment_record_lifecycle_acceptance(monkeypatch, tmp_path):
     async def scenario(client):
         login_data = await register_and_login(
             client,
@@ -254,6 +271,16 @@ def test_experiment_record_lifecycle_acceptance(monkeypatch):
         exported = export_response.json()
         assert exported["experiment"]["name"] == "系统验收实验"
         assert exported["designs"][0]["passed_validation"] is True
+        assert exported["archive"]["candidates_csv"].endswith("candidates.csv")
+
+        csv_response = await client.get(
+            f"/api/experiments/{experiment_id}/export/csv",
+            headers=headers,
+        )
+        assert csv_response.status_code == 200
+        assert "design_name" in csv_response.text
+        assert "sequence" in csv_response.text
+        assert "design_0" in csv_response.text
 
         delete_response = await client.delete(f"/api/experiments/{experiment_id}", headers=headers)
         assert delete_response.status_code == 200
@@ -262,7 +289,7 @@ def test_experiment_record_lifecycle_acceptance(monkeypatch):
         missing_response = await client.get(f"/api/experiments/{experiment_id}", headers=headers)
         assert missing_response.status_code == 404
 
-    asyncio.run(run_with_acceptance_client(monkeypatch, scenario))
+    asyncio.run(run_with_acceptance_client(monkeypatch, scenario, tmp_path))
 
 
 def test_researcher_cannot_delete_another_users_experiment(monkeypatch):

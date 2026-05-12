@@ -1,12 +1,11 @@
 import { Sidebar } from '@/components/Sidebar'
-import { NewDesignPage } from '@/pages/NewDesignPage'
+import { NewDesignHubPage } from '@/pages/NewDesignHubPage'
 import { JobCenterPage } from '@/pages/JobCenterPage'
 import { HelpPage } from '@/pages/HelpPage'
 import { LoginModal } from '@/pages/LoginPage'
 import { ExperimentsPage } from '@/pages/ExperimentsPage'
 import { ExperimentDetailPage } from '@/pages/ExperimentDetailPage'
 import { MonitorPage } from '@/pages/MonitorPage'
-import { DeNovoDesignPage } from '@/pages/DeNovoDesignPage'
 import { useAppStore } from '@/store/useAppStore'
 
 function App() {
@@ -20,8 +19,7 @@ function App() {
     <div className="flex h-screen w-screen overflow-hidden bg-deepbinder-bg">
       <Sidebar />
       <main className="flex-1 overflow-auto relative">
-        {currentPage === '新建设计' && <NewDesignPage />}
-        {currentPage === 'De Novo Design' && <DeNovoDesignPage />}
+        {(currentPage === '新建设计' || currentPage === 'De Novo Design') && <NewDesignHubPage />}
         {currentPage === '实验记录' && <ExperimentsPage />}
         {currentPage === '作业中心' && <JobCenterPage />}
         {currentPage === '系统监控' && <MonitorPage />}

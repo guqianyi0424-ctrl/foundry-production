@@ -5,8 +5,10 @@ from adapters.model_adapters import HotspotModelAdapter, MPNNAdapter, RF3Adapter
 from database import SessionLocal
 from repositories.experiments import ExperimentRepository
 from services.design_pipeline import DesignPipelineService
+from services.experiment_archive import ExperimentArchiveService
 from services.experiments import ExperimentService
 from services.hotspot_prediction import HotspotPredictionService
+from config.settings import get_settings
 
 
 @dataclass(frozen=True)
@@ -21,7 +23,12 @@ class DesignServices:
 
 @lru_cache(maxsize=1)
 def get_design_services() -> DesignServices:
-    experiment_service = ExperimentService(ExperimentRepository(SessionLocal))
+    settings = get_settings()
+    archive_service = ExperimentArchiveService(settings.paths.output_root)
+    experiment_service = ExperimentService(
+        ExperimentRepository(SessionLocal),
+        archive_service=archive_service,
+    )
     rfd3 = RFD3Adapter()
     mpnn = MPNNAdapter()
     rf3 = RF3Adapter()

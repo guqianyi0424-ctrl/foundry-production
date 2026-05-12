@@ -101,3 +101,52 @@ class ExperimentRepository:
             db.commit()
         finally:
             db.close()
+
+    def get_archive_payload(self, experiment_id: str) -> dict[str, Any] | None:
+        db = self.session_factory()
+        try:
+            experiment = db.query(Experiment).filter(Experiment.id == experiment_id).first()
+            if not experiment:
+                return None
+            return {
+                "experiment": {
+                    "id": experiment.id,
+                    "name": experiment.name,
+                    "status": experiment.status,
+                    "created_at": experiment.created_at.isoformat()
+                    if experiment.created_at
+                    else None,
+                    "updated_at": experiment.updated_at.isoformat()
+                    if experiment.updated_at
+                    else None,
+                    "input_pdb": experiment.input_pdb,
+                    "target": experiment.target,
+                    "hotspots": experiment.hotspots,
+                    "rfd3_config": experiment.rfd3_config,
+                    "mpnn_config": experiment.mpnn_config,
+                    "rf3_config": experiment.rf3_config,
+                    "duration_seconds": experiment.duration_seconds,
+                    "gpu_info": experiment.gpu_info,
+                    "user_id": experiment.user_id,
+                },
+                "results": {
+                    "rfd3": experiment.rfd3_results,
+                    "mpnn": experiment.mpnn_results,
+                    "rf3": experiment.rf3_results,
+                },
+                "designs": [
+                    {
+                        "id": design.id,
+                        "design_name": design.design_name,
+                        "sequence": design.sequence,
+                        "pdb_content": design.pdb_content,
+                        "plddt": design.plddt,
+                        "rmsd": design.rmsd,
+                        "ranking_score": design.ranking_score,
+                        "passed_validation": design.passed_validation,
+                    }
+                    for design in experiment.designs
+                ],
+            }
+        finally:
+            db.close()

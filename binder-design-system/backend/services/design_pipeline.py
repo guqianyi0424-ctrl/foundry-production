@@ -103,7 +103,13 @@ class DesignPipelineService:
                 failed_step="rf3",
             )
 
+        self.experiment_service.save_designs(
+            experiment_id,
+            self._build_candidate_designs(mpnn_result.data or {}, rf3_result.data or {}),
+        )
         self.experiment_service.finish(experiment_id, "completed", time.time() - start)
+        if hasattr(self.experiment_service, "write_archive"):
+            self.experiment_service.write_archive(experiment_id)
         return PipelineResult(
             job_id,
             experiment_id,
@@ -112,3 +118,33 @@ class DesignPipelineService:
             mpnn=mpnn_result,
             rf3=rf3_result,
         )
+
+    def _build_candidate_designs(
+        self,
+        mpnn_data: dict[str, Any],
+        rf3_data: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        sequences = mpnn_data.get("sequences") or []
+        if not sequences:
+            return []
+
+        candidates = []
+        for index, sequence in enumerate(sequences, start=1):
+            is_validated_sequence = index == 1
+            candidates.append(
+                {
+                    "name": sequence.get("name") or f"candidate_{index:03d}",
+                    "sequence": sequence.get("sequence", ""),
+                    "pdb_content": sequence.get("pdb_content", ""),
+                    "plddt": rf3_data.get("avg_plddt") if is_validated_sequence else None,
+                    "rmsd": rf3_data.get("rmsd") if is_validated_sequence else None,
+                    "ranking_score": (rf3_data.get("summary") or {}).get(
+                        "ranking_score",
+                        sequence.get("score"),
+                    ),
+                    "passed_validation": bool(rf3_data.get("passed", False))
+                    if is_validated_sequence
+                    else False,
+                }
+            )
+        return candidates

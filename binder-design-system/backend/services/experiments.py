@@ -4,8 +4,9 @@ from repositories.experiments import ExperimentRepository
 
 
 class ExperimentService:
-    def __init__(self, repository: ExperimentRepository):
+    def __init__(self, repository: ExperimentRepository, archive_service=None):
         self.repository = repository
+        self.archive_service = archive_service
 
     def create_pipeline_experiment(
         self,
@@ -31,3 +32,15 @@ class ExperimentService:
 
     def save_designs(self, experiment_id: str, designs: list[dict[str, Any]]) -> None:
         self.repository.save_designs(experiment_id, designs)
+
+    def write_archive(self, experiment_id: str) -> dict[str, str] | None:
+        if self.archive_service is None:
+            return None
+        payload = self.repository.get_archive_payload(experiment_id)
+        if payload is None:
+            return None
+        return self.archive_service.write_archive(
+            experiment=payload["experiment"],
+            results=payload["results"],
+            designs=payload["designs"],
+        )

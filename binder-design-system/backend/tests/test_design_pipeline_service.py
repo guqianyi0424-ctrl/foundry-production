@@ -94,6 +94,22 @@ def test_pipeline_service_runs_all_steps():
     assert result.experiment_id == "exp_1"
     assert [step[1] for step in experiments.steps] == ["rfd3", "mpnn", "rf3"]
     assert experiments.finished[-1][1] == "completed"
+    assert experiments.designs == [
+        (
+            "exp_1",
+            [
+                {
+                    "name": "seq_0",
+                    "sequence": "ACD",
+                    "pdb_content": "MPNN_PDB",
+                    "plddt": 90.0,
+                    "rmsd": 1.1,
+                    "ranking_score": -1.0,
+                    "passed_validation": True,
+                }
+            ],
+        )
+    ]
 
 
 def test_pipeline_service_stops_when_rfd3_fails():

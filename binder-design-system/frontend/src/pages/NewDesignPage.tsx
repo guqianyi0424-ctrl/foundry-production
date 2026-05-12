@@ -4,7 +4,7 @@ import { SequenceViewer } from '@/components/SequenceViewer'
 import { MolstarViewer } from '@/components/MolstarViewer'
 import { DesignPanel } from '@/components/DesignPanel'
 import { SilentStructureViewer } from '@/components/SilentStructureViewer'
-import { uploadPdb, predictHotspot, runRFD3, runMPNN, runRF3 } from '@/api'
+import { uploadPdb, predictHotspot, runRFD3, runMPNN, runRF3, runPipeline } from '@/api'
 import type { PredictHotspotResponse, RFD3Design, MPNNSequence, RF3Response } from '@/api'
 import type { HotspotResidue } from '@/types'
 import { parseStructureFile } from '@/utils/pdbParser'
@@ -191,6 +191,8 @@ export function NewDesignPage() {
   const setMpnnResults = useAppStore((s) => s.setMpnnResults)
   const rf3Results = useAppStore((s) => s.rf3Results)
   const setRf3Results = useAppStore((s) => s.setRf3Results)
+  const setCurrentExperimentId = useAppStore((s) => s.setCurrentExperimentId)
+  const setCurrentPage = useAppStore((s) => s.setCurrentPage)
   const isRunning = useAppStore((s) => s.isRunning)
   const setIsRunning = useAppStore((s) => s.setIsRunning)
   const addJob = useAppStore((s) => s.addJob)
@@ -204,6 +206,7 @@ export function NewDesignPage() {
   const [isMPNNRunning, setIsMPNNRunning] = useState(false)
   const [runningMPNNDesignIdx, setRunningMPNNDesignIdx] = useState<number | null>(null)
   const [isRF3Running, setIsRF3Running] = useState(false)
+  const [isSubmittingPipeline, setIsSubmittingPipeline] = useState(false)
   const [selectedRFD3Design, setSelectedRFD3Design] = useState<RFD3Design | null>(null)
   const [selectedMPNNSeq, setSelectedMPNNSeq] = useState<MPNNSequence | null>(null)
   const [activeStep, setActiveStep] = useState(0)
@@ -281,8 +284,13 @@ export function NewDesignPage() {
   }, [pdbContent, rfd3Config, committedHotspotTokens, setRfd3Results])
 
   const handleRunMPNN = useCallback(async (backbonePdb: string, designIdx: number) => {
+    const design = rfd3Results?.designs.find(item => item.index === designIdx)
+      ?? rfd3Results?.batches.flatMap(batch => batch.designs).find(item => item.index === designIdx)
+      ?? null
+    if (design) setSelectedRFD3Design(design)
     setIsMPNNRunning(true)
     setRunningMPNNDesignIdx(designIdx)
+    setActiveStep(1)
     try {
       const targetChains = [...new Set(committedHotspotItems.map(hotspotChainFromConfig).filter((chain): chain is string => Boolean(chain)))]
       const res = await runMPNN({
@@ -291,10 +299,11 @@ export function NewDesignPage() {
         fixed_chains: targetChains.length > 0 ? targetChains : undefined,
       })
       setMpnnResults(res)
-      setActiveStep(2)
+      setSelectedMPNNSeq(res.sequences?.[0] ?? null)
+      setActiveStep(1)
     } catch (err) { alert('MPNN运行失败: ' + String(err)) }
     finally { setIsMPNNRunning(false); setRunningMPNNDesignIdx(null) }
-  }, [committedHotspotItems, setMpnnResults])
+  }, [committedHotspotItems, rfd3Results, setMpnnResults])
 
   const handleRunRF3 = useCallback(async (mpnnPdb: string) => {
     setIsRF3Running(true)
@@ -310,6 +319,50 @@ export function NewDesignPage() {
     } catch (err) { alert('RF3运行失败: ' + String(err)) }
     finally { setIsRF3Running(false) }
   }, [selectedRFD3Design, setRf3Results])
+
+  const handleSubmitPipeline = useCallback(async () => {
+    if (!pdbContent) {
+      alert('请先上传目标结构')
+      return
+    }
+    if (pendingHotspots.length === 0) {
+      alert('请先预测或选择热点残基')
+      return
+    }
+    setIsSubmittingPipeline(true)
+    try {
+      const result = await runPipeline({
+        pdb_content: pdbContent,
+        hotspots: pendingHotspots.map(h => ({ chain: h.chain, residue: h.residue })),
+        binder_length: binderLength,
+      })
+      if (result.rfd3_results) setRfd3Results(result.rfd3_results)
+      if (result.mpnn_results) setMpnnResults(result.mpnn_results)
+      if (result.rf3_results) setRf3Results(result.rf3_results)
+      setCurrentExperimentId(result.experiment_id)
+      addJob({
+        id: result.job_id,
+        name: `设计任务 ${result.experiment_id}`,
+        status: result.status,
+        time: new Date().toLocaleString('zh-CN'),
+      })
+      setCurrentPage(`experiment_${result.experiment_id}`)
+    } catch (err) {
+      alert('提交任务失败: ' + String(err))
+    } finally {
+      setIsSubmittingPipeline(false)
+    }
+  }, [
+    pdbContent,
+    pendingHotspots,
+    binderLength,
+    setRfd3Results,
+    setMpnnResults,
+    setRf3Results,
+    setCurrentExperimentId,
+    addJob,
+    setCurrentPage,
+  ])
 
   return (
     <div className="p-6 max-w-[1400px] mx-auto space-y-5">
@@ -328,6 +381,13 @@ export function NewDesignPage() {
         <div className="flex items-center gap-2">
           <button onClick={handleResetView} className="flex items-center gap-2 px-4 py-2 rounded-lg border border-gray-200 text-gray-700 text-sm hover:bg-gray-50 transition-all">
             <RotateCcw size={16} />重置
+          </button>
+          <button
+            onClick={handleSubmitPipeline}
+            disabled={!pdbContent || pendingHotspots.length === 0 || isSubmittingPipeline}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary-600 text-white text-sm hover:bg-primary-700 disabled:cursor-not-allowed disabled:bg-gray-300 transition-all"
+          >
+            <Play size={16} />{isSubmittingPipeline ? '提交中...' : '提交任务'}
           </button>
         </div>
       </div>
@@ -432,7 +492,7 @@ export function NewDesignPage() {
                             </div>
                           )}
                           <div className="mt-2 flex justify-end">
-                            <button onClick={(e) => { e.stopPropagation(); handleRunMPNN(design.pdb_content, design.index) }} disabled={isMPNNRunning} className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs bg-green-50 text-green-700 hover:bg-green-100 transition-all disabled:opacity-50">
+                            <button onClick={(e) => { e.stopPropagation(); handleRunMPNN(design.pdb_content, design.index) }} disabled={isMPNNRunning && runningMPNNDesignIdx !== design.index} className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs bg-green-50 text-green-700 hover:bg-green-100 transition-all disabled:opacity-50">
                               <FlaskConical size={12} />{isMPNNRunning && runningMPNNDesignIdx === design.index ? 'MPNN运行中...' : '送入MPNN'}
                             </button>
                           </div>

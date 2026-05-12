@@ -1,9 +1,8 @@
 import { useAppStore } from '@/store/useAppStore'
-import { FlaskConical, ClipboardList, HelpCircle, Beaker, Activity, LogOut, User, Dna } from 'lucide-react'
+import { FlaskConical, ClipboardList, HelpCircle, Beaker, Activity, LogOut, User } from 'lucide-react'
 
 const navItems = [
   { label: '新建设计', icon: FlaskConical },
-  { label: 'De Novo Design', icon: Dna },
   { label: '实验记录', icon: Beaker },
   { label: '作业中心', icon: ClipboardList },
   { label: '系统监控', icon: Activity, adminOnly: true },

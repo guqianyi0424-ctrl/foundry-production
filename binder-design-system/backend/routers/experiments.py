@@ -6,9 +6,12 @@ from sqlalchemy import desc
 from datetime import datetime
 import uuid
 import json
+from pathlib import Path
 
 from database import get_db, Experiment, ExperimentDesign, User, AuditLog
 from routers.auth import require_login
+from services.experiment_archive import ExperimentArchiveService
+from config.settings import get_settings
 
 router = APIRouter()
 
@@ -78,6 +81,69 @@ def get_accessible_experiment(db: Session, experiment_id: str, current_user: Use
         raise HTTPException(status_code=404, detail="实验记录不存在")
     ensure_experiment_access(exp, current_user)
     return exp
+
+
+def build_experiment_report(exp: Experiment) -> dict:
+    designs = []
+    for d in exp.designs:
+        designs.append({
+            "id": d.id,
+            "design_name": d.design_name,
+            "sequence": d.sequence,
+            "pdb_content": d.pdb_content,
+            "plddt": d.plddt,
+            "rmsd": d.rmsd,
+            "ranking_score": d.ranking_score,
+            "passed_validation": d.passed_validation,
+        })
+
+    archive_service = ExperimentArchiveService(get_settings().paths.output_root)
+    archive = archive_service.write_archive(
+        experiment={
+            "id": exp.id,
+            "name": exp.name,
+            "status": exp.status,
+            "created_at": exp.created_at.isoformat() if exp.created_at else None,
+            "updated_at": exp.updated_at.isoformat() if exp.updated_at else None,
+            "target": exp.target,
+            "hotspots": exp.hotspots,
+            "rfd3_config": exp.rfd3_config,
+            "mpnn_config": exp.mpnn_config,
+            "rf3_config": exp.rf3_config,
+            "duration_seconds": exp.duration_seconds,
+            "gpu_info": exp.gpu_info,
+            "user_id": exp.user_id,
+        },
+        results={
+            "rfd3": exp.rfd3_results,
+            "mpnn": exp.mpnn_results,
+            "rf3": exp.rf3_results,
+        },
+        designs=designs,
+    )
+
+    return {
+        "experiment": {
+            "id": exp.id,
+            "name": exp.name,
+            "status": exp.status,
+            "created_at": exp.created_at.isoformat() if exp.created_at else None,
+            "target": exp.target,
+            "hotspots": exp.hotspots,
+            "rfd3_config": exp.rfd3_config,
+            "mpnn_config": exp.mpnn_config,
+            "rf3_config": exp.rf3_config,
+            "duration_seconds": exp.duration_seconds,
+            "gpu_info": exp.gpu_info,
+        },
+        "results": {
+            "rfd3": exp.rfd3_results,
+            "mpnn": exp.mpnn_results,
+            "rf3": exp.rf3_results,
+        },
+        "designs": designs,
+        "archive": archive,
+    }
 
 
 @router.get("/experiments", summary="实验列表(分页+筛选)")
@@ -278,39 +344,28 @@ async def export_experiment(
 ):
     exp = get_accessible_experiment(db, experiment_id, current_user)
 
-    designs = []
-    for d in exp.designs:
-        designs.append({
-            "design_name": d.design_name,
-            "sequence": d.sequence,
-            "plddt": d.plddt,
-            "rmsd": d.rmsd,
-            "ranking_score": d.ranking_score,
-            "passed_validation": d.passed_validation,
-        })
+    return build_experiment_report(exp)
 
-    report = {
-        "experiment": {
-            "id": exp.id,
-            "name": exp.name,
-            "status": exp.status,
-            "created_at": exp.created_at.isoformat() if exp.created_at else None,
-            "target": exp.target,
-            "hotspots": exp.hotspots,
-            "rfd3_config": exp.rfd3_config,
-            "mpnn_config": exp.mpnn_config,
-            "rf3_config": exp.rf3_config,
-            "duration_seconds": exp.duration_seconds,
-            "gpu_info": exp.gpu_info,
-        },
-        "results": {
-            "rfd3": exp.rfd3_results,
-            "mpnn": exp.mpnn_results,
-            "rf3": exp.rf3_results,
-        },
-        "designs": designs,
-    }
-    return report
+
+@router.get("/experiments/{experiment_id}/export/csv", summary="导出候选设计CSV")
+async def export_experiment_csv(
+    experiment_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_login),
+):
+    from fastapi.responses import FileResponse
+
+    exp = get_accessible_experiment(db, experiment_id, current_user)
+    report = build_experiment_report(exp)
+    csv_path = Path(report["archive"]["candidates_csv"])
+    if not csv_path.is_file():
+        raise HTTPException(status_code=404, detail="候选设计CSV不存在")
+    safe_name = "".join(ch if ch.isalnum() or ch in "._-" else "_" for ch in exp.name)
+    return FileResponse(
+        csv_path,
+        media_type="text/csv",
+        filename=f"{safe_name}_candidates.csv",
+    )
 
 
 @router.post("/experiments/compare", summary="实验对比")

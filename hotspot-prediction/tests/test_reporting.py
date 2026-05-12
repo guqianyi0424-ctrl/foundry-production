@@ -7,6 +7,8 @@ from hotspot_prediction.reporting import (
     build_dataset_summary,
     build_experiment_matrix,
     collect_ablation_results,
+    collect_main_results,
+    compute_random_topk_baseline,
     compute_topk_metrics,
     write_table,
 )
@@ -66,6 +68,25 @@ class ReportingTests(unittest.TestCase):
         self.assertAlmostEqual(rows[0]["hotspot_recall"], 1 / 3)
         self.assertEqual(rows[1]["proteins_hit"], 2)
         self.assertAlmostEqual(rows[1]["topk_hit_rate"], 1.0)
+
+    def test_random_topk_baseline_uses_same_protein_groups(self):
+        records = [
+            {"pdb_id": "A", "label": 1, "prob": 0.9},
+            {"pdb_id": "A", "label": 0, "prob": 0.8},
+            {"pdb_id": "A", "label": 0, "prob": 0.7},
+            {"pdb_id": "B", "label": 0, "prob": 0.9},
+            {"pdb_id": "B", "label": 1, "prob": 0.7},
+            {"pdb_id": "B", "label": 0, "prob": 0.1},
+        ]
+
+        rows = compute_random_topk_baseline(records, k_values=[1, 2], n_trials=20, seed=1)
+
+        self.assertEqual(rows[0]["top_k"], 1)
+        self.assertEqual(rows[0]["proteins_with_hotspots"], 2)
+        self.assertEqual(rows[0]["trials"], 20)
+        self.assertGreater(float(rows[0]["random_topk_hit_rate_mean"]), 0.0)
+        self.assertLess(float(rows[0]["random_topk_hit_rate_mean"]), 1.0)
+        self.assertGreater(float(rows[1]["random_hotspot_recall_mean"]), float(rows[0]["random_hotspot_recall_mean"]))
 
     def test_experiment_matrix_contains_expected_methods(self):
         rows = build_experiment_matrix()
@@ -136,6 +157,57 @@ class ReportingTests(unittest.TestCase):
             self.assertAlmostEqual(float(by_profile["esm2_only"]["test_f1"]), 0.6)
             self.assertAlmostEqual(float(by_profile["esm2_only"]["top3_hit_rate"]), 0.4)
             self.assertEqual(by_profile["esm2_pssm"]["status"], "pending")
+
+    def test_collect_main_results_prioritizes_ranking_metrics_and_random_baseline(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            neg3 = root / "neg3"
+            neg3.mkdir()
+            write_table(
+                neg3 / "cross_validation_results.csv",
+                [
+                    {"roc_auc": 0.7, "pr_auc": 0.5, "f1": 0.4, "mcc": 0.2},
+                    {"roc_auc": 0.8, "pr_auc": 0.6, "f1": 0.5, "mcc": 0.3},
+                ],
+            )
+            write_table(
+                neg3 / "test_metrics.csv",
+                [
+                    {
+                        "threshold": 0.55,
+                        "roc_auc": 0.71,
+                        "pr_auc": 0.09,
+                        "f1": 0.08,
+                        "precision": 0.04,
+                        "recall": 0.5,
+                        "mcc": 0.1,
+                    }
+                ],
+            )
+            write_table(
+                neg3 / "topk_metrics.csv",
+                [
+                    {"top_k": 3, "topk_hit_rate": 0.38, "hotspot_recall": 0.17},
+                    {"top_k": 5, "topk_hit_rate": 0.43, "hotspot_recall": 0.25},
+                    {"top_k": 10, "topk_hit_rate": 0.48, "hotspot_recall": 0.32},
+                ],
+            )
+            write_table(
+                neg3 / "topk_random_baseline.csv",
+                [
+                    {"top_k": 3, "random_topk_hit_rate_mean": 0.12, "random_hotspot_recall_mean": 0.03},
+                    {"top_k": 5, "random_topk_hit_rate_mean": 0.20, "random_hotspot_recall_mean": 0.05},
+                    {"top_k": 10, "random_topk_hit_rate_mean": 0.30, "random_hotspot_recall_mean": 0.10},
+                ],
+            )
+
+            rows = collect_main_results(root, profiles=["neg3"])
+
+            self.assertEqual(rows[0]["profile"], "neg3")
+            self.assertAlmostEqual(float(rows[0]["cv_roc_auc_mean"]), 0.75)
+            self.assertAlmostEqual(float(rows[0]["test_pr_auc"]), 0.09)
+            self.assertAlmostEqual(float(rows[0]["top5_hit_rate"]), 0.43)
+            self.assertAlmostEqual(float(rows[0]["random_top5_hit_rate"]), 0.20)
 
 
 if __name__ == "__main__":

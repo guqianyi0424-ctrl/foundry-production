@@ -1,10 +1,11 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
+from fastapi.params import Depends as DependsParam
 from pydantic import BaseModel
 from typing import List, Optional
 import time
 import uuid
 
-from database import SessionLocal, Experiment, ExperimentDesign
+from database import SessionLocal, Experiment, ExperimentDesign, User
 from routers.auth import get_current_user
 from logger import logger, record_task
 from schemas.domain import RFD3JobConfig
@@ -278,7 +279,10 @@ async def run_rf3(req: RF3Request):
 
 
 @router.post("/run-pipeline", summary="完整设计流水线", description="自动执行RFD3→MPNN→RF3全流程")
-async def run_pipeline(req: PipelineRequest):
+async def run_pipeline(
+    req: PipelineRequest,
+    current_user: User | None = Depends(get_current_user),
+):
     job_id = f"job_{int(time.time())}"
     start = time.time()
 
@@ -288,6 +292,11 @@ async def run_pipeline(req: PipelineRequest):
             hotspots=req.hotspots,
             binder_length=req.binder_length,
             job_id=job_id,
+            user_id=(
+                current_user.id
+                if current_user and not isinstance(current_user, DependsParam)
+                else None
+            ),
         )
         duration = time.time() - start
         record_task(
