@@ -79,10 +79,56 @@ class FakeRFD3Service:
         )
 
 
+class FakeMPNNService:
+    def run(self, **kwargs):
+        return AdapterResult(
+            success=True,
+            data={
+                "success": True,
+                "sequences": [
+                    {
+                        "index": 0,
+                        "name": "seq_0",
+                        "sequence": "ACD",
+                        "pdb_content": "MPNN_PDB",
+                        "score": -1.0,
+                    }
+                ],
+                "num_sequences": 1,
+                "first_sequence_pdb": "MPNN_PDB",
+                "output_dir": "",
+            },
+        )
+
+
+class FakeRF3Service:
+    def run(self, **kwargs):
+        return AdapterResult(
+            success=True,
+            data={
+                "success": True,
+                "predicted_pdb": "RF3_PDB",
+                "predicted_pdb_path": "",
+                "num_models": 1,
+                "summary": {"ranking_score": 0.8},
+                "pae": None,
+                "plddt": [90.0],
+                "avg_plddt": 90.0,
+                "rmsd": 1.0,
+                "rmsd_interpretation": "Excellent",
+                "per_res_rmsd": [1.0],
+                "passed": True,
+                "output_dir": "",
+            },
+        )
+
+
 class FakeServices:
     hotspot_prediction = FakeHotspotService()
     pipeline = FakePipelineService()
     rfd3 = FakeRFD3Service()
+    mpnn = FakeMPNNService()
+    rf3 = FakeRF3Service()
 
 
 class FakeUser:
@@ -166,3 +212,42 @@ def test_run_rfd3_accepts_denovo_request_without_target(monkeypatch):
         db.delete(exp)
         db.commit()
         db.close()
+
+
+def test_preview_only_mpnn_and_rf3_do_not_persist(monkeypatch):
+    design_router = patch_services(monkeypatch)
+    persisted = []
+    monkeypatch.setattr(
+        design_router,
+        "_save_experiment_step",
+        lambda *args, **kwargs: persisted.append(("step", args, kwargs)),
+    )
+    monkeypatch.setattr(
+        design_router,
+        "_save_designs",
+        lambda *args, **kwargs: persisted.append(("designs", args, kwargs)),
+    )
+
+    mpnn = asyncio.run(
+        design_router.run_mpnn(
+            design_router.MPNNRequest(
+                backbone_pdb_content="RFD3_PDB",
+                experiment_id="exp_formal",
+                preview_only=True,
+            )
+        )
+    )
+    rf3 = asyncio.run(
+        design_router.run_rf3(
+            design_router.RF3Request(
+                mpnn_pdb_content="MPNN_PDB",
+                rfd3_pdb_content="RFD3_PDB",
+                experiment_id="exp_formal",
+                preview_only=True,
+            )
+        )
+    )
+
+    assert mpnn["success"] is True
+    assert rf3["success"] is True
+    assert persisted == []

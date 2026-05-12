@@ -41,6 +41,7 @@ class MPNNRequest(BaseModel):
     fixed_chains: Optional[List[str]] = None
     model_type: str = "ligand_mpnn"
     experiment_id: Optional[str] = None
+    preview_only: bool = False
 
 
 class RF3Request(BaseModel):
@@ -48,6 +49,7 @@ class RF3Request(BaseModel):
     rfd3_pdb_content: Optional[str] = None
     example_id: str = "binder_design"
     experiment_id: Optional[str] = None
+    preview_only: bool = False
 
 
 class PipelineRequest(BaseModel):
@@ -260,18 +262,21 @@ async def run_mpnn(req: MPNNRequest):
         }
         duration = time.time() - start
         record_task("run_mpnn", "success", duration)
-        _save_experiment_step(req.experiment_id, "mpnn", sanitize_model_result(result), config)
+        if not req.preview_only:
+            _save_experiment_step(req.experiment_id, "mpnn", sanitize_model_result(result), config)
 
-        if result.get("success") and result.get("sequences"):
-            designs = []
-            for s in result["sequences"]:
-                designs.append({
-                    "name": s.get("name", f"seq_{s.get('index', 0)}"),
-                    "sequence": s.get("sequence", ""),
-                    "pdb_content": s.get("pdb_content", ""),
-                    "ranking_score": s.get("score"),
-                })
-            _save_designs(req.experiment_id, designs)
+            if result.get("success") and result.get("sequences"):
+                designs = []
+                for s in result["sequences"]:
+                    designs.append({
+                        "name": s.get("name", f"seq_{s.get('index', 0)}"),
+                        "sequence": s.get("sequence", ""),
+                        "pdb_content": s.get("pdb_content", ""),
+                        "ranking_score": s.get("score"),
+                        "ranking_source": "mpnn" if s.get("score") is not None else "none",
+                        "validation_status": "not_validated",
+                    })
+                _save_designs(req.experiment_id, designs)
 
         return result
     except Exception as e:
@@ -298,9 +303,10 @@ async def run_rf3(req: RF3Request):
         }
         duration = time.time() - start
         record_task("run_rf3", "success", duration)
-        _save_experiment_step(req.experiment_id, "rf3", sanitize_model_result(result), config)
+        if not req.preview_only:
+            _save_experiment_step(req.experiment_id, "rf3", sanitize_model_result(result), config)
 
-        if result.get("success") and req.experiment_id:
+        if result.get("success") and req.experiment_id and not req.preview_only:
             db = SessionLocal()
             try:
                 exp = db.query(Experiment).filter(Experiment.id == req.experiment_id).first()
