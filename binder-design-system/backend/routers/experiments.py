@@ -95,6 +95,9 @@ def build_experiment_report(exp: Experiment) -> dict:
             "rmsd": d.rmsd,
             "ranking_score": d.ranking_score,
             "passed_validation": d.passed_validation,
+            "plddt_source": getattr(d, "plddt_source", None),
+            "ranking_source": getattr(d, "ranking_source", None),
+            "validation_status": getattr(d, "validation_status", None),
         })
 
     archive_service = ExperimentArchiveService(get_settings().paths.output_root)
@@ -206,6 +209,9 @@ async def get_experiment(
             "rmsd": d.rmsd,
             "ranking_score": d.ranking_score,
             "passed_validation": d.passed_validation,
+            "plddt_source": getattr(d, "plddt_source", None),
+            "ranking_source": getattr(d, "ranking_source", None),
+            "validation_status": getattr(d, "validation_status", None),
         })
 
     return {

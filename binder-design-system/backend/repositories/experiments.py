@@ -96,6 +96,9 @@ class ExperimentRepository:
                         rmsd=data.get("rmsd"),
                         ranking_score=data.get("ranking_score"),
                         passed_validation=data.get("passed_validation", False),
+                        plddt_source=data.get("plddt_source"),
+                        ranking_source=data.get("ranking_source"),
+                        validation_status=data.get("validation_status"),
                     )
                 )
             db.commit()
@@ -144,6 +147,9 @@ class ExperimentRepository:
                         "rmsd": design.rmsd,
                         "ranking_score": design.ranking_score,
                         "passed_validation": design.passed_validation,
+                        "plddt_source": design.plddt_source,
+                        "ranking_source": design.ranking_source,
+                        "validation_status": design.validation_status,
                     }
                     for design in experiment.designs
                 ],

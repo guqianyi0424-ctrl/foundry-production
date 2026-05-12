@@ -76,6 +76,9 @@ class ExperimentDesign(Base):
     rmsd = Column(Float, nullable=True)
     ranking_score = Column(Float, nullable=True)
     passed_validation = Column(Boolean, default=False)
+    plddt_source = Column(String, nullable=True)
+    ranking_source = Column(String, nullable=True)
+    validation_status = Column(String, nullable=True)
 
     experiment = relationship("Experiment", back_populates="designs")
 

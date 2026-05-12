@@ -28,7 +28,8 @@ class SuccessfulRFD3:
                 "success": True,
                 "first_backbone_pdb": "RFD3_PDB",
                 "designs": [
-                    {"name": "rfd3_0", "pdb_content": "RFD3_PDB", "plddt": 88.0}
+                    {"name": "rfd3_0", "pdb_content": "RFD3_PDB", "plddt": 88.0},
+                    {"name": "rfd3_1", "pdb_content": "RFD3_PDB_1", "plddt": 77.5},
                 ],
             },
         )
@@ -52,7 +53,13 @@ class SuccessfulMPNN:
                         "sequence": "ACD",
                         "pdb_content": "MPNN_PDB",
                         "score": -1.0,
-                    }
+                    },
+                    {
+                        "name": "seq_1",
+                        "sequence": "EFG",
+                        "pdb_content": "MPNN_PDB_1",
+                        "score": -2.5,
+                    },
                 ],
             },
         )
@@ -106,6 +113,21 @@ def test_pipeline_service_runs_all_steps():
                     "rmsd": 1.1,
                     "ranking_score": -1.0,
                     "passed_validation": True,
+                    "plddt_source": "rf3",
+                    "ranking_source": "mpnn",
+                    "validation_status": "validated",
+                },
+                {
+                    "name": "seq_1",
+                    "sequence": "EFG",
+                    "pdb_content": "MPNN_PDB_1",
+                    "plddt": 77.5,
+                    "rmsd": None,
+                    "ranking_score": -2.5,
+                    "passed_validation": False,
+                    "plddt_source": "rfd3",
+                    "ranking_source": "mpnn",
+                    "validation_status": "not_validated",
                 }
             ],
         )

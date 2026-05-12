@@ -56,6 +56,9 @@ def test_experiment_service_saves_design_records():
                 "rmsd": 1.2,
                 "ranking_score": 0.4,
                 "passed_validation": True,
+                "plddt_source": "rfd3",
+                "ranking_source": "mpnn",
+                "validation_status": "not_validated",
             }
         ],
     )
@@ -68,6 +71,9 @@ def test_experiment_service_saves_design_records():
         assert design.design_name == "design_0"
         assert design.sequence == "ACD"
         assert design.passed_validation is True
+        assert design.plddt_source == "rfd3"
+        assert design.ranking_source == "mpnn"
+        assert design.validation_status == "not_validated"
     finally:
         db.close()
 

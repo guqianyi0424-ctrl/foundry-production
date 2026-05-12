@@ -105,7 +105,11 @@ class DesignPipelineService:
 
         self.experiment_service.save_designs(
             experiment_id,
-            self._build_candidate_designs(mpnn_result.data or {}, rf3_result.data or {}),
+            self._build_candidate_designs(
+                mpnn_result.data or {},
+                rf3_result.data or {},
+                rfd3_result.data or {},
+            ),
         )
         self.experiment_service.finish(experiment_id, "completed", time.time() - start)
         if hasattr(self.experiment_service, "write_archive"):
@@ -123,28 +127,57 @@ class DesignPipelineService:
         self,
         mpnn_data: dict[str, Any],
         rf3_data: dict[str, Any],
+        rfd3_data: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
         sequences = mpnn_data.get("sequences") or []
         if not sequences:
             return []
 
+        rfd3_designs = (rfd3_data or {}).get("designs") or []
+        rf3_ranking = (rf3_data.get("summary") or {}).get("ranking_score")
         candidates = []
-        for index, sequence in enumerate(sequences, start=1):
-            is_validated_sequence = index == 1
+        for index, sequence in enumerate(sequences):
+            is_validated_sequence = index == 0
+            rfd3_design = rfd3_designs[index] if index < len(rfd3_designs) else {}
+            fallback_plddt = rfd3_design.get("plddt")
+            sequence_score = sequence.get("score")
+
+            if is_validated_sequence and rf3_data.get("avg_plddt") is not None:
+                plddt = rf3_data.get("avg_plddt")
+                plddt_source = "rf3"
+            elif fallback_plddt is not None:
+                plddt = fallback_plddt
+                plddt_source = "rfd3"
+            else:
+                plddt = None
+                plddt_source = "none"
+
+            if is_validated_sequence and rf3_ranking is not None:
+                ranking_score = rf3_ranking
+                ranking_source = "rf3"
+            elif sequence_score is not None:
+                ranking_score = sequence_score
+                ranking_source = "mpnn"
+            else:
+                ranking_score = None
+                ranking_source = "none"
+
             candidates.append(
                 {
-                    "name": sequence.get("name") or f"candidate_{index:03d}",
+                    "name": sequence.get("name") or f"candidate_{index + 1:03d}",
                     "sequence": sequence.get("sequence", ""),
                     "pdb_content": sequence.get("pdb_content", ""),
-                    "plddt": rf3_data.get("avg_plddt") if is_validated_sequence else None,
+                    "plddt": plddt,
                     "rmsd": rf3_data.get("rmsd") if is_validated_sequence else None,
-                    "ranking_score": (rf3_data.get("summary") or {}).get(
-                        "ranking_score",
-                        sequence.get("score"),
-                    ),
+                    "ranking_score": ranking_score,
                     "passed_validation": bool(rf3_data.get("passed", False))
                     if is_validated_sequence
                     else False,
+                    "plddt_source": plddt_source,
+                    "ranking_source": ranking_source,
+                    "validation_status": "validated"
+                    if is_validated_sequence
+                    else "not_validated",
                 }
             )
         return candidates
