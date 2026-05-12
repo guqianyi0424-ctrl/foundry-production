@@ -1,6 +1,6 @@
 """
 系统配置文件 - 云服务器部署
-Top-K=5, 集成两个热点残基模型
+Top-K=3, 默认使用 final_neg3 热点残基权重
 """
 import os
 from pathlib import Path
@@ -21,7 +21,7 @@ COS_CONFIG = {
     "bucket": os.getenv("COS_BUCKET", ""),
 }
 
-TOP_K = 5
+TOP_K = 3
 
 HOTSPOT_CONFIG = {
     "top_k": TOP_K,
@@ -34,7 +34,7 @@ HOTSPOT_CONFIG = {
     ),
     "dl_models_dir": os.getenv(
         "HOTSPOT_DL_DIR",
-        str(PROJECT_ROOT.parent / "hotspot-prediction" / "models")
+        str(PROJECT_ROOT.parent / "hotspot-prediction" / "models" / "final_neg3")
     ),
     "dl_model_folds": 5,
     "esm2_model": "facebook/esm2_t33_650M_UR50D",

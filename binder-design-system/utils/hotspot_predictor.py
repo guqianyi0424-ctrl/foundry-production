@@ -42,6 +42,12 @@ class HotspotPredictor:
         self.top_k = top_k
         self.base_path = Path(__file__).parent.parent.parent
         self.hotspot_dl_path = self.base_path / "hotspot-prediction"
+        self.models_dir = Path(
+            os.getenv(
+                "HOTSPOT_DL_DIR",
+                str(self.hotspot_dl_path / "models" / "final_neg3"),
+            )
+        )
 
         self._dl_models = {}
         self._dl_loaded = False
@@ -205,10 +211,8 @@ class HotspotPredictor:
             NUM_LAYERS = hotspot_module["NUM_LAYERS"]
             DROPOUT = hotspot_module["DROPOUT"]
 
-            models_dir = self.hotspot_dl_path / "models"
-
             for fold_idx in range(1, 6):
-                model_file = models_dir / f"best_model_fold{fold_idx}.pth"
+                model_file = self.models_dir / f"best_model_fold{fold_idx}.pth"
                 if model_file.exists():
                     try:
                         model = PPIHotspotGAT(

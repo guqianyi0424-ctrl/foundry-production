@@ -9,6 +9,9 @@ const clampNumber = (value: number, min: number, max: number) => Math.min(Math.m
 const shortSequence = (sequence: string, max = 140) =>
   sequence.length > max ? `${sequence.slice(0, max)}...` : sequence
 
+const hasRmsd = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isFinite(value) && value >= 0
+
 export function DeNovoDesignPage() {
   const [length, setLength] = useState(80)
   const [diffusionBatchSize, setDiffusionBatchSize] = useState(2)
@@ -232,7 +235,7 @@ export function DeNovoDesignPage() {
             {rf3Results && (
               <div className="space-y-4">
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                  <MetricCard label="RMSD" value={`${rf3Results.rmsd.toFixed(2)} Å`} tone={rf3Results.rmsd < 2 ? 'green' : rf3Results.rmsd < 5 ? 'amber' : 'red'} />
+                  <MetricCard label="RMSD" value={hasRmsd(rf3Results.rmsd) ? `${rf3Results.rmsd.toFixed(2)} Å` : '未计算'} tone={!hasRmsd(rf3Results.rmsd) ? 'gray' : rf3Results.rmsd < 2 ? 'green' : rf3Results.rmsd < 5 ? 'amber' : 'red'} />
                   <MetricCard label="pLDDT" value={rf3Results.avg_plddt.toFixed(1)} tone={rf3Results.avg_plddt > 80 ? 'green' : rf3Results.avg_plddt > 60 ? 'amber' : 'red'} />
                   <MetricCard label="pTM" value={(rf3Results.summary?.ptm ?? 0).toFixed(3)} tone="blue" />
                   <MetricCard label="Ranking" value={(rf3Results.summary?.ranking_score ?? 0).toFixed(3)} tone="gray" />
@@ -242,7 +245,11 @@ export function DeNovoDesignPage() {
                     {rf3Results.passed ? <CheckCircle2 size={18} /> : <AlertTriangle size={18} />}
                     {rf3Results.passed ? '验证通过' : '需要优化'}
                   </div>
-                  <div className="mt-1 text-xs text-gray-600">RMSD {rf3Results.rmsd.toFixed(2)} Å，{rf3Results.rmsd_interpretation}</div>
+                  <div className="mt-1 text-xs text-gray-600">
+                    {hasRmsd(rf3Results.rmsd)
+                      ? `RMSD ${rf3Results.rmsd.toFixed(2)} Å，${rf3Results.rmsd_interpretation}`
+                      : '缺少参考结构或 CA 原子匹配失败，RMSD 未计算；这不等于设计失败'}
+                  </div>
                 </div>
               </div>
             )}

@@ -9,6 +9,7 @@ from database import SessionLocal, Experiment, ExperimentDesign, User
 from routers.auth import get_current_user
 from logger import logger, record_task
 from schemas.domain import RFD3JobConfig
+from adapters.model_adapters import sanitize_model_result
 from services.factory import get_design_services
 
 router = APIRouter()
@@ -28,6 +29,9 @@ class RFD3Request(BaseModel):
     diffusion_batch_size: int = 2
     n_batches: int = 2
     experiment_id: Optional[str] = None
+    task_name: Optional[str] = None
+    target_filename: Optional[str] = None
+    chain_type: Optional[str] = None
 
 
 class MPNNRequest(BaseModel):
@@ -109,11 +113,31 @@ def _save_designs(experiment_id: str, designs: list):
         db.close()
 
 
+def _create_rfd3_experiment(req: RFD3Request, config: dict, user_id: str | None = None) -> str:
+    db = SessionLocal()
+    try:
+        experiment = Experiment(
+            id=str(uuid.uuid4()),
+            name=req.task_name or f"RFD3_{time.strftime('%Y%m%d_%H%M%S')}",
+            status="running",
+            input_pdb=req.pdb_content,
+            target=req.target,
+            hotspots=req.hotspots or [],
+            rfd3_config=config,
+            user_id=user_id,
+        )
+        db.add(experiment)
+        db.commit()
+        return experiment.id
+    finally:
+        db.close()
+
+
 @router.post("/predict-hotspot", summary="热点残基预测", description="使用ESM-2+GAT模型预测蛋白质热点残基，返回Top-K热点列表")
 async def predict_hotspot(req: HotspotRequest):
     start = time.time()
     try:
-        result = get_design_services().hotspot_prediction.predict(req.pdb_content, top_k=5)
+        result = get_design_services().hotspot_prediction.predict(req.pdb_content, top_k=3)
         if not result.success:
             raise RuntimeError(result.message or result.raw_error or "热点预测失败")
         payload = result.data or {}
@@ -143,11 +167,20 @@ async def predict_hotspot(req: HotspotRequest):
 
 
 @router.post("/run-rfd3", summary="RFD3骨架生成", description="使用RFDiffusion3生成蛋白质Binder骨架结构，支持GPU推理和Mock回退")
-async def run_rfd3(req: RFD3Request):
+async def run_rfd3(
+    req: RFD3Request,
+    current_user: User | None = Depends(get_current_user),
+):
     start = time.time()
     try:
         job_id = f"rfd3_{int(time.time())}"
         config = {
+            "task_type": "protein" if req.pdb_content else "de_novo",
+            "task_id": job_id,
+            "task_name": req.task_name,
+            "target_filename": req.target_filename,
+            "chain_type": req.chain_type or "proteinChain",
+            "protein_chain": req.target,
             "target": req.target,
             "hotspots": req.hotspots,
             "binder_length": req.binder_length,
@@ -156,6 +189,12 @@ async def run_rfd3(req: RFD3Request):
             "diffusion_batch_size": req.diffusion_batch_size,
             "n_batches": req.n_batches,
         }
+        user_id = (
+            current_user.id
+            if current_user and not isinstance(current_user, DependsParam)
+            else None
+        )
+        experiment_id = req.experiment_id or _create_rfd3_experiment(req, config, user_id)
         adapter_result = get_design_services().rfd3.run(
             RFD3JobConfig(
                 pdb_content=req.pdb_content,
@@ -175,7 +214,7 @@ async def run_rfd3(req: RFD3Request):
         }
         duration = time.time() - start
         record_task("run_rfd3", "success", duration)
-        _save_experiment_step(req.experiment_id, "rfd3", result, config)
+        _save_experiment_step(experiment_id, "rfd3", sanitize_model_result(result), config)
 
         if result.get("success") and result.get("designs"):
             designs = []
@@ -186,7 +225,9 @@ async def run_rfd3(req: RFD3Request):
                     "pdb_content": d.get("pdb_content", ""),
                     "plddt": d.get("plddt"),
                 })
-            _save_designs(req.experiment_id, designs)
+            _save_designs(experiment_id, designs)
+
+        result["experiment_id"] = experiment_id
 
         return result
     except Exception as e:
@@ -219,7 +260,7 @@ async def run_mpnn(req: MPNNRequest):
         }
         duration = time.time() - start
         record_task("run_mpnn", "success", duration)
-        _save_experiment_step(req.experiment_id, "mpnn", result, config)
+        _save_experiment_step(req.experiment_id, "mpnn", sanitize_model_result(result), config)
 
         if result.get("success") and result.get("sequences"):
             designs = []
@@ -257,7 +298,7 @@ async def run_rf3(req: RF3Request):
         }
         duration = time.time() - start
         record_task("run_rf3", "success", duration)
-        _save_experiment_step(req.experiment_id, "rf3", result, config)
+        _save_experiment_step(req.experiment_id, "rf3", sanitize_model_result(result), config)
 
         if result.get("success") and req.experiment_id:
             db = SessionLocal()

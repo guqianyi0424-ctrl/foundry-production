@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useAppStore } from '@/store/useAppStore'
 import { getExperiment, exportExperiment, exportExperimentCsv, type ExperimentDetail } from '@/api'
+import { SilentStructureViewer } from '@/components/SilentStructureViewer'
 import { ArrowLeft, Download, Clock, Cpu, CheckCircle, XCircle, FlaskConical, Activity, FileText, Dna, Box } from 'lucide-react'
 
 const statusConfig: Record<string, { label: string; color: string }> = {
@@ -10,6 +11,40 @@ const statusConfig: Record<string, { label: string; color: string }> = {
   mpnn_completed: { label: 'MPNN完成', color: 'bg-orange-100 text-orange-700' },
   completed: { label: '已完成', color: 'bg-green-100 text-green-700' },
   failed: { label: '失败', color: 'bg-red-100 text-red-700' },
+}
+
+const hasRmsd = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isFinite(value) && value >= 0
+
+const metric = (value: unknown, digits = 2) =>
+  typeof value === 'number' && Number.isFinite(value) ? value.toFixed(digits) : '-'
+
+const sanitizeForDisplay = (value: any): any => {
+  if (Array.isArray(value)) return value.map(sanitizeForDisplay)
+  if (!value || typeof value !== 'object') return value
+  const next: any = {}
+  for (const [key, item] of Object.entries(value)) {
+    if (['pdb_content', 'first_backbone_pdb', 'first_sequence_pdb', 'predicted_pdb'].includes(key) && typeof item === 'string' && item) {
+      next[key] = '<omitted>'
+    } else {
+      next[key] = sanitizeForDisplay(item)
+    }
+  }
+  return next
+}
+
+const topCandidates = (experiment: ExperimentDetail) =>
+  [...(experiment.designs || [])]
+    .sort((a, b) => (b.plddt ?? b.ranking_score ?? 0) - (a.plddt ?? a.ranking_score ?? 0))
+    .slice(0, 3)
+
+function InfoRow({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) {
+  return (
+    <div className="flex justify-between gap-4">
+      <dt className="text-gray-500">{label}</dt>
+      <dd className={`${mono ? 'font-mono text-xs' : ''} text-right text-gray-900`}>{value || '-'}</dd>
+    </div>
+  )
 }
 
 export function ExperimentDetailPage({ experimentId }: { experimentId: string }) {
@@ -88,6 +123,8 @@ export function ExperimentDetailPage({ experimentId }: { experimentId: string })
   const sc = statusConfig[experiment.status] || statusConfig.created
   const rf3Results = experiment.rf3_results || {}
   const rf3Summary = (rf3Results as any).summary || {}
+  const rfd3Config = experiment.rfd3_config || {}
+  const candidates = topCandidates(experiment)
 
   return (
     <div className="p-6 max-w-7xl mx-auto">
@@ -157,16 +194,13 @@ export function ExperimentDetailPage({ experimentId }: { experimentId: string })
           <div className="bg-white rounded-xl border border-gray-200 p-5">
             <h3 className="font-medium text-gray-900 mb-3">基本信息</h3>
             <dl className="space-y-2 text-sm">
-              <div className="flex justify-between">
-                <dt className="text-gray-500">靶点</dt>
-                <dd className="text-gray-900">{experiment.target || '-'}</dd>
-              </div>
-              <div className="flex justify-between">
-                <dt className="text-gray-500">热点残基</dt>
-                <dd className="text-gray-900">
-                  {experiment.hotspots ? JSON.stringify(experiment.hotspots) : '-'}
-                </dd>
-              </div>
+              <InfoRow label="任务类型" value={rfd3Config.task_type === 'de_novo' ? 'de novo' : 'protein'} />
+              <InfoRow label="任务ID" value={experiment.id} mono />
+              <InfoRow label="链类型" value={rfd3Config.chain_type || 'proteinChain'} />
+              <InfoRow label="proteinChain 序列/范围" value={rfd3Config.protein_chain || experiment.target || '-'} />
+              <InfoRow label="上传蛋白名称" value={rfd3Config.target_filename || '-'} />
+              <InfoRow label="热点残基" value={experiment.hotspots ? JSON.stringify(experiment.hotspots) : '-'} />
+              <InfoRow label="生成参数" value={`${rfd3Config.n_batches ?? '-'} x ${rfd3Config.diffusion_batch_size ?? '-'}, length=${rfd3Config.binder_length ?? '-'}`} />
               <div className="flex justify-between">
                 <dt className="text-gray-500">GPU信息</dt>
                 <dd className="text-gray-900">{experiment.gpu_info || '-'}</dd>
@@ -182,23 +216,30 @@ export function ExperimentDetailPage({ experimentId }: { experimentId: string })
             <dl className="space-y-2 text-sm">
               <div className="flex justify-between">
                 <dt className="text-gray-500">RMSD</dt>
-                <dd className="text-gray-900">{(rf3Results as any).rmsd?.toFixed(2) || '-'} Å</dd>
+                <dd className="text-gray-900">
+                  {hasRmsd((rf3Results as any).rmsd) ? `${(rf3Results as any).rmsd.toFixed(2)} Å` : '未计算'}
+                </dd>
               </div>
+              {!hasRmsd((rf3Results as any).rmsd) && (
+                <div className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">
+                  缺少参考结构或 CA 原子匹配失败，RMSD 未计算；这不等于设计失败。
+                </div>
+              )}
               <div className="flex justify-between">
                 <dt className="text-gray-500">pLDDT</dt>
-                <dd className="text-gray-900">{(rf3Results as any).avg_plddt?.toFixed(2) || '-'}</dd>
+                <dd className="text-gray-900">{metric((rf3Results as any).avg_plddt)}</dd>
               </div>
               <div className="flex justify-between">
                 <dt className="text-gray-500">pTM</dt>
-                <dd className="text-gray-900">{rf3Summary.ptm?.toFixed(3) || '-'}</dd>
+                <dd className="text-gray-900">{metric(rf3Summary.ptm, 3)}</dd>
               </div>
               <div className="flex justify-between">
                 <dt className="text-gray-500">iPTM</dt>
-                <dd className="text-gray-900">{rf3Summary.iptm?.toFixed(3) || '-'}</dd>
+                <dd className="text-gray-900">{metric(rf3Summary.iptm, 3)}</dd>
               </div>
               <div className="flex justify-between">
                 <dt className="text-gray-500">验证通过</dt>
-                <dd>{(rf3Results as any).passed ? <CheckCircle size={16} className="text-green-600" /> : <XCircle size={16} className="text-red-500" />}</dd>
+                <dd>{!hasRmsd((rf3Results as any).rmsd) ? '-' : (rf3Results as any).passed ? <CheckCircle size={16} className="text-green-600" /> : <XCircle size={16} className="text-red-500" />}</dd>
               </div>
             </dl>
           </div>
@@ -210,7 +251,7 @@ export function ExperimentDetailPage({ experimentId }: { experimentId: string })
           <h3 className="font-medium text-gray-900 mb-3">RFD3 骨架生成结果</h3>
           {experiment.rfd3_results ? (
             <pre className="bg-gray-50 rounded-lg p-4 text-xs overflow-auto max-h-96">
-              {JSON.stringify(experiment.rfd3_results, null, 2)}
+              {JSON.stringify(sanitizeForDisplay(experiment.rfd3_results), null, 2)}
             </pre>
           ) : (
             <p className="text-gray-400">暂无RFD3结果</p>
@@ -223,7 +264,7 @@ export function ExperimentDetailPage({ experimentId }: { experimentId: string })
           <h3 className="font-medium text-gray-900 mb-3">MPNN 序列设计结果</h3>
           {experiment.mpnn_results ? (
             <pre className="bg-gray-50 rounded-lg p-4 text-xs overflow-auto max-h-96">
-              {JSON.stringify(experiment.mpnn_results, null, 2)}
+              {JSON.stringify(sanitizeForDisplay(experiment.mpnn_results), null, 2)}
             </pre>
           ) : (
             <p className="text-gray-400">暂无MPNN结果</p>
@@ -236,7 +277,7 @@ export function ExperimentDetailPage({ experimentId }: { experimentId: string })
           <h3 className="font-medium text-gray-900 mb-3">RF3 结构验证结果</h3>
           {experiment.rf3_results ? (
             <pre className="bg-gray-50 rounded-lg p-4 text-xs overflow-auto max-h-96">
-              {JSON.stringify(experiment.rf3_results, null, 2)}
+              {JSON.stringify(sanitizeForDisplay(experiment.rf3_results), null, 2)}
             </pre>
           ) : (
             <p className="text-gray-400">暂无RF3结果</p>
@@ -247,7 +288,27 @@ export function ExperimentDetailPage({ experimentId }: { experimentId: string })
       {activeTab === 'designs' && (
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
           {experiment.designs && experiment.designs.length > 0 ? (
-            <table className="w-full text-sm">
+            <div>
+              <div className="border-b border-gray-100 p-4">
+                <h3 className="text-sm font-semibold text-gray-900">置信度最高的三个设计结果</h3>
+                <div className="mt-3 grid grid-cols-1 lg:grid-cols-3 gap-3">
+                  {candidates.map((d) => (
+                    <div key={d.id} className="rounded-xl border border-gray-100 p-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm font-medium text-gray-900 truncate">{d.design_name || '-'}</span>
+                        <span className="text-xs text-gray-500">pLDDT {metric(d.plddt, 1)}</span>
+                      </div>
+                      <div className="mt-2 h-40 overflow-hidden rounded-lg border border-gray-100">
+                        <SilentStructureViewer pdbContent={d.pdb_content || undefined} title={d.design_name || 'candidate'} heightClassName="h-40" emptyText="无结构数据" />
+                      </div>
+                      <div className="mt-2 text-xs text-gray-500">
+                        RMSD {hasRmsd(d.rmsd) ? `${d.rmsd.toFixed(2)} Å` : '未计算'} · Ranking {metric(d.ranking_score, 3)}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <table className="w-full text-sm">
               <thead>
                 <tr className="bg-gray-50 border-b">
                   <th className="text-left px-4 py-3 font-medium text-gray-600">名称</th>
@@ -266,7 +327,7 @@ export function ExperimentDetailPage({ experimentId }: { experimentId: string })
                       {d.sequence ? (d.sequence.length > 40 ? d.sequence.slice(0, 40) + '...' : d.sequence) : '-'}
                     </td>
                     <td className="px-4 py-3">{d.plddt?.toFixed(1) || '-'}</td>
-                    <td className="px-4 py-3">{d.rmsd?.toFixed(2) || '-'} Å</td>
+                    <td className="px-4 py-3">{hasRmsd(d.rmsd) ? `${d.rmsd.toFixed(2)} Å` : '-'}</td>
                     <td className="px-4 py-3">{d.ranking_score?.toFixed(3) || '-'}</td>
                     <td className="px-4 py-3">
                       {d.passed_validation ? (
@@ -278,7 +339,8 @@ export function ExperimentDetailPage({ experimentId }: { experimentId: string })
                   </tr>
                 ))}
               </tbody>
-            </table>
+              </table>
+            </div>
           ) : (
             <div className="text-center py-10 text-gray-400">暂无设计结果</div>
           )}

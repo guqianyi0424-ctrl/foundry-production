@@ -54,8 +54,8 @@ export function MolstarViewer() {
         if (destroyed) return
         pluginRef.current = plugin
         setInitDone(true)
-      } catch (err) {
-        console.error('Molstar init error:', err)
+      } catch {
+        // Keep Molstar failures out of the user console; the sequence view remains usable.
       }
     }
     initViewer()
@@ -74,8 +74,8 @@ export function MolstarViewer() {
         if (cancelled) return
         await plugin.builders.structure.hierarchy.applyPreset(trajectory, 'default')
         if (!cancelled) setStructureVersion(version => version + 1)
-      } catch (err) {
-        console.warn('Load structure failed:', err)
+      } catch {
+        // Structure loading can fail for partial/mock PDB strings; hide noisy viewer logs.
       }
     }
     loadStructure()
@@ -129,16 +129,10 @@ export function MolstarViewer() {
         }
       }
 
-      if (elements.length === 0) {
-        console.warn('[buildResiduesLoci] no matching elements for', targets)
-        return null
-      }
+      if (elements.length === 0) return null
 
-      const loci = SE.Loci(structure, elements)
-      console.log('[buildResiduesLoci] success! size:', SE.Loci.size(loci))
-      return loci
-    } catch (e) {
-      console.error('[buildResiduesLoci] error:', e)
+      return SE.Loci(structure, elements)
+    } catch {
       return null
     }
   }
@@ -187,16 +181,10 @@ export function MolstarViewer() {
         }
       }
 
-      if (elements.length === 0) {
-        console.warn('[buildRangeLoci] no matching elements for', chainId, startResSeq, '-', endResSeq)
-        return null
-      }
+      if (elements.length === 0) return null
 
-      const loci = SE.Loci(structure, elements)
-      console.log('[buildRangeLoci] success! size:', SE.Loci.size(loci))
-      return loci
-    } catch (e) {
-      console.error('[buildRangeLoci] error:', e)
+      return SE.Loci(structure, elements)
+    } catch {
       return null
     }
   }
@@ -209,8 +197,8 @@ export function MolstarViewer() {
         const loci = await buildResiduesLoci([{ chain: focusedResidue.chain, resSeq: focusedResidue.resSeq }])
         if (!loci) return
         plugin.managers.camera.focusLoci(loci, { durationMs: 500 })
-      } catch (err) {
-        console.warn('Focus residue failed:', err)
+      } catch {
+        // Ignore transient Molstar focus failures.
       }
     }
     focusResidue()
@@ -269,8 +257,8 @@ export function MolstarViewer() {
           const hoverLoci = await buildResiduesLoci([{ chain: hoveredResidue.chain, resSeq: hoveredResidue.resSeq }])
           highlightLoci(hoverLoci, 0x60A5FA)
         }
-      } catch (err) {
-        console.warn('Update highlights failed:', err)
+      } catch {
+        // Ignore transient Molstar selection failures.
       }
     }
 

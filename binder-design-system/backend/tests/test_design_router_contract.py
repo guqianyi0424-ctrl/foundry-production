@@ -1,10 +1,14 @@
 import asyncio
 
+from database import SessionLocal, Experiment
 from schemas.domain import AdapterResult, PipelineResult
 
 
 class FakeHotspotService:
+    last_top_k = None
+
     def predict(self, pdb_content, top_k=5):
+        self.last_top_k = top_k
         return AdapterResult(
             success=True,
             data={
@@ -81,6 +85,10 @@ class FakeServices:
     rfd3 = FakeRFD3Service()
 
 
+class FakeUser:
+    id = "user_rfd3"
+
+
 def patch_services(monkeypatch):
     import routers.design as design_router
 
@@ -90,6 +98,7 @@ def patch_services(monkeypatch):
 
 def test_predict_hotspot_contract(monkeypatch):
     design_router = patch_services(monkeypatch)
+    FakeServices.hotspot_prediction.last_top_k = None
 
     data = asyncio.run(
         design_router.predict_hotspot(
@@ -104,6 +113,7 @@ def test_predict_hotspot_contract(monkeypatch):
     assert data["method"] == "rule"
     assert data["model_loaded"] is False
     assert data["total_residues"] == 100
+    assert FakeServices.hotspot_prediction.last_top_k == 3
 
 
 def test_run_pipeline_contract(monkeypatch):
@@ -137,7 +147,8 @@ def test_run_rfd3_accepts_denovo_request_without_target(monkeypatch):
                 binder_length=72,
                 diffusion_batch_size=1,
                 n_batches=1,
-            )
+            ),
+            current_user=FakeUser(),
         )
     )
 
@@ -147,3 +158,11 @@ def test_run_rfd3_accepts_denovo_request_without_target(monkeypatch):
     assert services.rfd3.config.target is None
     assert services.rfd3.config.hotspots == []
     assert services.rfd3.config.binder_length == 72
+    db = SessionLocal()
+    try:
+        exp = db.query(Experiment).filter(Experiment.id == data["experiment_id"]).one()
+        assert exp.user_id == "user_rfd3"
+    finally:
+        db.delete(exp)
+        db.commit()
+        db.close()

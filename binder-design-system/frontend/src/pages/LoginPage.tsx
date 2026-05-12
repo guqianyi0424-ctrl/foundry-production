@@ -17,14 +17,26 @@ const formatBackendError = (err: any): string => {
     ? data.details
         .map((item: any) => {
           if (typeof item === 'string') return item
-          if (typeof item?.msg === 'string') return item.msg
-          if (typeof item?.message === 'string') return item.message
+          const field = formatValidationField(item?.loc)
+          if (typeof item?.msg === 'string') return field ? `${field}: ${item.msg}` : item.msg
+          if (typeof item?.message === 'string') return field ? `${field}: ${item.message}` : item.message
           return null
         })
         .filter((item: string | null): item is string => Boolean(item))
     : []
 
   return details.length > 0 ? `${message}：${details.join('；')}` : message
+}
+
+const formatValidationField = (loc: unknown): string => {
+  if (!Array.isArray(loc)) return ''
+  const field = loc[loc.length - 1]
+  const labels: Record<string, string> = {
+    username: '用户名',
+    password: '密码',
+    email: '邮箱',
+  }
+  return typeof field === 'string' ? labels[field] || field : ''
 }
 
 export function LoginModal() {
@@ -75,7 +87,7 @@ export function LoginModal() {
           </h2>
 
           {error && (
-            <div className="mb-4 px-3 py-2.5 bg-red-50 border border-red-200 rounded-lg text-red-600 text-sm flex items-start gap-2">
+            <div role="alert" className="mb-4 px-3 py-2.5 bg-red-50 border border-red-200 rounded-lg text-red-600 text-sm flex items-start gap-2">
               <span className="mt-0.5">•</span>
               {error}
             </div>

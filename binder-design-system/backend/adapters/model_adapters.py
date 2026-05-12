@@ -4,6 +4,31 @@ from typing import Any
 from schemas.domain import AdapterResult, RFD3JobConfig
 
 
+PDB_PAYLOAD_KEYS = {
+    "pdb_content",
+    "first_backbone_pdb",
+    "first_sequence_pdb",
+    "predicted_pdb",
+    "mpnn_pdb_content",
+    "rfd3_pdb_content",
+}
+
+
+def sanitize_model_result(value: Any) -> Any:
+    if isinstance(value, list):
+        return [sanitize_model_result(item) for item in value]
+    if not isinstance(value, dict):
+        return value
+
+    sanitized: dict[str, Any] = {}
+    for key, item in value.items():
+        if key in PDB_PAYLOAD_KEYS and isinstance(item, str) and item:
+            sanitized[key] = "<omitted>"
+        else:
+            sanitized[key] = sanitize_model_result(item)
+    return sanitized
+
+
 class RFD3Adapter:
     def __init__(self, runner_factory: Callable[[], Any] | None = None):
         self.runner_factory = runner_factory

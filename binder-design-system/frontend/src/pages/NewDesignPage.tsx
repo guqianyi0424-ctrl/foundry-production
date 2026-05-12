@@ -25,6 +25,9 @@ const hotspotChainFromConfig = (input: string): string | null => {
   return trimmed.includes('/') ? trimmed.split('/')[0] : trimmed.match(/^[A-Za-z0-9]+/)?.[0] ?? null
 }
 
+const hasRmsd = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isFinite(value) && value >= 0
+
 const mergeHotspotSelections = (...groups: HotspotResidue[][]): HotspotResidue[] => {
   const seen = new Set<string>()
   const merged: HotspotResidue[] = []
@@ -269,6 +272,7 @@ export function NewDesignPage() {
     setIsRFD3Running(true)
     setShowRFD3Modal(false)
     try {
+      const taskName = `RFD3_${targetFile?.name ? targetFile.name.replace(/\.[^.]+$/, '') : 'protein'}_${new Date().toISOString().slice(0, 19).replace(/[-:T]/g, '')}`
       const res = await runRFD3({
         pdb_content: pdbContent,
         target: rfd3Config.targetStructure || undefined,
@@ -276,12 +280,25 @@ export function NewDesignPage() {
         binder_length: params.binder_length,
         diffusion_batch_size: params.diffusion_batch_size,
         n_batches: params.n_batches,
+        task_name: taskName,
+        target_filename: targetFile?.name,
+        chain_type: 'proteinChain',
       })
       setRfd3Results(res)
       setActiveStep(1)
+      if (res.experiment_id) {
+        setCurrentExperimentId(res.experiment_id)
+        addJob({
+          id: `rfd3_${res.experiment_id}`,
+          name: taskName,
+          status: 'rfd3_completed',
+          time: new Date().toLocaleString('zh-CN'),
+        })
+        setCurrentPage(`experiment_${res.experiment_id}`)
+      }
     } catch (err) { alert('RFD3运行失败: ' + String(err)) }
     finally { setIsRFD3Running(false) }
-  }, [pdbContent, rfd3Config, committedHotspotTokens, setRfd3Results])
+  }, [pdbContent, rfd3Config, committedHotspotTokens, setRfd3Results, targetFile, setCurrentExperimentId, addJob, setCurrentPage])
 
   const handleRunMPNN = useCallback(async (backbonePdb: string, designIdx: number) => {
     const design = rfd3Results?.designs.find(item => item.index === designIdx)
@@ -371,13 +388,7 @@ export function NewDesignPage() {
 
       {/* Header */}
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <div className="flex bg-gray-100 rounded-lg p-0.5">
-            {['表单模式', 'JSON模式'].map(mode => (
-              <button key={mode} className="px-4 py-1.5 text-xs font-medium rounded-md transition-all text-gray-600 hover:text-gray-900">{mode}</button>
-            ))}
-          </div>
-        </div>
+          <div className="text-sm font-semibold text-gray-700">Protein to Protein</div>
         <div className="flex items-center gap-2">
           <button onClick={handleResetView} className="flex items-center gap-2 px-4 py-2 rounded-lg border border-gray-200 text-gray-700 text-sm hover:bg-gray-50 transition-all">
             <RotateCcw size={16} />重置
@@ -418,7 +429,7 @@ export function NewDesignPage() {
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-base font-bold text-gray-900 flex items-center gap-2"><span>🧬</span> 结构与序列</h3>
           <div className="flex gap-2">
-            <button onClick={handlePredictHotspot} disabled={!pdbContent || isPredicting} title="AI预测热点 (Top-5)" className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs transition-all ${!pdbContent || isPredicting ? 'border-gray-100 text-gray-300 cursor-not-allowed' : 'border-purple-200 text-purple-600 hover:bg-purple-50 bg-purple-50/50'}`}>
+            <button onClick={handlePredictHotspot} disabled={!pdbContent || isPredicting} title="AI预测热点 (Top-3)" className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs transition-all ${!pdbContent || isPredicting ? 'border-gray-100 text-gray-300 cursor-not-allowed' : 'border-purple-200 text-purple-600 hover:bg-purple-50 bg-purple-50/50'}`}>
               <Sparkles size={14} />{isPredicting ? '预测中...' : '预测热点'}
             </button>
             <button onClick={handleTrimTarget} disabled={!selectedRange} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs transition-all ${!selectedRange ? 'border-gray-100 text-gray-300 cursor-not-allowed' : 'border-gray-200 text-gray-600 hover:bg-orange-50 hover:text-orange-600'}`}>
@@ -583,8 +594,14 @@ export function NewDesignPage() {
                   <div className="p-4 rounded-xl border border-gray-100 bg-white">
                     <div className="text-xs text-gray-500 mb-1">Backbone RMSD</div>
                     <div className="flex items-baseline gap-1">
-                      <span className={`text-2xl font-bold ${rf3Results.rmsd < 2 ? 'text-green-600' : rf3Results.rmsd < 5 ? 'text-amber-600' : 'text-red-600'}`}>{rf3Results.rmsd.toFixed(2)}</span>
-                      <span className="text-xs text-gray-400">Å</span>
+                      {hasRmsd(rf3Results.rmsd) ? (
+                        <>
+                          <span className={`text-2xl font-bold ${rf3Results.rmsd < 2 ? 'text-green-600' : rf3Results.rmsd < 5 ? 'text-amber-600' : 'text-red-600'}`}>{rf3Results.rmsd.toFixed(2)}</span>
+                          <span className="text-xs text-gray-400">Å</span>
+                        </>
+                      ) : (
+                        <span className="text-xl font-bold text-gray-500">未计算</span>
+                      )}
                     </div>
                     <span className={`text-xs px-2 py-0.5 rounded-full ${rf3Results.rmsd_interpretation === 'Excellent' ? 'bg-green-100 text-green-700' : rf3Results.rmsd_interpretation === 'Good' ? 'bg-blue-100 text-blue-700' : 'bg-amber-100 text-amber-700'}`}>
                       {rf3Results.rmsd_interpretation}
@@ -630,9 +647,11 @@ export function NewDesignPage() {
                       {rf3Results.passed ? '验证通过 ✅' : '需要优化 ⚠️'}
                     </span>
                     <p className="text-sm text-gray-600 mt-0.5">
-                      {rf3Results.passed
-                        ? `RMSD ${rf3Results.rmsd.toFixed(2)} Å < 2.0 Å，设计序列很可能折叠成预期结构`
-                        : `RMSD ${rf3Results.rmsd.toFixed(2)} Å ≥ 2.0 Å，建议调整参数重新设计`}
+                      {!hasRmsd(rf3Results.rmsd)
+                        ? '缺少参考结构或 CA 原子匹配失败，RMSD 未计算；这不等于设计失败'
+                        : rf3Results.passed
+                          ? `RMSD ${rf3Results.rmsd.toFixed(2)} Å < 2.0 Å，设计序列很可能折叠成预期结构`
+                          : `RMSD ${rf3Results.rmsd.toFixed(2)} Å ≥ 2.0 Å，建议调整参数重新设计`}
                     </p>
                   </div>
                 </div>

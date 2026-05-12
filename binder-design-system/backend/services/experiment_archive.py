@@ -4,6 +4,8 @@ import re
 from pathlib import Path
 from typing import Any
 
+from adapters.model_adapters import sanitize_model_result
+
 
 class ExperimentArchiveService:
     def __init__(self, output_root: str | Path):
@@ -41,10 +43,12 @@ class ExperimentArchiveService:
                 "candidate_id": str(candidate_id),
                 "design_name": str(design_name),
                 "sequence": design.get("sequence") or "",
+                "sequence_length": str(len(design.get("sequence") or "")),
                 "plddt": self._stringify_metric(design.get("plddt")),
                 "rmsd": self._stringify_metric(design.get("rmsd")),
                 "ranking_score": self._stringify_metric(design.get("ranking_score")),
                 "passed_validation": "true" if design.get("passed_validation") else "false",
+                "has_pdb": "true" if pdb_content else "false",
                 "pdb_file": pdb_file,
                 "created_at": experiment.get("created_at") or "",
             }
@@ -92,10 +96,12 @@ class ExperimentArchiveService:
             "candidate_id",
             "design_name",
             "sequence",
+            "sequence_length",
             "plddt",
             "rmsd",
             "ranking_score",
             "passed_validation",
+            "has_pdb",
             "pdb_file",
             "created_at",
         ]
@@ -119,7 +125,7 @@ class ExperimentArchiveService:
             payload = results.get(step)
             if payload is not None:
                 (raw_results_dir / f"{step}_results.json").write_text(
-                    json.dumps(payload, indent=2)
+                    json.dumps(sanitize_model_result(payload), indent=2)
                 )
 
     def _summarize_result(self, result: Any) -> Any:

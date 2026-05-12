@@ -1,5 +1,5 @@
 import { useAppStore } from '@/store/useAppStore'
-import { HelpCircle, Dna } from 'lucide-react'
+import { Dna } from 'lucide-react'
 
 interface DesignPanelProps {
   onOpenRFD3?: () => void
@@ -21,22 +21,10 @@ export function DesignPanel({ onOpenRFD3, isRFD3Running }: DesignPanelProps) {
     syncTargetFromRange()
   }
 
-  const configSummary = () => {
-    const cfg = rfd3Config
-    const parts: string[] = []
-    if (cfg.targetStructure) parts.push(`target=${cfg.targetStructure}`)
-    if (cfg.hotspots) parts.push(`hotspots=[${cfg.hotspots}]`)
-    if (cfg.conditionAtoms) parts.push(`atoms=${cfg.conditionAtoms}`)
-    parts.push(`length=${cfg.lengthMin}-${cfg.lengthMax}`)
-    parts.push(`batches=${cfg.nBatches}x${cfg.diffusionBatchSize}`)
-    console.log('[RFD3 Config]', parts.join(' | '))
-  }
-
   return (
     <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-4">
       <div className="flex items-center gap-2">
         <span className="text-sm font-semibold text-gray-900">RFD3 Binder 设计参数</span>
-        <button onClick={configSummary} title="查看当前配置" className="text-gray-400 hover:text-gray-600"><HelpCircle size={14} /></button>
       </div>
 
       <div className="grid grid-cols-[100px_1fr] gap-y-4 gap-x-4 items-start">
@@ -94,12 +82,11 @@ export function DesignPanel({ onOpenRFD3, isRFD3Running }: DesignPanelProps) {
         <div className="pt-2 flex items-center gap-3">
           {onOpenRFD3 && (
             <button onClick={onOpenRFD3} disabled={!rfd3Config.targetStructure || isRFD3Running} className={`flex items-center gap-2 px-5 py-2 rounded-lg text-white text-sm font-medium transition-all ${!rfd3Config.targetStructure || isRFD3Running ? 'bg-gray-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700 shadow-sm'}`}>
-              <Dna size={16} />{isRFD3Running ? 'RFD3生成中...' : 'RFD3 骨架生成'}
+              <Dna size={16} />{isRFD3Running ? '任务运行中...' : '新建任务'}
             </button>
           )}
           <button onClick={() => {
-            configSummary()
-            alert(`当前配置已记录到控制台，请按 F12 查看\n\n目标实体: ${rfd3Config.targetEntityType} / ${rfd3Config.targetStructure || '(未填)'}\n热点: ${rfd3Config.hotspots || '(未填)'}\n条件原子: ${rfd3Config.conditionAtoms || '(未填)'}\n长度: ${rfd3Config.lengthMin}-${rfd3Config.lengthMax}\nn_batches: ${rfd3Config.nBatches}\ndiffusion_batch_size: ${rfd3Config.diffusionBatchSize}\n\n总生成数: ${rfd3Config.nBatches * rfd3Config.diffusionBatchSize} 个`)
+            alert(`目标实体: ${rfd3Config.targetEntityType} / ${rfd3Config.targetStructure || '(未填)'}\n热点: ${rfd3Config.hotspots || '(未填)'}\n条件原子: ${rfd3Config.conditionAtoms || '(未填)'}\n长度: ${rfd3Config.lengthMin}-${rfd3Config.lengthMax}\nn_batches: ${rfd3Config.nBatches}\ndiffusion_batch_size: ${rfd3Config.diffusionBatchSize}\n\n总生成数: ${rfd3Config.nBatches * rfd3Config.diffusionBatchSize} 个`)
           }} disabled={!rfd3Config.targetStructure} className={`px-5 py-2 rounded-lg text-white text-sm font-medium transition-all ${!rfd3Config.targetStructure ? 'bg-gray-300 cursor-not-allowed' : 'bg-primary-600 hover:bg-primary-700 shadow-sm'}`}>
             验证配置
           </button>

@@ -62,10 +62,12 @@ def test_experiment_archive_writes_standard_artifacts(tmp_path):
             "candidate_id": "design_1",
             "design_name": "candidate_001",
             "sequence": "ACDE",
+            "sequence_length": "4",
             "plddt": "91.2",
             "rmsd": "1.1",
             "ranking_score": "0.87",
             "passed_validation": "true",
+            "has_pdb": "true",
             "pdb_file": "structures/candidate_001.pdb",
             "created_at": "2026-05-12T12:00:00",
         }

@@ -32,6 +32,7 @@ const mockRunDeNovoRFD3 = vi.fn()
 const mockRunMPNN = vi.fn()
 const mockRunRF3 = vi.fn()
 const mockGetExperiments = vi.fn()
+const mockGetExperiment = vi.fn()
 
 vi.mock('@/api', async () => {
   const actual = await vi.importActual<typeof import('@/api')>('@/api')
@@ -44,6 +45,7 @@ vi.mock('@/api', async () => {
     runMPNN: (...args: unknown[]) => mockRunMPNN(...args),
     runRF3: (...args: unknown[]) => mockRunRF3(...args),
     getExperiments: (...args: unknown[]) => mockGetExperiments(...args),
+    getExperiment: (...args: unknown[]) => mockGetExperiment(...args),
   }
 })
 
@@ -70,6 +72,7 @@ beforeEach(() => {
   mockRunMPNN.mockReset()
   mockRunRF3.mockReset()
   mockGetExperiments.mockResolvedValue({ total: 0, items: [] })
+  mockGetExperiment.mockReset()
 })
 
 describe('system acceptance page flows', () => {
@@ -235,6 +238,23 @@ describe('system acceptance page flows', () => {
     expect(screen.getByText('1.35 Å')).toBeInTheDocument()
   })
 
+  it('switches between de novo and protein-to-protein design modes', async () => {
+    useAppStore.getState().setAuth('researcher-token', researcher)
+
+    const user = userEvent.setup()
+    render(<App />)
+
+    expect(screen.getByText('目标结构')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'de novo protein' }))
+    expect(screen.getByRole('heading', { name: 'De Novo Protein Design' })).toBeInTheDocument()
+    expect(screen.queryByText('目标结构')).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'protein to protein' }))
+    expect(screen.getByText('目标结构')).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'De Novo Protein Design' })).not.toBeInTheDocument()
+  })
+
   it('sends the clicked protein-to-protein RFD3 design into MPNN', async () => {
     useAppStore.getState().setAuth('researcher-token', researcher)
     useAppStore.getState().setPdbContent('TARGET_PDB')
@@ -280,7 +300,7 @@ describe('system acceptance page flows', () => {
     const user = userEvent.setup()
     render(<App />)
 
-    await user.click(screen.getByRole('button', { name: 'RFD3 骨架生成' }))
+    await user.click(screen.getByRole('button', { name: '新建任务' }))
     await user.click(screen.getByRole('button', { name: '开始生成' }))
     await user.click(await screen.findByRole('button', { name: /① RFD3 骨架生成/ }))
     await screen.findByText('rfd3_2')
@@ -323,9 +343,53 @@ describe('system acceptance page flows', () => {
     await user.click(screen.getByRole('button', { name: /实验记录/ }))
 
     const table = await screen.findByRole('table')
+    expect(within(table).getByText('任务类型')).toBeInTheDocument()
+    expect(within(table).getByText('任务ID')).toBeInTheDocument()
+    expect(within(table).getByText('任务名称')).toBeInTheDocument()
+    expect(within(table).getByText('结束时间')).toBeInTheDocument()
     expect(within(table).getByText('验收实验记录')).toBeInTheDocument()
     expect(within(table).getByText('已完成')).toBeInTheDocument()
-    expect(within(table).getByText('A/1-2')).toBeInTheDocument()
+    expect(within(table).getByText('protein')).toBeInTheDocument()
+    expect(within(table).getByText('exp-1')).toBeInTheDocument()
+  })
+
+  it('renders unavailable RF3 RMSD as not calculated in experiment detail', async () => {
+    useAppStore.getState().setAuth('researcher-token', researcher)
+    mockGetExperiment.mockResolvedValue({
+      id: 'exp-rmsd',
+      name: 'RMSD 缺失实验',
+      status: 'completed',
+      created_at: '2026-05-10T12:00:00',
+      updated_at: '2026-05-10T12:10:00',
+      input_pdb: 'ATOM',
+      target: 'A/1-2',
+      hotspots: [{ chain: 'A', residue: 1 }],
+      rfd3_config: { task_type: 'protein', protein_chain: 'A/1-2' },
+      mpnn_config: null,
+      rf3_config: null,
+      rfd3_results: null,
+      mpnn_results: null,
+      rf3_results: {
+        success: true,
+        avg_plddt: 82.1,
+        rmsd: -1,
+        rmsd_interpretation: 'N/A',
+        passed: false,
+        summary: { ptm: 0.6, iptm: 0.5 },
+      },
+      duration_seconds: 10,
+      gpu_info: null,
+      user_id: 'u-researcher',
+      designs: [],
+    })
+
+    useAppStore.getState().setCurrentPage('experiment_exp-rmsd')
+    render(<App />)
+
+    expect(await screen.findByText('RMSD 缺失实验')).toBeInTheDocument()
+    expect(screen.getByText('未计算')).toBeInTheDocument()
+    expect(screen.getByText(/缺少参考结构或 CA 原子匹配失败/)).toBeInTheDocument()
+    expect(screen.queryByText('-1.00 Å')).not.toBeInTheDocument()
   })
 
   it('documents roles and ProteinMPNN visualization limits in help page', async () => {

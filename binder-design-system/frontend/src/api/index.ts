@@ -58,6 +58,7 @@ export interface RFD3Design {
 
 export interface RFD3Response {
   success: boolean
+  experiment_id?: string
   designs: RFD3Design[]
   batches: Array<{ batch_idx: number; num_structures: number; designs: RFD3Design[] }>
   num_batches: number
@@ -117,6 +118,9 @@ export const runRFD3 = async (params: {
   diffusion_batch_size?: number
   n_batches?: number
   experiment_id?: string
+  task_name?: string
+  target_filename?: string
+  chain_type?: string
 }): Promise<RFD3Response> => {
   const res = await api.post('/run-rfd3', params)
   return res.data
@@ -232,6 +236,7 @@ export interface ExperimentItem {
   gpu_info: string | null
   user_id: string | null
   num_designs: number
+  rfd3_config?: any
 }
 
 export interface ExperimentDetail extends ExperimentItem {

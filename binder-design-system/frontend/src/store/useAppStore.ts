@@ -50,6 +50,7 @@ interface AppState {
   predictedHotspots: HotspotResidue[];
   setPredictedHotspots: (hotspots: HotspotResidue[]) => void;
   removePredictedHotspot: (chain: string, residue: number) => void;
+  removePredictedHotspotsInRange: (chain: string, startResSeq: number, endResSeq: number) => void;
 
   focusedResidue: { chain: string; resSeq: number } | null;
   setFocusedResidue: (residue: { chain: string; resSeq: number } | null) => void;
@@ -213,6 +214,14 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   removePredictedHotspot: (chain, residue) => {
     const predictedHotspots = get().predictedHotspots.filter(h => !(h.chain === chain && h.residue === residue))
+    set({ predictedHotspots })
+  },
+  removePredictedHotspotsInRange: (chain, startResSeq, endResSeq) => {
+    const min = Math.min(startResSeq, endResSeq)
+    const max = Math.max(startResSeq, endResSeq)
+    const predictedHotspots = get().predictedHotspots.filter(
+      h => h.chain !== chain || h.residue < min || h.residue > max,
+    )
     set({ predictedHotspots })
   },
 

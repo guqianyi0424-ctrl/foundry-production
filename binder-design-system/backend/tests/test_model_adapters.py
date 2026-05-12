@@ -83,3 +83,31 @@ def test_hotspot_adapter_reuses_predictor_instance():
     assert second.success is True
     assert len(created) == 1
     assert created[0].calls == [("ATOM 1", 3), ("ATOM 2", 4)]
+
+
+def test_sanitize_model_result_strips_nested_pdb_payloads():
+    from adapters.model_adapters import sanitize_model_result
+
+    result = sanitize_model_result(
+        {
+            "success": True,
+            "first_backbone_pdb": "ATOM FIRST",
+            "designs": [
+                {"name": "d0", "pdb_content": "ATOM D0", "plddt": 90.0},
+                {"name": "d1", "pdb_content": "ATOM D1", "plddt": 80.0},
+            ],
+            "batches": [
+                {
+                    "batch_idx": 0,
+                    "designs": [
+                        {"name": "d0", "pdb_content": "ATOM D0", "plddt": 90.0},
+                    ],
+                }
+            ],
+        }
+    )
+
+    assert result["first_backbone_pdb"] == "<omitted>"
+    assert result["designs"][0]["pdb_content"] == "<omitted>"
+    assert result["batches"][0]["designs"][0]["pdb_content"] == "<omitted>"
+    assert result["designs"][0]["plddt"] == 90.0

@@ -180,6 +180,7 @@ async def list_experiments(
             "gpu_info": exp.gpu_info,
             "user_id": exp.user_id,
             "num_designs": len(exp.designs) if exp.designs else 0,
+            "rfd3_config": exp.rfd3_config,
         }
         result.append(exp_dict)
 

@@ -16,6 +16,16 @@ def test_settings_exposes_project_paths():
     assert isinstance(settings.paths.output_root, Path)
 
 
+def test_default_hotspot_weight_directory_is_final_neg3(monkeypatch):
+    monkeypatch.delenv("HOTSPOT_DL_DIR", raising=False)
+
+    from utils.hotspot_predictor import HotspotPredictor
+
+    predictor = HotspotPredictor(top_k=3)
+
+    assert predictor.models_dir == predictor.hotspot_dl_path / "models" / "final_neg3"
+
+
 def test_runtime_settings_read_environment(monkeypatch):
     monkeypatch.setenv("DEEPBINDER_FOUNDRY_MODE", "source")
     monkeypatch.setenv("DEEPBINDER_ALLOW_MOCK", "0")

@@ -31,7 +31,7 @@ export function SilentStructureViewer({
 <head>
   <script>
     var silent=function(){};
-    console.log=silent;console.warn=silent;console.info=silent;console.debug=silent;
+    console.log=silent;console.warn=silent;console.info=silent;console.debug=silent;console.error=silent;
   </script>
   <script src="https://cdn.jsdelivr.net/npm/molstar@4.4.0/build/viewer/molstar.js"></script>
   <style>

@@ -12,6 +12,11 @@ const statusConfig: Record<string, { label: string; color: string; icon: any }> 
   failed: { label: '失败', color: 'bg-red-100 text-red-700', icon: XCircle },
 }
 
+const taskTypeOf = (exp: ExperimentItem) => {
+  const cfg = (exp as any).rfd3_config || {}
+  return cfg.task_type === 'de_novo' ? 'de novo' : 'protein'
+}
+
 export function ExperimentsPage() {
   const setCurrentPage = useAppStore((s) => s.setCurrentPage)
   const [experiments, setExperiments] = useState<ExperimentItem[]>([])
@@ -164,12 +169,13 @@ export function ExperimentsPage() {
                     else setSelectedIds(new Set(experiments.map(e => e.id)))
                   }} checked={selectedIds.size === experiments.length && experiments.length > 0} />
                 </th>
-                <th className="text-left px-4 py-3 font-medium text-gray-600">实验名称</th>
+                <th className="text-left px-4 py-3 font-medium text-gray-600">任务类型</th>
+                <th className="text-left px-4 py-3 font-medium text-gray-600">任务ID</th>
+                <th className="text-left px-4 py-3 font-medium text-gray-600">任务名称</th>
                 <th className="text-left px-4 py-3 font-medium text-gray-600">状态</th>
-                <th className="text-left px-4 py-3 font-medium text-gray-600">靶点</th>
-                <th className="text-left px-4 py-3 font-medium text-gray-600">设计数</th>
-                <th className="text-left px-4 py-3 font-medium text-gray-600">耗时</th>
                 <th className="text-left px-4 py-3 font-medium text-gray-600">创建时间</th>
+                <th className="text-left px-4 py-3 font-medium text-gray-600">结束时间</th>
+                <th className="text-left px-4 py-3 font-medium text-gray-600">耗时</th>
                 <th className="text-left px-4 py-3 font-medium text-gray-600">操作</th>
               </tr>
             </thead>
@@ -182,6 +188,8 @@ export function ExperimentsPage() {
                     <td className="px-4 py-3">
                       <input type="checkbox" className="rounded" checked={selectedIds.has(exp.id)} onChange={() => toggleSelect(exp.id)} />
                     </td>
+                    <td className="px-4 py-3 text-gray-600">{taskTypeOf(exp)}</td>
+                    <td className="px-4 py-3 text-xs font-mono text-gray-500">{exp.id}</td>
                     <td className="px-4 py-3">
                       <button
                         onClick={() => setCurrentPage(`experiment_${exp.id}`)}
@@ -196,14 +204,25 @@ export function ExperimentsPage() {
                         {sc.label}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-gray-600">{exp.target || '-'}</td>
-                    <td className="px-4 py-3 text-gray-600">{exp.num_designs}</td>
+                    <td className="px-4 py-3 text-gray-500 text-xs">{formatDate(exp.created_at)}</td>
+                    <td className="px-4 py-3 text-gray-500 text-xs">{formatDate(exp.updated_at)}</td>
                     <td className="px-4 py-3 text-gray-600">
                       {exp.duration_seconds ? `${exp.duration_seconds.toFixed(1)}s` : '-'}
                     </td>
-                    <td className="px-4 py-3 text-gray-500 text-xs">{formatDate(exp.created_at)}</td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => setCurrentPage(`experiment_${exp.id}`)}
+                          className="px-2 py-1 text-xs text-blue-600 hover:bg-blue-50 rounded transition-colors"
+                        >
+                          参数
+                        </button>
+                        <button
+                          onClick={() => setCurrentPage(`experiment_${exp.id}`)}
+                          className="px-2 py-1 text-xs text-purple-600 hover:bg-purple-50 rounded transition-colors"
+                        >
+                          结果
+                        </button>
                         <button
                           onClick={() => handleExport(exp.id, exp.name)}
                           className="p-1.5 text-gray-400 hover:text-primary-600 hover:bg-primary-50 rounded transition-colors"
