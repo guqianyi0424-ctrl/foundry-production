@@ -8,6 +8,7 @@ from services.design_pipeline import DesignPipelineService
 from services.experiment_archive import ExperimentArchiveService
 from services.experiments import ExperimentService
 from services.hotspot_prediction import HotspotPredictionService
+from services.pipeline_scheduler import PipelineTaskScheduler
 from config.settings import get_settings
 
 
@@ -32,9 +33,13 @@ def get_design_services() -> DesignServices:
     rfd3 = RFD3Adapter()
     mpnn = MPNNAdapter()
     rf3 = RF3Adapter()
+    scheduler = PipelineTaskScheduler(
+        mpnn_slots=settings.runtime.pipeline_mpnn_slots,
+        rf3_slots=settings.runtime.pipeline_rf3_slots,
+    )
     return DesignServices(
         hotspot_prediction=HotspotPredictionService(HotspotModelAdapter()),
-        pipeline=DesignPipelineService(rfd3, mpnn, rf3, experiment_service),
+        pipeline=DesignPipelineService(rfd3, mpnn, rf3, experiment_service, scheduler=scheduler),
         experiments=experiment_service,
         rfd3=rfd3,
         mpnn=mpnn,

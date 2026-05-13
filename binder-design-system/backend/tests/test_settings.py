@@ -31,6 +31,8 @@ def test_runtime_settings_read_environment(monkeypatch):
     monkeypatch.setenv("DEEPBINDER_ALLOW_MOCK", "0")
     monkeypatch.setenv("DEEPBINDER_FOUNDRY_ENV", "foundry-prod")
     monkeypatch.setenv("DEEPBINDER_MODEL_TIMEOUT_SECONDS", "45")
+    monkeypatch.setenv("DEEPBINDER_PIPELINE_MPNN_SLOTS", "2")
+    monkeypatch.setenv("DEEPBINDER_PIPELINE_RF3_SLOTS", "3")
 
     from config.settings import build_settings
 
@@ -40,3 +42,5 @@ def test_runtime_settings_read_environment(monkeypatch):
     assert settings.runtime.allow_mock is False
     assert settings.runtime.foundry_env == "foundry-prod"
     assert settings.runtime.model_timeout_seconds == 45
+    assert settings.runtime.pipeline_mpnn_slots == 2
+    assert settings.runtime.pipeline_rf3_slots == 3

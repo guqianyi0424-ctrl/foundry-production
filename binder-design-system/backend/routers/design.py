@@ -56,6 +56,14 @@ class PipelineRequest(BaseModel):
     pdb_content: str
     hotspots: list[dict]
     binder_length: int = 80
+    target: Optional[str] = None
+    length_min: int = 40
+    length_max: int = 120
+    diffusion_batch_size: int = 2
+    n_batches: int = 2
+    task_name: Optional[str] = None
+    target_filename: Optional[str] = None
+    chain_type: Optional[str] = None
 
 
 def _save_experiment_step(experiment_id: str, step: str, results: dict, config: dict = None):
@@ -450,6 +458,14 @@ async def run_pipeline(
                 if current_user and not isinstance(current_user, DependsParam)
                 else None
             ),
+            target=req.target,
+            length_min=req.length_min,
+            length_max=req.length_max,
+            diffusion_batch_size=req.diffusion_batch_size,
+            n_batches=req.n_batches,
+            task_name=req.task_name,
+            target_filename=req.target_filename,
+            chain_type=req.chain_type,
         )
         duration = time.time() - start
         record_task(

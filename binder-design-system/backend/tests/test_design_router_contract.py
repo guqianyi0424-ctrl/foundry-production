@@ -2,6 +2,7 @@ import asyncio
 
 from database import SessionLocal, Experiment
 from schemas.domain import AdapterResult, PipelineResult
+from services.design_pipeline import DesignPipelineService
 
 
 class FakeHotspotService:
@@ -30,7 +31,39 @@ class FakeHotspotService:
 
 
 class FakePipelineService:
-    def run_pipeline(self, pdb_content, hotspots, binder_length, job_id, user_id=None):
+    last_call = None
+
+    def run_pipeline(
+        self,
+        pdb_content,
+        hotspots,
+        binder_length,
+        job_id,
+        user_id=None,
+        target=None,
+        length_min=40,
+        length_max=120,
+        diffusion_batch_size=2,
+        n_batches=2,
+        task_name=None,
+        target_filename=None,
+        chain_type=None,
+    ):
+        self.last_call = {
+            "pdb_content": pdb_content,
+            "hotspots": hotspots,
+            "binder_length": binder_length,
+            "job_id": job_id,
+            "user_id": user_id,
+            "target": target,
+            "length_min": length_min,
+            "length_max": length_max,
+            "diffusion_batch_size": diffusion_batch_size,
+            "n_batches": n_batches,
+            "task_name": task_name,
+            "target_filename": target_filename,
+            "chain_type": chain_type,
+        }
         return PipelineResult(
             job_id=job_id,
             experiment_id="exp_1",
@@ -164,6 +197,7 @@ def test_predict_hotspot_contract(monkeypatch):
 
 def test_run_pipeline_contract(monkeypatch):
     design_router = patch_services(monkeypatch)
+    FakeServices.pipeline.last_call = None
 
     data = asyncio.run(
         design_router.run_pipeline(
@@ -171,6 +205,14 @@ def test_run_pipeline_contract(monkeypatch):
                 pdb_content="ATOM",
                 hotspots=[{"chain": "A", "residue": 10}],
                 binder_length=80,
+                target="A/1-100",
+                length_min=50,
+                length_max=140,
+                diffusion_batch_size=3,
+                n_batches=4,
+                task_name="Pipeline Protein",
+                target_filename="target.pdb",
+                chain_type="proteinChain",
             )
         )
     )
@@ -180,6 +222,178 @@ def test_run_pipeline_contract(monkeypatch):
     assert data["rfd3_results"]["success"] is True
     assert data["mpnn_results"]["success"] is True
     assert data["rf3_results"]["success"] is True
+    assert FakeServices.pipeline.last_call is not None
+    assert FakeServices.pipeline.last_call["target"] == "A/1-100"
+    assert FakeServices.pipeline.last_call["length_min"] == 50
+    assert FakeServices.pipeline.last_call["length_max"] == 140
+    assert FakeServices.pipeline.last_call["diffusion_batch_size"] == 3
+    assert FakeServices.pipeline.last_call["n_batches"] == 4
+    assert FakeServices.pipeline.last_call["task_name"] == "Pipeline Protein"
+    assert FakeServices.pipeline.last_call["target_filename"] == "target.pdb"
+    assert FakeServices.pipeline.last_call["chain_type"] == "proteinChain"
+
+
+class RecordingExperimentService:
+    def __init__(self):
+        self.created = None
+        self.steps = []
+        self.designs = []
+        self.finished = None
+        self.archived = None
+
+    def create_pipeline_experiment(self, **kwargs):
+        self.created = kwargs
+        return "exp_pipeline"
+
+    def save_step(self, experiment_id, step, results, config=None):
+        self.steps.append(
+            {
+                "experiment_id": experiment_id,
+                "step": step,
+                "results": results,
+                "config": config,
+            }
+        )
+
+    def save_designs(self, experiment_id, designs):
+        self.designs.append({"experiment_id": experiment_id, "designs": designs})
+
+    def finish(self, experiment_id, status, duration_seconds):
+        self.finished = {
+            "experiment_id": experiment_id,
+            "status": status,
+            "duration_seconds": duration_seconds,
+        }
+
+    def write_archive(self, experiment_id):
+        self.archived = experiment_id
+
+
+class RecordingRFD3Adapter:
+    def __init__(self):
+        self.config = None
+
+    def run(self, config):
+        self.config = config
+        return AdapterResult(
+            success=True,
+            data={
+                "success": True,
+                "designs": [
+                    {
+                        "index": 0,
+                        "name": "rfd3_0",
+                        "pdb_content": "RFD3_PDB",
+                        "plddt": 82.0,
+                    }
+                ],
+                "first_backbone_pdb": "RFD3_PDB",
+            },
+        )
+
+
+class RecordingMPNNAdapter:
+    def __init__(self):
+        self.kwargs = None
+
+    def run(self, **kwargs):
+        self.kwargs = kwargs
+        return AdapterResult(
+            success=True,
+            data={
+                "success": True,
+                "sequences": [
+                    {
+                        "index": 0,
+                        "name": "seq_0",
+                        "sequence": "ACD",
+                        "pdb_content": "MPNN_PDB",
+                        "score": -0.5,
+                    }
+                ],
+                "first_sequence_pdb": "MPNN_PDB",
+            },
+        )
+
+
+class RecordingRF3Adapter:
+    def __init__(self):
+        self.kwargs = None
+
+    def run(self, **kwargs):
+        self.kwargs = kwargs
+        return AdapterResult(
+            success=True,
+            data={
+                "success": True,
+                "predicted_pdb": "RF3_PDB",
+                "summary": {"ranking_score": 0.88},
+                "avg_plddt": 91.0,
+                "rmsd": 1.2,
+                "passed": True,
+            },
+        )
+
+
+def test_pipeline_service_persists_sanitized_steps_and_candidate_designs():
+    experiment_service = RecordingExperimentService()
+    rfd3 = RecordingRFD3Adapter()
+    mpnn = RecordingMPNNAdapter()
+    rf3 = RecordingRF3Adapter()
+    service = DesignPipelineService(rfd3, mpnn, rf3, experiment_service)
+
+    result = service.run_pipeline(
+        pdb_content="TARGET_PDB",
+        hotspots=[{"chain": "A", "residue": 42}],
+        binder_length=80,
+        job_id="job_1",
+        user_id="user_1",
+        target="A/1-100",
+        length_min=50,
+        length_max=140,
+        diffusion_batch_size=3,
+        n_batches=4,
+        task_name="Full pipeline",
+        target_filename="target.pdb",
+        chain_type="proteinChain",
+    )
+
+    assert result.status == "completed"
+    assert experiment_service.created["name"] == "Full pipeline"
+    assert experiment_service.created["user_id"] == "user_1"
+    assert experiment_service.created["rfd3_config"]["target"] == "A/1-100"
+    assert rfd3.config.target == "A/1-100"
+    assert rfd3.config.hotspots == ["A42"]
+    assert rfd3.config.length_min == 50
+    assert rfd3.config.length_max == 140
+    assert rfd3.config.diffusion_batch_size == 3
+    assert rfd3.config.n_batches == 4
+    assert mpnn.kwargs["backbone_pdb_content"] == "RFD3_PDB"
+    assert mpnn.kwargs["fixed_chains"] == ["A"]
+    assert rf3.kwargs["mpnn_pdb_content"] == "MPNN_PDB"
+    assert rf3.kwargs["rfd3_pdb_content"] == "RFD3_PDB"
+    assert [step["step"] for step in experiment_service.steps] == ["rfd3", "mpnn", "rf3"]
+    assert experiment_service.steps[0]["results"]["first_backbone_pdb"] == "<omitted>"
+    assert experiment_service.steps[1]["results"]["first_sequence_pdb"] == "<omitted>"
+    assert experiment_service.steps[2]["results"]["tasks"][0]["result"]["predicted_pdb"] == "<omitted>"
+    assert experiment_service.steps[2]["results"]["summary"]["validated_count"] == 1
+    assert experiment_service.designs[0]["experiment_id"] == "exp_pipeline"
+    assert experiment_service.designs[0]["designs"] == [
+        {
+            "name": "rfd3_0/seq_0",
+            "sequence": "ACD",
+            "pdb_content": "MPNN_PDB",
+            "plddt": 91.0,
+            "rmsd": 1.2,
+            "ranking_score": 0.88,
+            "passed_validation": True,
+            "plddt_source": "rf3",
+            "ranking_source": "rf3",
+            "validation_status": "validated",
+        }
+    ]
+    assert experiment_service.finished["status"] == "completed"
+    assert experiment_service.archived == "exp_pipeline"
 
 
 def test_run_rfd3_accepts_denovo_request_without_target(monkeypatch):

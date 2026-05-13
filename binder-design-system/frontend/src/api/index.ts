@@ -99,9 +99,10 @@ export interface RunPipelineResponse {
   job_id: string
   experiment_id: string
   status: string
+  failed_step?: string | null
   rfd3_results?: RFD3Response
   mpnn_results?: MPNNResponse
-  rf3_results?: any
+  rf3_results?: RF3Response
 }
 
 export const uploadPdb = async (file: File): Promise<UploadResponse> => {
@@ -203,8 +204,16 @@ export const runMPNN = async (params: {
 
 export const runPipeline = async (params: {
   pdb_content: string
+  target?: string
   hotspots: Array<{ chain: string; residue: number }>
   binder_length: number
+  length_min?: number
+  length_max?: number
+  diffusion_batch_size?: number
+  n_batches?: number
+  task_name?: string
+  target_filename?: string
+  chain_type?: string
 }): Promise<RunPipelineResponse> => {
   const res = await api.post('/run-pipeline', params)
   return res.data

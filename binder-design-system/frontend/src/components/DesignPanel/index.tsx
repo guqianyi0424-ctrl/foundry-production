@@ -1,5 +1,6 @@
 import { useAppStore } from '@/store/useAppStore'
 import { Dna } from 'lucide-react'
+import { useEffect } from 'react'
 
 interface DesignPanelProps {
   onOpenRFD3?: () => void
@@ -17,9 +18,10 @@ export function DesignPanel({ onOpenRFD3, isRFD3Running }: DesignPanelProps) {
     setRfd3Config({ targetStructure: val })
   }
 
-  if (selectedRange && !rfd3Config.targetStructure) {
+  useEffect(() => {
+    if (!selectedRange || rfd3Config.targetStructure) return
     syncTargetFromRange()
-  }
+  }, [rfd3Config.targetStructure, selectedRange])
 
   return (
     <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-4">

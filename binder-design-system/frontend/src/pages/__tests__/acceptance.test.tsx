@@ -31,6 +31,7 @@ const mockRunRFD3 = vi.fn()
 const mockRunDeNovoRFD3 = vi.fn()
 const mockRunMPNN = vi.fn()
 const mockRunRF3 = vi.fn()
+const mockRunPipeline = vi.fn()
 const mockGetExperiments = vi.fn()
 const mockGetExperiment = vi.fn()
 const mockGetUsers = vi.fn()
@@ -45,6 +46,7 @@ vi.mock('@/api', async () => {
     runDeNovoRFD3: (...args: unknown[]) => mockRunDeNovoRFD3(...args),
     runMPNN: (...args: unknown[]) => mockRunMPNN(...args),
     runRF3: (...args: unknown[]) => mockRunRF3(...args),
+    runPipeline: (...args: unknown[]) => mockRunPipeline(...args),
     getExperiments: (...args: unknown[]) => mockGetExperiments(...args),
     getExperiment: (...args: unknown[]) => mockGetExperiment(...args),
     getUsers: (...args: unknown[]) => mockGetUsers(...args),
@@ -73,6 +75,7 @@ beforeEach(() => {
   mockRunDeNovoRFD3.mockReset()
   mockRunMPNN.mockReset()
   mockRunRF3.mockReset()
+  mockRunPipeline.mockReset()
   mockGetExperiments.mockResolvedValue({ total: 0, items: [] })
   mockGetExperiment.mockReset()
   mockGetUsers.mockResolvedValue({ users: [] })
@@ -390,46 +393,73 @@ describe('system acceptance page flows', () => {
     expect(screen.queryByRole('heading', { name: 'De Novo Protein Design' })).not.toBeInTheDocument()
   })
 
-  it('sends the clicked protein-to-protein RFD3 design into MPNN', async () => {
+  it('runs the complete protein-to-protein pipeline from the primary generate action', async () => {
     useAppStore.getState().setAuth('researcher-token', researcher)
     useAppStore.getState().setPdbContent('TARGET_PDB')
     useAppStore.getState().setRfd3Config({
       targetStructure: 'A/1-100',
       hotspots: 'A/42',
     })
-    mockRunRFD3.mockResolvedValue({
-      success: true,
-      designs: [
-        { index: 0, batch: 0, design_in_batch: 0, name: 'rfd3_0', pdb_path: '', pdb_content: 'RFD3_0', plddt: 80 },
-        { index: 1, batch: 0, design_in_batch: 1, name: 'rfd3_1', pdb_path: '', pdb_content: 'RFD3_1', plddt: 81 },
-        { index: 2, batch: 0, design_in_batch: 2, name: 'rfd3_2', pdb_path: '', pdb_content: 'RFD3_2', plddt: 82 },
-        { index: 3, batch: 0, design_in_batch: 3, name: 'rfd3_3', pdb_path: '', pdb_content: 'RFD3_3', plddt: 83 },
-      ],
-      batches: [
-        {
-          batch_idx: 0,
-          num_structures: 4,
-          designs: [
-            { index: 0, batch: 0, design_in_batch: 0, name: 'rfd3_0', pdb_path: '', pdb_content: 'RFD3_0', plddt: 80 },
-            { index: 1, batch: 0, design_in_batch: 1, name: 'rfd3_1', pdb_path: '', pdb_content: 'RFD3_1', plddt: 81 },
-            { index: 2, batch: 0, design_in_batch: 2, name: 'rfd3_2', pdb_path: '', pdb_content: 'RFD3_2', plddt: 82 },
-            { index: 3, batch: 0, design_in_batch: 3, name: 'rfd3_3', pdb_path: '', pdb_content: 'RFD3_3', plddt: 83 },
-          ],
+    mockRunPipeline.mockResolvedValue({
+      job_id: 'job-pipeline',
+      experiment_id: 'exp-pipeline',
+      status: 'completed',
+      rfd3_results: {
+        success: true,
+        designs: [
+          { index: 0, batch: 0, design_in_batch: 0, name: 'rfd3_0', pdb_path: '', pdb_content: 'RFD3_0', plddt: 80 },
+          { index: 1, batch: 0, design_in_batch: 1, name: 'rfd3_1', pdb_path: '', pdb_content: 'RFD3_1', plddt: 81 },
+          { index: 2, batch: 0, design_in_batch: 2, name: 'rfd3_2', pdb_path: '', pdb_content: 'RFD3_2', plddt: 82 },
+        ],
+        batches: [
+          {
+            batch_idx: 0,
+            num_structures: 3,
+            designs: [
+              { index: 0, batch: 0, design_in_batch: 0, name: 'rfd3_0', pdb_path: '', pdb_content: 'RFD3_0', plddt: 80 },
+              { index: 1, batch: 0, design_in_batch: 1, name: 'rfd3_1', pdb_path: '', pdb_content: 'RFD3_1', plddt: 81 },
+              { index: 2, batch: 0, design_in_batch: 2, name: 'rfd3_2', pdb_path: '', pdb_content: 'RFD3_2', plddt: 82 },
+            ],
+          },
+        ],
+        num_batches: 1,
+        num_designs: 3,
+        first_backbone_pdb: 'RFD3_0',
+        output_dir: '',
+      },
+      mpnn_results: {
+        success: true,
+        sequences: [
+          { index: 0, name: 'seq_0', sequence: 'ACDEFGHIK', pdb_path: '', pdb_content: 'MPNN_PDB', score: -0.3 },
+        ],
+        num_sequences: 1,
+        first_sequence_pdb: 'MPNN_PDB',
+        output_dir: '',
+      },
+      rf3_results: {
+        success: true,
+        predicted_pdb: 'RF3_PDB',
+        predicted_pdb_path: '',
+        num_models: 1,
+        summary: {
+          chain_ptm: [0.8],
+          overall_plddt: 91.2,
+          overall_pde: 0.2,
+          overall_pae: 1.3,
+          ptm: 0.81,
+          iptm: 0.78,
+          has_clash: false,
+          ranking_score: 0.85,
         },
-      ],
-      num_batches: 1,
-      num_designs: 4,
-      first_backbone_pdb: 'RFD3_0',
-      output_dir: '',
-    })
-    mockRunMPNN.mockResolvedValue({
-      success: true,
-      sequences: [
-        { index: 0, name: 'seq_0', sequence: 'ACDEFGHIK', pdb_path: '', pdb_content: 'MPNN_FOR_RFD3_1', score: -0.3 },
-      ],
-      num_sequences: 1,
-      first_sequence_pdb: 'MPNN_FOR_RFD3_1',
-      output_dir: '',
+        pae: null,
+        plddt: [91.2],
+        avg_plddt: 91.2,
+        rmsd: 1.35,
+        rmsd_interpretation: 'Excellent',
+        per_res_rmsd: [1.0],
+        passed: true,
+        output_dir: '',
+      },
     })
 
     const user = userEvent.setup()
@@ -438,63 +468,162 @@ describe('system acceptance page flows', () => {
     await user.click(screen.getByRole('button', { name: '新建任务' }))
     await user.click(screen.getByRole('button', { name: '开始生成' }))
     await user.click(await screen.findByRole('button', { name: /① RFD3 骨架生成/ }))
-    await screen.findByText('rfd3_1')
+    await screen.findByText('rfd3_0')
+    expect(mockRunPipeline).toHaveBeenCalledWith(expect.objectContaining({
+      pdb_content: 'TARGET_PDB',
+      target: 'A/1-100',
+      hotspots: [{ chain: 'A', residue: 42 }],
+      binder_length: 80,
+      length_min: 40,
+      length_max: 120,
+      diffusion_batch_size: 2,
+      n_batches: 2,
+      task_name: expect.stringMatching(/^Pipeline_/),
+      chain_type: 'proteinChain',
+    }))
+    expect(mockRunRFD3).not.toHaveBeenCalled()
+    expect(mockRunMPNN).not.toHaveBeenCalled()
+    expect(mockRunRF3).not.toHaveBeenCalled()
     expect(screen.queryByText('rfd3_2')).not.toBeInTheDocument()
-
-    await user.click(screen.getAllByRole('button', { name: /送入MPNN/ })[1])
-
-    await screen.findByText('Sequence 1')
-    expect(mockRunMPNN).toHaveBeenCalledWith({
-      backbone_pdb_content: 'RFD3_1',
-      batch_size: 10,
-      fixed_chains: ['A'],
-    })
-    expect(screen.queryAllByRole('button', { name: /送入MPNN/ })).toHaveLength(0)
+    await user.click(screen.getByRole('button', { name: /② MPNN 序列设计/ }))
+    expect(await screen.findByText('Sequence 1')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: /③ RF3 结构验证/ }))
+    expect(await screen.findByText('验证通过 ✅')).toBeInTheDocument()
   })
 
-  it('shows only two RFD3 preview designs and sends formal MPNN/RF3 experiment calls', async () => {
+  it('shows only two RFD3 preview designs after backend pipeline completion', async () => {
     useAppStore.getState().setAuth('researcher-token', researcher)
     useAppStore.getState().setPdbContent('TARGET_PDB')
     useAppStore.getState().setRfd3Config({
       targetStructure: 'A/1-100',
       hotspots: 'A/42',
     })
-    mockRunRFD3.mockResolvedValue({
-      success: true,
+    mockRunPipeline.mockResolvedValue({
+      job_id: 'job-preview',
       experiment_id: 'exp-preview',
-      designs: [
-        { index: 0, batch: 0, design_in_batch: 0, name: 'rfd3_0', pdb_path: '', pdb_content: 'RFD3_0', plddt: 80 },
-        { index: 1, batch: 0, design_in_batch: 1, name: 'rfd3_1', pdb_path: '', pdb_content: 'RFD3_1', plddt: 81 },
-        { index: 2, batch: 0, design_in_batch: 2, name: 'rfd3_2', pdb_path: '', pdb_content: 'RFD3_2', plddt: 82 },
-      ],
-      batches: [
-        {
-          batch_idx: 0,
-          num_structures: 3,
-          designs: [
-            { index: 0, batch: 0, design_in_batch: 0, name: 'rfd3_0', pdb_path: '', pdb_content: 'RFD3_0', plddt: 80 },
-            { index: 1, batch: 0, design_in_batch: 1, name: 'rfd3_1', pdb_path: '', pdb_content: 'RFD3_1', plddt: 81 },
-            { index: 2, batch: 0, design_in_batch: 2, name: 'rfd3_2', pdb_path: '', pdb_content: 'RFD3_2', plddt: 82 },
-          ],
+      status: 'completed',
+      rfd3_results: {
+        success: true,
+        designs: [
+          { index: 0, batch: 0, design_in_batch: 0, name: 'rfd3_0', pdb_path: '', pdb_content: 'RFD3_0', plddt: 80 },
+          { index: 1, batch: 0, design_in_batch: 1, name: 'rfd3_1', pdb_path: '', pdb_content: 'RFD3_1', plddt: 81 },
+          { index: 2, batch: 0, design_in_batch: 2, name: 'rfd3_2', pdb_path: '', pdb_content: 'RFD3_2', plddt: 82 },
+        ],
+        batches: [
+          {
+            batch_idx: 0,
+            num_structures: 3,
+            designs: [
+              { index: 0, batch: 0, design_in_batch: 0, name: 'rfd3_0', pdb_path: '', pdb_content: 'RFD3_0', plddt: 80 },
+              { index: 1, batch: 0, design_in_batch: 1, name: 'rfd3_1', pdb_path: '', pdb_content: 'RFD3_1', plddt: 81 },
+              { index: 2, batch: 0, design_in_batch: 2, name: 'rfd3_2', pdb_path: '', pdb_content: 'RFD3_2', plddt: 82 },
+            ],
+          },
+        ],
+        num_batches: 1,
+        num_designs: 3,
+        first_backbone_pdb: 'RFD3_0',
+        output_dir: '',
+      },
+      mpnn_results: {
+        success: true,
+        sequences: [
+          { index: 0, name: 'seq_0', sequence: 'ACDEFGHIK', pdb_path: '', pdb_content: 'MPNN_PDB', score: -0.3 },
+        ],
+        num_sequences: 1,
+        first_sequence_pdb: 'MPNN_PDB',
+        output_dir: '',
+      },
+      rf3_results: {
+        success: true,
+        predicted_pdb: 'RF3_PDB',
+        predicted_pdb_path: '',
+        num_models: 1,
+        summary: {
+          chain_ptm: [0.8],
+          overall_plddt: 91.2,
+          overall_pde: 0.2,
+          overall_pae: 1.3,
+          ptm: 0.81,
+          iptm: 0.78,
+          has_clash: false,
+          ranking_score: 0.85,
         },
-      ],
-      num_batches: 1,
-      num_designs: 3,
-      first_backbone_pdb: 'RFD3_0',
-      output_dir: '',
+        pae: null,
+        plddt: [91.2],
+        avg_plddt: 91.2,
+        rmsd: 1.35,
+        rmsd_interpretation: 'Excellent',
+        per_res_rmsd: [1.0],
+        passed: true,
+        output_dir: '',
+      },
+    })
+
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(screen.getByRole('button', { name: '新建任务' }))
+    await user.click(screen.getByRole('button', { name: '开始生成' }))
+    await user.click(await screen.findByRole('button', { name: /① RFD3 骨架生成/ }))
+
+    expect(await screen.findByText('rfd3_0')).toBeInTheDocument()
+    expect(screen.getByText('rfd3_1')).toBeInTheDocument()
+    expect(screen.queryByText('rfd3_2')).not.toBeInTheDocument()
+    expect(screen.getByText(/当前仅展示 2 个预览 design/)).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: /② MPNN 序列设计/ }))
+    expect(await screen.findByText('Sequence 1')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: /③ RF3 结构验证/ }))
+    await screen.findByText('验证通过 ✅')
+    expect(mockRunRFD3).not.toHaveBeenCalled()
+    expect(mockRunMPNN).not.toHaveBeenCalled()
+    expect(mockRunRF3).not.toHaveBeenCalled()
+  })
+
+  it('keeps manual protein-to-protein MPNN and RF3 clicks as preview-only process displays', async () => {
+    useAppStore.getState().setAuth('researcher-token', researcher)
+    useAppStore.getState().setPdbContent('TARGET_PDB')
+    useAppStore.getState().setRfd3Config({
+      targetStructure: 'A/1-100',
+      hotspots: 'A/42',
+    })
+    mockRunPipeline.mockResolvedValue({
+      job_id: 'job-preview-only',
+      experiment_id: 'exp-preview-only',
+      status: 'completed',
+      rfd3_results: {
+        success: true,
+        designs: [
+          { index: 0, batch: 0, design_in_batch: 0, name: 'rfd3_0', pdb_path: '', pdb_content: 'RFD3_0', plddt: 80 },
+        ],
+        batches: [
+          {
+            batch_idx: 0,
+            num_structures: 1,
+            designs: [
+              { index: 0, batch: 0, design_in_batch: 0, name: 'rfd3_0', pdb_path: '', pdb_content: 'RFD3_0', plddt: 80 },
+            ],
+          },
+        ],
+        num_batches: 1,
+        num_designs: 1,
+        first_backbone_pdb: 'RFD3_0',
+        output_dir: '',
+      },
     })
     mockRunMPNN.mockResolvedValue({
       success: true,
       sequences: [
-        { index: 0, name: 'seq_0', sequence: 'ACDEFGHIK', pdb_path: '', pdb_content: 'MPNN_PDB', score: -0.3 },
+        { index: 0, name: 'seq_preview', sequence: 'ACDEFGHIK', pdb_path: '', pdb_content: 'MPNN_PREVIEW', score: -0.3 },
       ],
       num_sequences: 1,
-      first_sequence_pdb: 'MPNN_PDB',
+      first_sequence_pdb: 'MPNN_PREVIEW',
       output_dir: '',
     })
     mockRunRF3.mockResolvedValue({
       success: true,
-      predicted_pdb: 'RF3_PDB',
+      predicted_pdb: 'RF3_PREVIEW',
       predicted_pdb_path: '',
       num_models: 1,
       summary: {
@@ -523,73 +652,72 @@ describe('system acceptance page flows', () => {
     await user.click(screen.getByRole('button', { name: '新建任务' }))
     await user.click(screen.getByRole('button', { name: '开始生成' }))
     await user.click(await screen.findByRole('button', { name: /① RFD3 骨架生成/ }))
+    await user.click(await screen.findByRole('button', { name: /送入MPNN/ }))
 
-    expect(screen.getByText('rfd3_0')).toBeInTheDocument()
-    expect(screen.getByText('rfd3_1')).toBeInTheDocument()
-    expect(screen.queryByText('rfd3_2')).not.toBeInTheDocument()
-    expect(screen.getByText(/当前仅展示 2 个预览 design/)).toBeInTheDocument()
-
-    await user.click(screen.getAllByRole('button', { name: /送入MPNN/ })[0])
-    await screen.findByText('Sequence 1')
+    expect(await screen.findByText('Sequence 1')).toBeInTheDocument()
     expect(mockRunMPNN).toHaveBeenCalledWith({
       backbone_pdb_content: 'RFD3_0',
       batch_size: 10,
       fixed_chains: ['A'],
-      experiment_id: 'exp-preview',
+      preview_only: true,
     })
 
     await user.click(screen.getByRole('button', { name: /送入RF3验证/ }))
-    await screen.findByText('验证通过 ✅')
+    expect(await screen.findByText('验证通过 ✅')).toBeInTheDocument()
     expect(mockRunRF3).toHaveBeenCalledWith({
-      mpnn_pdb_content: 'MPNN_PDB',
+      mpnn_pdb_content: 'MPNN_PREVIEW',
       rfd3_pdb_content: 'RFD3_0',
       example_id: 'binder_design',
-      experiment_id: 'exp-preview',
+      preview_only: true,
     })
   })
 
-  it('keeps protein-to-protein RFD3 completion when navigating away during the run', async () => {
+  it('keeps protein-to-protein pipeline completion when navigating away during the run', async () => {
     useAppStore.getState().setAuth('researcher-token', researcher)
     useAppStore.getState().setPdbContent('TARGET_PDB')
     useAppStore.getState().setRfd3Config({
       targetStructure: 'A/1-100',
       hotspots: 'A/42',
     })
-    let resolveRfd3: (value: any) => void = () => {}
-    mockRunRFD3.mockReturnValue(new Promise((resolve) => { resolveRfd3 = resolve }))
+    let resolvePipeline: (value: any) => void = () => {}
+    mockRunPipeline.mockReturnValue(new Promise((resolve) => { resolvePipeline = resolve }))
 
     const user = userEvent.setup()
     render(<App />)
 
     await user.click(screen.getByRole('button', { name: '新建任务' }))
     await user.click(screen.getByRole('button', { name: '开始生成' }))
-    expect(await screen.findByText('RFD3 正在生成骨架结构...')).toBeInTheDocument()
+    expect(await screen.findByText('完整流水线正在运行...')).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: /实验记录/ }))
     await user.click(screen.getByRole('button', { name: /新建设计/ }))
     await user.click(screen.getByRole('button', { name: /① RFD3 骨架生成/ }))
-    expect(await screen.findByText('RFD3 正在生成骨架结构...')).toBeInTheDocument()
+    expect(await screen.findByText('完整流水线正在运行...')).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: /实验记录/ }))
-    resolveRfd3({
-      success: true,
+    resolvePipeline({
+      job_id: 'job-running',
       experiment_id: 'exp-running',
-      designs: [
-        { index: 0, batch: 0, design_in_batch: 0, name: 'rfd3_done', pdb_path: '', pdb_content: 'RFD3_DONE', plddt: 80 },
-      ],
-      batches: [
-        {
-          batch_idx: 0,
-          num_structures: 1,
-          designs: [
-            { index: 0, batch: 0, design_in_batch: 0, name: 'rfd3_done', pdb_path: '', pdb_content: 'RFD3_DONE', plddt: 80 },
-          ],
-        },
-      ],
-      num_batches: 1,
-      num_designs: 1,
-      first_backbone_pdb: 'RFD3_DONE',
-      output_dir: '',
+      status: 'completed',
+      rfd3_results: {
+        success: true,
+        designs: [
+          { index: 0, batch: 0, design_in_batch: 0, name: 'rfd3_done', pdb_path: '', pdb_content: 'RFD3_DONE', plddt: 80 },
+        ],
+        batches: [
+          {
+            batch_idx: 0,
+            num_structures: 1,
+            designs: [
+              { index: 0, batch: 0, design_in_batch: 0, name: 'rfd3_done', pdb_path: '', pdb_content: 'RFD3_DONE', plddt: 80 },
+            ],
+          },
+        ],
+        num_batches: 1,
+        num_designs: 1,
+        first_backbone_pdb: 'RFD3_DONE',
+        output_dir: '',
+      },
     })
 
     await waitFor(() => {
@@ -600,7 +728,7 @@ describe('system acceptance page flows', () => {
     await user.click(screen.getByRole('button', { name: /① RFD3 骨架生成/ }))
 
     expect(await screen.findByText('rfd3_done')).toBeInTheDocument()
-    expect(screen.queryByText('RFD3 正在生成骨架结构...')).not.toBeInTheDocument()
+    expect(screen.queryByText('完整流水线正在运行...')).not.toBeInTheDocument()
   })
 
   it('keeps predicted hotspot markers after selecting target range', async () => {

@@ -52,7 +52,10 @@ def test_hotspot_prediction_marks_sequence_without_committing_configuration():
     assert "handleConfirmPrediction" not in page
     assert "const pendingHotspots = mergeHotspotSelections(predictedHotspots, selectedHotspots)" in page
     assert "const hotspotStr = pendingHotspots.map(h => `${h.chain}/${h.residue}`).join(', ')" in page
-    assert "hotspots: committedHotspotTokens.length > 0 ? committedHotspotTokens : undefined" in page
+    assert "hotspots: committedHotspotItems.map(toPipelineHotspot).filter" in page
+    assert "runPipeline" in store
+    assert "normalizePipelineMpnnResults(result.mpnn_results || null)" in store
+    assert "normalizePipelineRf3Results(result.rf3_results || null)" in store
 
     assert "predictedHotspots: HotspotResidue[]" in store
     assert "setPredictedHotspots: (hotspots: HotspotResidue[]) => void" in store
@@ -61,7 +64,9 @@ def test_hotspot_prediction_marks_sequence_without_committing_configuration():
     assert "set({ selectedRange: null, selectedHotspots: [], hotspotInput: '' })" not in store
     assert "filter(h => h.chain !== range.chain)" not in store
 
-    assert "useEffect" not in design_panel
+    assert "useEffect" in design_panel
+    assert "if (!selectedRange || rfd3Config.targetStructure) return" in design_panel
+    assert design_panel.index("useEffect(() => {") < design_panel.index("syncTargetFromRange()")
     assert "hotspotInput" not in design_panel
 
     assert "seq-hotspot-dot" in sequence_viewer

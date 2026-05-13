@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import type { ChainInfo, HotspotResidue, RFD3Design, MPNNResult, RF3Result } from '@/types'
-import type { RFD3Response, MPNNResponse, RF3Response } from '@/api'
-import { runRFD3 } from '@/api'
+import type { RFD3Response, MPNNResponse, RF3Response, RunPipelineResponse } from '@/api'
+import { runPipeline } from '@/api'
 
 const AUTH_TOKEN_KEY = 'deepbinder_token'
 const AUTH_USER_KEY = 'deepbinder_user'
@@ -98,8 +98,10 @@ interface AppState {
   startProteinRfd3Run: (params: {
     pdb_content: string;
     target?: string;
-    hotspots?: string[];
+    hotspots?: string[] | Array<{ chain: string; residue: number }>;
     binder_length: number;
+    length_min?: number;
+    length_max?: number;
     diffusion_batch_size: number;
     n_batches: number;
     task_name: string;
@@ -144,6 +146,42 @@ const getInitialAuth = () => {
 }
 
 const initialAuth = getInitialAuth()
+
+const normalizePipelineMpnnResults = (result: MPNNResponse | any | null): MPNNResponse | null => {
+  if (!result) return null
+  if (Array.isArray(result.sequences)) {
+    return {
+      ...result,
+      num_sequences: result.num_sequences ?? result.sequences.length,
+    }
+  }
+  const sequences = (result.tasks ?? []).flatMap((task: any) => task.result?.sequences ?? [])
+  return {
+    ...result,
+    sequences,
+    num_sequences: sequences.length,
+    first_sequence_pdb: result.first_sequence_pdb ?? sequences[0]?.pdb_content ?? '',
+  }
+}
+
+const normalizePipelineRf3Results = (result: RF3Response | any | null): RF3Response | null => {
+  if (!result) return null
+  if (typeof result.avg_plddt === 'number') return result
+  const successfulTasks = (result.tasks ?? []).filter((task: any) => task.success && task.result)
+  const best = successfulTasks
+    .map((task: any) => task.result)
+    .sort((a: any, b: any) => {
+      const plddtDiff = (b.avg_plddt ?? Number.NEGATIVE_INFINITY) - (a.avg_plddt ?? Number.NEGATIVE_INFINITY)
+      if (plddtDiff !== 0) return plddtDiff
+      return (a.rmsd ?? Number.POSITIVE_INFINITY) - (b.rmsd ?? Number.POSITIVE_INFINITY)
+    })[0]
+  if (!best) return result
+  return {
+    ...best,
+    tasks: result.tasks,
+    aggregate_summary: result.summary,
+  } as RF3Response
+}
 
 const initialState = {
   currentPage: '新建设计',
@@ -280,16 +318,42 @@ export const useAppStore = create<AppState>((set, get) => ({
         error: null,
       },
       rfd3Results: null,
+      mpnnResults: null,
+      rf3Results: null,
     })
     try {
-      const result = await runRFD3(params)
-      set({ rfd3Results: result })
+      const hotspotPayload = (params.hotspots || []).map((item) => {
+        if (typeof item !== 'string') return item
+        const match = item.match(/^([A-Za-z0-9]+)(-?\d+)$/)
+        return {
+          chain: match?.[1] || item.replace(/[0-9-]/g, ''),
+          residue: Number(match?.[2] || 0),
+        }
+      })
+      const result: RunPipelineResponse = await runPipeline({
+        pdb_content: params.pdb_content,
+        target: params.target,
+        hotspots: hotspotPayload,
+        binder_length: params.binder_length,
+        length_min: params.length_min,
+        length_max: params.length_max,
+        diffusion_batch_size: params.diffusion_batch_size,
+        n_batches: params.n_batches,
+        task_name: params.task_name,
+        target_filename: params.target_filename,
+        chain_type: params.chain_type,
+      })
+      set({
+        rfd3Results: result.rfd3_results ? { ...result.rfd3_results, experiment_id: result.experiment_id } : null,
+        mpnnResults: normalizePipelineMpnnResults(result.mpnn_results || null),
+        rf3Results: normalizePipelineRf3Results(result.rf3_results || null),
+      })
       if (result.experiment_id) {
         set({ currentExperimentId: result.experiment_id })
         get().addJob({
           id: `rfd3_${result.experiment_id}`,
           name: params.task_name,
-          status: 'rfd3_completed',
+          status: result.status,
           time: new Date().toLocaleString('zh-CN'),
         })
       }

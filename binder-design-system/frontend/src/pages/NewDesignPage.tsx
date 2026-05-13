@@ -19,8 +19,15 @@ const splitHotspotConfig = (input: string): string[] =>
     .map(item => item.trim())
     .filter(Boolean)
 
-const toRfd3HotspotToken = (input: string): string =>
-  input.replace('/', '').replace(/\s+/g, '')
+const toPipelineHotspot = (input: string): { chain: string; residue: number } | null => {
+  const trimmed = input.trim()
+  if (!trimmed) return null
+  const slashMatch = trimmed.match(/^([^/]+)\/(-?\d+)$/)
+  if (slashMatch) return { chain: slashMatch[1], residue: Number(slashMatch[2]) }
+  const tokenMatch = trimmed.match(/^([A-Za-z0-9]+?)(-?\d+)$/)
+  if (tokenMatch) return { chain: tokenMatch[1], residue: Number(tokenMatch[2]) }
+  return null
+}
 
 const hotspotChainFromConfig = (input: string): string | null => {
   const trimmed = input.trim()
@@ -225,7 +232,6 @@ export function NewDesignPage() {
   const [activeStep, setActiveStep] = useState(0)
   const pendingHotspots = mergeHotspotSelections(predictedHotspots, selectedHotspots)
   const committedHotspotItems = splitHotspotConfig(rfd3Config.hotspots)
-  const committedHotspotTokens = committedHotspotItems.map(toRfd3HotspotToken)
   const visibleRFD3Batches = getPreviewBatches(rfd3Results)
   const previewDesignCount = visibleRFD3Batches.reduce((total, batch) => total + batch.designs.length, 0)
   const isRFD3Running = proteinRfd3Run.status === 'running'
@@ -284,12 +290,15 @@ export function NewDesignPage() {
     if (!pdbContent) return
     setShowRFD3Modal(false)
     try {
-      const taskName = `RFD3_${targetFile?.name ? targetFile.name.replace(/\.[^.]+$/, '') : 'protein'}_${new Date().toISOString().slice(0, 19).replace(/[-:T]/g, '')}`
+      const timestamp = new Date().toISOString().slice(0, 19).split('-').join('').split(':').join('').split('T').join('')
+      const taskName = `Pipeline_${targetFile?.name ? targetFile.name.replace(/\.[^.]+$/, '') : 'protein'}_${timestamp}`
       const res = await startProteinRfd3Run({
         pdb_content: pdbContent,
         target: rfd3Config.targetStructure || undefined,
-        hotspots: committedHotspotTokens.length > 0 ? committedHotspotTokens : undefined,
+        hotspots: committedHotspotItems.map(toPipelineHotspot).filter((item): item is { chain: string; residue: number } => Boolean(item)),
         binder_length: params.binder_length,
+        length_min: rfd3Config.lengthMin,
+        length_max: rfd3Config.lengthMax,
         diffusion_batch_size: params.diffusion_batch_size,
         n_batches: params.n_batches,
         task_name: taskName,
@@ -297,8 +306,8 @@ export function NewDesignPage() {
         chain_type: 'proteinChain',
       })
       if (res) setActiveStep(1)
-    } catch (err) { alert('RFD3运行失败: ' + String(err)) }
-  }, [pdbContent, rfd3Config, committedHotspotTokens, startProteinRfd3Run, targetFile])
+    } catch (err) { alert('完整流水线运行失败: ' + String(err)) }
+  }, [pdbContent, rfd3Config, committedHotspotItems, startProteinRfd3Run, targetFile])
 
   const handleRunMPNN = useCallback(async (backbonePdb: string, designIdx: number) => {
     const design = rfd3Results?.designs.find(item => item.index === designIdx)
@@ -314,7 +323,7 @@ export function NewDesignPage() {
         backbone_pdb_content: backbonePdb,
         batch_size: 10,
         fixed_chains: targetChains.length > 0 ? targetChains : undefined,
-        ...(rfd3Results?.experiment_id ? { experiment_id: rfd3Results.experiment_id } : {}),
+        preview_only: true,
       })
       setMpnnResults(res)
       setSelectedMPNNSeq(res.sequences?.[0] ?? null)
@@ -331,7 +340,7 @@ export function NewDesignPage() {
         mpnn_pdb_content: mpnnPdb,
         rfd3_pdb_content: rfd3Pdb,
         example_id: 'binder_design',
-        ...(rfd3Results?.experiment_id ? { experiment_id: rfd3Results.experiment_id } : {}),
+        preview_only: true,
       })
       setRf3Results(res)
       setActiveStep(2)
@@ -419,7 +428,7 @@ export function NewDesignPage() {
             {isRFD3Running && (
               <div className="flex items-center justify-center py-12">
                 <div className="animate-spin w-8 h-8 border-3 border-blue-500 border-t-transparent rounded-full mr-3" />
-                <span className="text-gray-600">RFD3 正在生成骨架结构...</span>
+                <span className="text-gray-600">完整流水线正在运行...</span>
               </div>
             )}
             {rfd3Results && !isRFD3Running && (
