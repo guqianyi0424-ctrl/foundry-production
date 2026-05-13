@@ -11,7 +11,6 @@ export function SequenceViewer() {
   const addHotspot = useAppStore((s) => s.addHotspot)
   const removeHotspot = useAppStore((s) => s.removeHotspot)
   const removePredictedHotspot = useAppStore((s) => s.removePredictedHotspot)
-  const removePredictedHotspotsInRange = useAppStore((s) => s.removePredictedHotspotsInRange)
   const setFocusedResidue = useAppStore((s) => s.setFocusedResidue)
   const setHoveredResidue = useAppStore((s) => s.setHoveredResidue)
 
@@ -92,7 +91,6 @@ export function SequenceViewer() {
         const startR = chain.resSeqs?.[minIdx] ?? (minIdx + 1)
         const endR = chain.resSeqs?.[maxIdx] ?? (maxIdx + 1)
         setSelectedRange({ chain: chainId, startResSeq: startR, endResSeq: endR })
-        removePredictedHotspotsInRange(chainId, startR, endR)
       }
     }
 

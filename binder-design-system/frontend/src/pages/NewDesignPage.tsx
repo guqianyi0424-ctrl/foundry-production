@@ -4,11 +4,11 @@ import { SequenceViewer } from '@/components/SequenceViewer'
 import { MolstarViewer } from '@/components/MolstarViewer'
 import { DesignPanel } from '@/components/DesignPanel'
 import { SilentStructureViewer } from '@/components/SilentStructureViewer'
-import { uploadPdb, predictHotspot, runRFD3, runMPNN, runRF3, runPipeline } from '@/api'
+import { uploadPdb, predictHotspot, runRFD3, runMPNN, runRF3 } from '@/api'
 import type { PredictHotspotResponse, RFD3Design, MPNNSequence, RF3Response } from '@/api'
 import type { HotspotResidue } from '@/types'
 import { parseStructureFile } from '@/utils/pdbParser'
-import { Upload, Play, RotateCcw, Sparkles, Scissors, Target, RefreshCw, X, CheckCircle2, Dna, FlaskConical, ChevronRight, Shield, TrendingUp, AlertTriangle } from 'lucide-react'
+import { Upload, RotateCcw, Sparkles, Scissors, Target, RefreshCw, X, CheckCircle2, Dna, FlaskConical, ChevronRight, Shield, TrendingUp, AlertTriangle } from 'lucide-react'
 import type { RFD3Response } from '@/api'
 
 const PREVIEW_DESIGN_LIMIT = 2
@@ -202,7 +202,6 @@ export function NewDesignPage() {
   const predictedHotspots = useAppStore((s) => s.predictedHotspots)
   const setPredictedHotspots = useAppStore((s) => s.setPredictedHotspots)
   const setRfd3Config = useAppStore((s) => s.setRfd3Config)
-  const binderLength = useAppStore((s) => s.binderLength)
   const rfd3Config = useAppStore((s) => s.rfd3Config)
   const rfd3Results = useAppStore((s) => s.rfd3Results)
   const setRfd3Results = useAppStore((s) => s.setRfd3Results)
@@ -211,9 +210,6 @@ export function NewDesignPage() {
   const rf3Results = useAppStore((s) => s.rf3Results)
   const setRf3Results = useAppStore((s) => s.setRf3Results)
   const setCurrentExperimentId = useAppStore((s) => s.setCurrentExperimentId)
-  const setCurrentPage = useAppStore((s) => s.setCurrentPage)
-  const isRunning = useAppStore((s) => s.isRunning)
-  const setIsRunning = useAppStore((s) => s.setIsRunning)
   const addJob = useAppStore((s) => s.addJob)
   const resetAll = useAppStore((s) => s.resetAll)
 
@@ -225,7 +221,6 @@ export function NewDesignPage() {
   const [isMPNNRunning, setIsMPNNRunning] = useState(false)
   const [runningMPNNDesignIdx, setRunningMPNNDesignIdx] = useState<number | null>(null)
   const [isRF3Running, setIsRF3Running] = useState(false)
-  const [isSubmittingPipeline, setIsSubmittingPipeline] = useState(false)
   const [selectedRFD3Design, setSelectedRFD3Design] = useState<RFD3Design | null>(null)
   const [selectedMPNNSeq, setSelectedMPNNSeq] = useState<MPNNSequence | null>(null)
   const [activeStep, setActiveStep] = useState(0)
@@ -358,50 +353,6 @@ export function NewDesignPage() {
     finally { setIsRF3Running(false) }
   }, [rfd3Results?.experiment_id, selectedRFD3Design, setRf3Results])
 
-  const handleSubmitPipeline = useCallback(async () => {
-    if (!pdbContent) {
-      alert('请先上传目标结构')
-      return
-    }
-    if (pendingHotspots.length === 0) {
-      alert('请先预测或选择热点残基')
-      return
-    }
-    setIsSubmittingPipeline(true)
-    try {
-      const result = await runPipeline({
-        pdb_content: pdbContent,
-        hotspots: pendingHotspots.map(h => ({ chain: h.chain, residue: h.residue })),
-        binder_length: binderLength,
-      })
-      if (result.rfd3_results) setRfd3Results(result.rfd3_results)
-      if (result.mpnn_results) setMpnnResults(result.mpnn_results)
-      if (result.rf3_results) setRf3Results(result.rf3_results)
-      setCurrentExperimentId(result.experiment_id)
-      addJob({
-        id: result.job_id,
-        name: `设计任务 ${result.experiment_id}`,
-        status: result.status,
-        time: new Date().toLocaleString('zh-CN'),
-      })
-      setCurrentPage(`experiment_${result.experiment_id}`)
-    } catch (err) {
-      alert('提交任务失败: ' + String(err))
-    } finally {
-      setIsSubmittingPipeline(false)
-    }
-  }, [
-    pdbContent,
-    pendingHotspots,
-    binderLength,
-    setRfd3Results,
-    setMpnnResults,
-    setRf3Results,
-    setCurrentExperimentId,
-    addJob,
-    setCurrentPage,
-  ])
-
   return (
     <div className="p-6 max-w-[1400px] mx-auto space-y-5">
       <HotspotPredictionModal open={showPredictionModal} onClose={() => setShowPredictionModal(false)} prediction={predictionResult} />
@@ -413,13 +364,6 @@ export function NewDesignPage() {
         <div className="flex items-center gap-2">
           <button onClick={handleResetView} className="flex items-center gap-2 px-4 py-2 rounded-lg border border-gray-200 text-gray-700 text-sm hover:bg-gray-50 transition-all">
             <RotateCcw size={16} />重置
-          </button>
-          <button
-            onClick={handleSubmitPipeline}
-            disabled={!pdbContent || pendingHotspots.length === 0 || isSubmittingPipeline}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary-600 text-white text-sm hover:bg-primary-700 disabled:cursor-not-allowed disabled:bg-gray-300 transition-all"
-          >
-            <Play size={16} />{isSubmittingPipeline ? '提交中...' : '提交任务'}
           </button>
         </div>
       </div>

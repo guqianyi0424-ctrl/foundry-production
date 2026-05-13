@@ -1,6 +1,5 @@
 import { Sidebar } from '@/components/Sidebar'
 import { NewDesignHubPage } from '@/pages/NewDesignHubPage'
-import { JobCenterPage } from '@/pages/JobCenterPage'
 import { HelpPage } from '@/pages/HelpPage'
 import { LoginModal } from '@/pages/LoginPage'
 import { ExperimentsPage } from '@/pages/ExperimentsPage'
@@ -21,7 +20,6 @@ function App() {
       <main className="flex-1 overflow-auto relative">
         {(currentPage === '新建设计' || currentPage === 'De Novo Design') && <NewDesignHubPage />}
         {currentPage === '实验记录' && <ExperimentsPage />}
-        {currentPage === '作业中心' && <JobCenterPage />}
         {currentPage === '系统监控' && <MonitorPage />}
         {currentPage === '帮助' && <HelpPage />}
         {experimentId && <ExperimentDetailPage experimentId={experimentId} />}

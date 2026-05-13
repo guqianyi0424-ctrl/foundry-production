@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -143,6 +143,18 @@ describe('system acceptance page flows', () => {
 
     expect(screen.getByText('管理员')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /系统监控/ })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /作业中心/ })).not.toBeInTheDocument()
+    expect(screen.queryByText('DeepBinder v2.0')).not.toBeInTheDocument()
+  })
+
+  it('removes protein-to-protein submit task entry points', () => {
+    useAppStore.getState().setAuth('researcher-token', researcher)
+
+    render(<App />)
+
+    expect(screen.queryByRole('button', { name: /提交任务/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /作业中心/ })).not.toBeInTheDocument()
+    expect(screen.queryByText('DeepBinder v2.0')).not.toBeInTheDocument()
   })
 
   it('runs the De Novo preview task without mutating formal MPNN/RF3 results', async () => {
@@ -475,6 +487,38 @@ describe('system acceptance page flows', () => {
       experiment_id: 'exp-preview',
       preview_only: true,
     })
+  })
+
+  it('keeps predicted hotspot markers after selecting target range', async () => {
+    useAppStore.getState().setAuth('researcher-token', researcher)
+    useAppStore.getState().setChains([
+      {
+        chain_id: 'A',
+        sequence: 'ACDEFGHIK',
+        length: 9,
+        resSeqs: [1, 2, 3, 4, 5, 6, 7, 8, 9],
+      },
+    ])
+    useAppStore.getState().setPdbContent('TARGET_PDB')
+    useAppStore.getState().setPredictedHotspots([{ chain: 'A', residue: 3, score: 0.91 }])
+
+    render(<App />)
+
+    expect(screen.getByTitle('A/3 · 预测热点')).toBeInTheDocument()
+    const startResidue = screen.getByTitle('A/2 (先拖拽选择范围)')
+    const endResidue = screen.getByTitle('A/5 (先拖拽选择范围)')
+    fireEvent.mouseDown(startResidue)
+    fireEvent.mouseEnter(endResidue)
+    fireEvent.mouseMove(endResidue)
+    fireEvent.mouseUp(endResidue)
+
+    expect(useAppStore.getState().selectedRange).toEqual({
+      chain: 'A',
+      startResSeq: 2,
+      endResSeq: 5,
+    })
+    expect(useAppStore.getState().predictedHotspots).toEqual([{ chain: 'A', residue: 3, score: 0.91 }])
+    expect(screen.getByTitle('A/3 · 预测热点')).toBeInTheDocument()
   })
 
   it('loads experiment records through the experiments page', async () => {

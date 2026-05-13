@@ -1,10 +1,9 @@
 import { useAppStore } from '@/store/useAppStore'
-import { FlaskConical, ClipboardList, HelpCircle, Beaker, Activity, LogOut, User } from 'lucide-react'
+import { FlaskConical, HelpCircle, Beaker, Activity, LogOut, User } from 'lucide-react'
 
 const navItems = [
   { label: '新建设计', icon: FlaskConical },
   { label: '实验记录', icon: Beaker },
-  { label: '作业中心', icon: ClipboardList },
   { label: '系统监控', icon: Activity, adminOnly: true },
   { label: '帮助', icon: HelpCircle },
 ]
@@ -62,7 +61,6 @@ export function Sidebar() {
         ) : (
           <div className="text-xs text-gray-400 text-center">未登录</div>
         )}
-        <div className="text-xs text-gray-400 text-center mt-2">DeepBinder v2.0</div>
       </div>
     </aside>
   )
