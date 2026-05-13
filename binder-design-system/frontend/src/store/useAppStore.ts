@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import type { ChainInfo, HotspotResidue, RFD3Design, MPNNResult, RF3Result } from '@/types'
 import type { RFD3Response, MPNNResponse, RF3Response } from '@/api'
+import { runRFD3 } from '@/api'
 
 const AUTH_TOKEN_KEY = 'deepbinder_token'
 const AUTH_USER_KEY = 'deepbinder_user'
@@ -82,6 +83,24 @@ interface AppState {
   rfd3Results: RFD3Response | null;
   setRfd3Results: (results: RFD3Response | null) => void;
 
+  proteinRfd3Run: {
+    status: 'idle' | 'running' | 'completed' | 'failed';
+    taskName: string | null;
+    startedAt: string | null;
+    error: string | null;
+  };
+  startProteinRfd3Run: (params: {
+    pdb_content: string;
+    target?: string;
+    hotspots?: string[];
+    binder_length: number;
+    diffusion_batch_size: number;
+    n_batches: number;
+    task_name: string;
+    target_filename?: string;
+    chain_type?: string;
+  }) => Promise<RFD3Response | null>;
+
   mpnnResults: MPNNResponse | null;
   setMpnnResults: (results: MPNNResponse | null) => void;
 
@@ -145,6 +164,12 @@ const initialState = {
   },
   currentExperimentId: null as string | null,
   rfd3Results: null as RFD3Response | null,
+  proteinRfd3Run: {
+    status: 'idle' as const,
+    taskName: null as string | null,
+    startedAt: null as string | null,
+    error: null as string | null,
+  },
   mpnnResults: null as MPNNResponse | null,
   rf3Results: null as RF3Response | null,
   isRunning: false,
@@ -233,6 +258,51 @@ export const useAppStore = create<AppState>((set, get) => ({
   setRfd3Config: (config) => set((state) => ({ rfd3Config: { ...state.rfd3Config, ...config } })),
   setCurrentExperimentId: (id) => set({ currentExperimentId: id }),
   setRfd3Results: (results) => set({ rfd3Results: results }),
+  startProteinRfd3Run: async (params) => {
+    if (get().proteinRfd3Run.status === 'running') {
+      return null
+    }
+    set({
+      proteinRfd3Run: {
+        status: 'running',
+        taskName: params.task_name,
+        startedAt: new Date().toISOString(),
+        error: null,
+      },
+      rfd3Results: null,
+    })
+    try {
+      const result = await runRFD3(params)
+      set({ rfd3Results: result })
+      if (result.experiment_id) {
+        set({ currentExperimentId: result.experiment_id })
+        get().addJob({
+          id: `rfd3_${result.experiment_id}`,
+          name: params.task_name,
+          status: 'rfd3_completed',
+          time: new Date().toLocaleString('zh-CN'),
+        })
+      }
+      set((state) => ({
+        proteinRfd3Run: {
+          ...state.proteinRfd3Run,
+          status: 'completed',
+          error: null,
+        },
+      }))
+      return result
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      set((state) => ({
+        proteinRfd3Run: {
+          ...state.proteinRfd3Run,
+          status: 'failed',
+          error: message,
+        },
+      }))
+      throw err
+    }
+  },
   setMpnnResults: (results) => set({ mpnnResults: results }),
   setRf3Results: (results) => set({ rf3Results: results }),
   setIsRunning: (running) => set({ isRunning: running }),

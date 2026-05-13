@@ -17,8 +17,13 @@ const taskTypeOf = (exp: ExperimentItem) => {
   return cfg.task_type === 'de_novo' ? 'de novo' : 'protein'
 }
 
-export function ExperimentsPage() {
+interface ExperimentsPageProps {
+  userId?: string
+}
+
+export function ExperimentsPage({ userId }: ExperimentsPageProps) {
   const setCurrentPage = useAppStore((s) => s.setCurrentPage)
+  const currentUser = useAppStore((s) => s.user)
   const [experiments, setExperiments] = useState<ExperimentItem[]>([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
@@ -27,10 +32,19 @@ export function ExperimentsPage() {
   const [loading, setLoading] = useState(false)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
 
+  const isAdmin = currentUser?.role === 'admin'
+  const scopedUser = experiments.find((item) => item.user_id === userId)?.user
+
   const fetchExperiments = useCallback(async () => {
     setLoading(true)
     try {
-      const res = await getExperiments({ page, page_size: 20, keyword: keyword || undefined, status: statusFilter || undefined })
+      const res = await getExperiments({
+        page,
+        page_size: 20,
+        keyword: keyword || undefined,
+        status: statusFilter || undefined,
+        user_id: isAdmin ? userId : undefined,
+      })
       setExperiments(res.items || [])
       setTotal(res.total || 0)
     } catch (err) {
@@ -38,7 +52,12 @@ export function ExperimentsPage() {
     } finally {
       setLoading(false)
     }
-  }, [page, keyword, statusFilter])
+  }, [page, keyword, statusFilter, userId, isAdmin])
+
+  useEffect(() => {
+    setPage(1)
+    setSelectedIds(new Set())
+  }, [userId])
 
   useEffect(() => {
     fetchExperiments()
@@ -104,9 +123,21 @@ export function ExperimentsPage() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">实验记录</h1>
-          <p className="text-sm text-gray-500 mt-1">管理和查看所有蛋白Binder设计实验</p>
+          <p className="text-sm text-gray-500 mt-1">
+            {userId
+              ? `查看用户 ${scopedUser?.username || userId} 的蛋白Binder设计实验`
+              : '管理和查看所有蛋白Binder设计实验'}
+          </p>
         </div>
         <div className="flex items-center gap-3">
+          {userId && (
+            <button
+              onClick={() => setCurrentPage('用户管理')}
+              className="flex items-center gap-1.5 px-3 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50"
+            >
+              返回用户管理
+            </button>
+          )}
           <button
             onClick={fetchExperiments}
             className="flex items-center gap-1.5 px-3 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50"
@@ -172,6 +203,7 @@ export function ExperimentsPage() {
                 <th className="text-left px-4 py-3 font-medium text-gray-600">任务类型</th>
                 <th className="text-left px-4 py-3 font-medium text-gray-600">任务ID</th>
                 <th className="text-left px-4 py-3 font-medium text-gray-600">任务名称</th>
+                {isAdmin && <th className="text-left px-4 py-3 font-medium text-gray-600">所属用户</th>}
                 <th className="text-left px-4 py-3 font-medium text-gray-600">状态</th>
                 <th className="text-left px-4 py-3 font-medium text-gray-600">创建时间</th>
                 <th className="text-left px-4 py-3 font-medium text-gray-600">结束时间</th>
@@ -198,6 +230,11 @@ export function ExperimentsPage() {
                         {exp.name}
                       </button>
                     </td>
+                    {isAdmin && (
+                      <td className="px-4 py-3 text-gray-600">
+                        {exp.user?.username || exp.user_id || '-'}
+                      </td>
+                    )}
                     <td className="px-4 py-3">
                       <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${sc.color}`}>
                         <StatusIcon size={12} />

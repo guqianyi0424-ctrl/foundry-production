@@ -4,7 +4,7 @@ import { SequenceViewer } from '@/components/SequenceViewer'
 import { MolstarViewer } from '@/components/MolstarViewer'
 import { DesignPanel } from '@/components/DesignPanel'
 import { SilentStructureViewer } from '@/components/SilentStructureViewer'
-import { uploadPdb, predictHotspot, runRFD3, runMPNN, runRF3 } from '@/api'
+import { uploadPdb, predictHotspot, runMPNN, runRF3 } from '@/api'
 import type { PredictHotspotResponse, RFD3Design, MPNNSequence, RF3Response } from '@/api'
 import type { HotspotResidue } from '@/types'
 import { parseStructureFile } from '@/utils/pdbParser'
@@ -205,19 +205,18 @@ export function NewDesignPage() {
   const rfd3Config = useAppStore((s) => s.rfd3Config)
   const rfd3Results = useAppStore((s) => s.rfd3Results)
   const setRfd3Results = useAppStore((s) => s.setRfd3Results)
+  const proteinRfd3Run = useAppStore((s) => s.proteinRfd3Run)
+  const startProteinRfd3Run = useAppStore((s) => s.startProteinRfd3Run)
   const mpnnResults = useAppStore((s) => s.mpnnResults)
   const setMpnnResults = useAppStore((s) => s.setMpnnResults)
   const rf3Results = useAppStore((s) => s.rf3Results)
   const setRf3Results = useAppStore((s) => s.setRf3Results)
-  const setCurrentExperimentId = useAppStore((s) => s.setCurrentExperimentId)
-  const addJob = useAppStore((s) => s.addJob)
   const resetAll = useAppStore((s) => s.resetAll)
 
   const [isPredicting, setIsPredicting] = useState(false)
   const [predictionResult, setPredictionResult] = useState<PredictHotspotResponse | null>(null)
   const [showPredictionModal, setShowPredictionModal] = useState(false)
   const [showRFD3Modal, setShowRFD3Modal] = useState(false)
-  const [isRFD3Running, setIsRFD3Running] = useState(false)
   const [isMPNNRunning, setIsMPNNRunning] = useState(false)
   const [runningMPNNDesignIdx, setRunningMPNNDesignIdx] = useState<number | null>(null)
   const [isRF3Running, setIsRF3Running] = useState(false)
@@ -229,6 +228,7 @@ export function NewDesignPage() {
   const committedHotspotTokens = committedHotspotItems.map(toRfd3HotspotToken)
   const visibleRFD3Batches = getPreviewBatches(rfd3Results)
   const previewDesignCount = visibleRFD3Batches.reduce((total, batch) => total + batch.designs.length, 0)
+  const isRFD3Running = proteinRfd3Run.status === 'running'
 
   const handleUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -282,11 +282,10 @@ export function NewDesignPage() {
 
   const handleRunRFD3 = useCallback(async (params: { binder_length: number; diffusion_batch_size: number; n_batches: number }) => {
     if (!pdbContent) return
-    setIsRFD3Running(true)
     setShowRFD3Modal(false)
     try {
       const taskName = `RFD3_${targetFile?.name ? targetFile.name.replace(/\.[^.]+$/, '') : 'protein'}_${new Date().toISOString().slice(0, 19).replace(/[-:T]/g, '')}`
-      const res = await runRFD3({
+      const res = await startProteinRfd3Run({
         pdb_content: pdbContent,
         target: rfd3Config.targetStructure || undefined,
         hotspots: committedHotspotTokens.length > 0 ? committedHotspotTokens : undefined,
@@ -297,20 +296,9 @@ export function NewDesignPage() {
         target_filename: targetFile?.name,
         chain_type: 'proteinChain',
       })
-      setRfd3Results(res)
-      setActiveStep(1)
-      if (res.experiment_id) {
-        setCurrentExperimentId(res.experiment_id)
-        addJob({
-          id: `rfd3_${res.experiment_id}`,
-          name: taskName,
-          status: 'rfd3_completed',
-          time: new Date().toLocaleString('zh-CN'),
-        })
-      }
+      if (res) setActiveStep(1)
     } catch (err) { alert('RFD3运行失败: ' + String(err)) }
-    finally { setIsRFD3Running(false) }
-  }, [pdbContent, rfd3Config, committedHotspotTokens, setRfd3Results, targetFile, setCurrentExperimentId, addJob])
+  }, [pdbContent, rfd3Config, committedHotspotTokens, startProteinRfd3Run, targetFile])
 
   const handleRunMPNN = useCallback(async (backbonePdb: string, designIdx: number) => {
     const design = rfd3Results?.designs.find(item => item.index === designIdx)

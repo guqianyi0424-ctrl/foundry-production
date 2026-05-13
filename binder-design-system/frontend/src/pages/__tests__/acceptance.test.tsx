@@ -33,6 +33,7 @@ const mockRunMPNN = vi.fn()
 const mockRunRF3 = vi.fn()
 const mockGetExperiments = vi.fn()
 const mockGetExperiment = vi.fn()
+const mockGetUsers = vi.fn()
 
 vi.mock('@/api', async () => {
   const actual = await vi.importActual<typeof import('@/api')>('@/api')
@@ -46,6 +47,7 @@ vi.mock('@/api', async () => {
     runRF3: (...args: unknown[]) => mockRunRF3(...args),
     getExperiments: (...args: unknown[]) => mockGetExperiments(...args),
     getExperiment: (...args: unknown[]) => mockGetExperiment(...args),
+    getUsers: (...args: unknown[]) => mockGetUsers(...args),
   }
 })
 
@@ -73,6 +75,7 @@ beforeEach(() => {
   mockRunRF3.mockReset()
   mockGetExperiments.mockResolvedValue({ total: 0, items: [] })
   mockGetExperiment.mockReset()
+  mockGetUsers.mockResolvedValue({ users: [] })
 })
 
 describe('system acceptance page flows', () => {
@@ -145,6 +148,67 @@ describe('system acceptance page flows', () => {
     expect(screen.getByRole('button', { name: /系统监控/ })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /作业中心/ })).not.toBeInTheDocument()
     expect(screen.queryByText('DeepBinder v2.0')).not.toBeInTheDocument()
+  })
+
+  it('lets administrators open user management and view a user scoped experiment list', async () => {
+    useAppStore.getState().setAuth('admin-token', admin)
+    mockGetUsers.mockResolvedValue({
+      users: [
+        admin,
+        {
+          id: 'u-owner',
+          username: 'owner',
+          email: 'owner@test.local',
+          role: 'researcher',
+          created_at: '2026-05-10T12:00:00',
+          last_login: '2026-05-11T12:00:00',
+        },
+      ],
+    })
+    mockGetExperiments.mockResolvedValue({
+      total: 1,
+      items: [
+        {
+          id: 'exp-owner',
+          name: 'Owner experiment',
+          status: 'completed',
+          created_at: '2026-05-10T12:00:00',
+          updated_at: '2026-05-10T12:10:00',
+          target: null,
+          hotspots: null,
+          duration_seconds: 12.5,
+          gpu_info: null,
+          user_id: 'u-owner',
+          user: {
+            id: 'u-owner',
+            username: 'owner',
+            email: 'owner@test.local',
+            role: 'researcher',
+          },
+          num_designs: 1,
+        },
+      ],
+    })
+
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(screen.getByRole('button', { name: /用户管理/ }))
+    expect(await screen.findByText('用户列表')).toBeInTheDocument()
+    expect(screen.getByText('owner')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: /查看 owner 实验/ }))
+
+    expect(await screen.findByText('Owner experiment')).toBeInTheDocument()
+    expect(mockGetExperiments).toHaveBeenLastCalledWith({
+      page: 1,
+      page_size: 20,
+      keyword: undefined,
+      status: undefined,
+      user_id: 'u-owner',
+    })
+    expect(screen.getByText('所属用户')).toBeInTheDocument()
+    expect(screen.getByText('owner')).toBeInTheDocument()
   })
 
   it('removes protein-to-protein submit task entry points', () => {
@@ -487,6 +551,61 @@ describe('system acceptance page flows', () => {
       experiment_id: 'exp-preview',
       preview_only: true,
     })
+  })
+
+  it('keeps protein-to-protein RFD3 completion when navigating away during the run', async () => {
+    useAppStore.getState().setAuth('researcher-token', researcher)
+    useAppStore.getState().setPdbContent('TARGET_PDB')
+    useAppStore.getState().setRfd3Config({
+      targetStructure: 'A/1-100',
+      hotspots: 'A/42',
+    })
+    let resolveRfd3: (value: any) => void = () => {}
+    mockRunRFD3.mockReturnValue(new Promise((resolve) => { resolveRfd3 = resolve }))
+
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(screen.getByRole('button', { name: '新建任务' }))
+    await user.click(screen.getByRole('button', { name: '开始生成' }))
+    expect(await screen.findByText('RFD3 正在生成骨架结构...')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: /实验记录/ }))
+    await user.click(screen.getByRole('button', { name: /新建设计/ }))
+    await user.click(screen.getByRole('button', { name: /① RFD3 骨架生成/ }))
+    expect(await screen.findByText('RFD3 正在生成骨架结构...')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: /实验记录/ }))
+    resolveRfd3({
+      success: true,
+      experiment_id: 'exp-running',
+      designs: [
+        { index: 0, batch: 0, design_in_batch: 0, name: 'rfd3_done', pdb_path: '', pdb_content: 'RFD3_DONE', plddt: 80 },
+      ],
+      batches: [
+        {
+          batch_idx: 0,
+          num_structures: 1,
+          designs: [
+            { index: 0, batch: 0, design_in_batch: 0, name: 'rfd3_done', pdb_path: '', pdb_content: 'RFD3_DONE', plddt: 80 },
+          ],
+        },
+      ],
+      num_batches: 1,
+      num_designs: 1,
+      first_backbone_pdb: 'RFD3_DONE',
+      output_dir: '',
+    })
+
+    await waitFor(() => {
+      expect(useAppStore.getState().rfd3Results?.experiment_id).toBe('exp-running')
+    })
+
+    await user.click(screen.getByRole('button', { name: /新建设计/ }))
+    await user.click(screen.getByRole('button', { name: /① RFD3 骨架生成/ }))
+
+    expect(await screen.findByText('rfd3_done')).toBeInTheDocument()
+    expect(screen.queryByText('RFD3 正在生成骨架结构...')).not.toBeInTheDocument()
   })
 
   it('keeps predicted hotspot markers after selecting target range', async () => {

@@ -1,9 +1,10 @@
 import { useAppStore } from '@/store/useAppStore'
-import { FlaskConical, HelpCircle, Beaker, Activity, LogOut, User } from 'lucide-react'
+import { FlaskConical, HelpCircle, Beaker, Activity, LogOut, User, Users } from 'lucide-react'
 
 const navItems = [
   { label: '新建设计', icon: FlaskConical },
   { label: '实验记录', icon: Beaker },
+  { label: '用户管理', icon: Users, adminOnly: true },
   { label: '系统监控', icon: Activity, adminOnly: true },
   { label: '帮助', icon: HelpCircle },
 ]
@@ -25,7 +26,9 @@ export function Sidebar() {
 
       <nav className="flex-1 py-3 px-3 space-y-1">
         {navItems.filter((item) => !item.adminOnly || user?.role === 'admin').map(({ label, icon: Icon }) => {
-          const isActive = currentPage === label || currentPage.startsWith(`experiment_`) && label === '实验记录'
+          const isActive = currentPage === label
+            || currentPage.startsWith(`experiment_`) && label === '实验记录'
+            || currentPage.startsWith(`user_`) && label === '用户管理'
           return (
             <button
               key={label}

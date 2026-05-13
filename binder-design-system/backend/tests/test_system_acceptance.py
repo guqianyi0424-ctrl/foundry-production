@@ -315,6 +315,58 @@ def test_researcher_cannot_delete_another_users_experiment(monkeypatch):
     asyncio.run(run_with_acceptance_client(monkeypatch, scenario))
 
 
+def test_admin_can_filter_experiments_by_user_and_rows_include_owner(monkeypatch):
+    async def scenario(client):
+        owner_login = await register_and_login(client, "owner", "secret123", "owner@test.local")
+        other_login = await register_and_login(client, "other", "secret123", "other@test.local")
+        owner_headers = {"Authorization": f"Bearer {owner_login['access_token']}"}
+        other_headers = {"Authorization": f"Bearer {other_login['access_token']}"}
+
+        owner_create = await client.post(
+            "/api/experiments",
+            headers=owner_headers,
+            json={"name": "Owner experiment"},
+        )
+        assert owner_create.status_code == 200
+        other_create = await client.post(
+            "/api/experiments",
+            headers=other_headers,
+            json={"name": "Other experiment"},
+        )
+        assert other_create.status_code == 200
+
+        admin_data = await login_admin(client)
+        admin_headers = {"Authorization": f"Bearer {admin_data['access_token']}"}
+
+        all_response = await client.get("/api/experiments", headers=admin_headers)
+        assert all_response.status_code == 200
+        all_items = all_response.json()["items"]
+        assert {item["name"] for item in all_items} >= {"Owner experiment", "Other experiment"}
+        assert {item["user"]["username"] for item in all_items} >= {"owner", "other"}
+
+        filtered_response = await client.get(
+            "/api/experiments",
+            headers=admin_headers,
+            params={"user_id": owner_login["user"]["id"]},
+        )
+        assert filtered_response.status_code == 200
+        filtered = filtered_response.json()
+        assert filtered["total"] == 1
+        assert filtered["items"][0]["name"] == "Owner experiment"
+        assert filtered["items"][0]["user"]["username"] == "owner"
+
+        blocked_response = await client.get(
+            "/api/experiments",
+            headers=other_headers,
+            params={"user_id": owner_login["user"]["id"]},
+        )
+        assert blocked_response.status_code == 200
+        assert blocked_response.json()["total"] == 1
+        assert blocked_response.json()["items"][0]["name"] == "Other experiment"
+
+    asyncio.run(run_with_acceptance_client(monkeypatch, scenario))
+
+
 def test_mock_pipeline_end_to_end_acceptance(monkeypatch):
     async def scenario(client):
         response = await client.post(

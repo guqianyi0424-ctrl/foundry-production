@@ -155,12 +155,15 @@ async def list_experiments(
     page_size: int = Query(20, ge=1, le=100),
     status: Optional[str] = None,
     keyword: Optional[str] = None,
+    user_id: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_login),
 ):
     query = db.query(Experiment)
     if current_user.role != "admin":
         query = query.filter(Experiment.user_id == current_user.id)
+    elif user_id:
+        query = query.filter(Experiment.user_id == user_id)
     if status:
         query = query.filter(Experiment.status == status)
     if keyword:
@@ -182,6 +185,12 @@ async def list_experiments(
             "duration_seconds": exp.duration_seconds,
             "gpu_info": exp.gpu_info,
             "user_id": exp.user_id,
+            "user": {
+                "id": exp.user.id,
+                "username": exp.user.username,
+                "email": exp.user.email,
+                "role": exp.user.role,
+            } if exp.user else None,
             "num_designs": len(exp.designs) if exp.designs else 0,
             "rfd3_config": exp.rfd3_config,
         }

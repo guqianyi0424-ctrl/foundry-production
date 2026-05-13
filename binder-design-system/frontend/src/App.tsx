@@ -5,6 +5,7 @@ import { LoginModal } from '@/pages/LoginPage'
 import { ExperimentsPage } from '@/pages/ExperimentsPage'
 import { ExperimentDetailPage } from '@/pages/ExperimentDetailPage'
 import { MonitorPage } from '@/pages/MonitorPage'
+import { UserManagementPage } from '@/pages/UserManagementPage'
 import { useAppStore } from '@/store/useAppStore'
 
 function App() {
@@ -13,6 +14,8 @@ function App() {
 
   const experimentMatch = currentPage.match(/^experiment_(.+)$/)
   const experimentId = experimentMatch ? experimentMatch[1] : null
+  const userMatch = currentPage.match(/^user_(.+)$/)
+  const scopedUserId = userMatch ? userMatch[1] : null
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-deepbinder-bg">
@@ -20,6 +23,8 @@ function App() {
       <main className="flex-1 overflow-auto relative">
         {(currentPage === '新建设计' || currentPage === 'De Novo Design') && <NewDesignHubPage />}
         {currentPage === '实验记录' && <ExperimentsPage />}
+        {scopedUserId && <ExperimentsPage userId={scopedUserId} />}
+        {currentPage === '用户管理' && <UserManagementPage />}
         {currentPage === '系统监控' && <MonitorPage />}
         {currentPage === '帮助' && <HelpPage />}
         {experimentId && <ExperimentDetailPage experimentId={experimentId} />}

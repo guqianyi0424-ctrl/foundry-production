@@ -205,7 +205,16 @@ export const runPipeline = async (params: {
 export interface AuthResponse {
   access_token: string
   token_type: string
-  user: { id: string; username: string; email: string | null; role: string }
+  user: UserSummary
+}
+
+export interface UserSummary {
+  id: string
+  username: string
+  email: string | null
+  role: string
+  created_at?: string | null
+  last_login?: string | null
 }
 
 export const authLogin = async (username: string, password: string): Promise<AuthResponse> => {
@@ -226,6 +235,11 @@ export const authMe = async () => {
   return res.data
 }
 
+export const getUsers = async (): Promise<{ users: UserSummary[] }> => {
+  const res = await api.get('/users')
+  return res.data
+}
+
 export interface ExperimentItem {
   id: string
   name: string
@@ -237,6 +251,7 @@ export interface ExperimentItem {
   duration_seconds: number | null
   gpu_info: string | null
   user_id: string | null
+  user?: UserSummary | null
   num_designs: number
   rfd3_config?: any
 }
@@ -264,7 +279,7 @@ export interface ExperimentDetail extends ExperimentItem {
   }>
 }
 
-export const getExperiments = async (params?: { page?: number; page_size?: number; status?: string; keyword?: string }) => {
+export const getExperiments = async (params?: { page?: number; page_size?: number; status?: string; keyword?: string; user_id?: string }) => {
   const res = await api.get('/experiments', { params })
   return res.data
 }
