@@ -9,6 +9,12 @@ const LEGACY_AUTH_PREFIX = 'ode' + 'sign'
 const LEGACY_AUTH_TOKEN_KEY = `${LEGACY_AUTH_PREFIX}_token`
 const LEGACY_AUTH_USER_KEY = `${LEGACY_AUTH_PREFIX}_user`
 
+const getStoredItem = (key: string, legacyKey: string) => (
+  sessionStorage.getItem(key)
+  || localStorage.getItem(key)
+  || localStorage.getItem(legacyKey)
+)
+
 export interface ResidueRange {
   chain: string;
   startResSeq: number;
@@ -118,14 +124,14 @@ interface AppState {
 
 const getInitialAuth = () => {
   try {
-    const token = localStorage.getItem(AUTH_TOKEN_KEY) || localStorage.getItem(LEGACY_AUTH_TOKEN_KEY)
-    const user = localStorage.getItem(AUTH_USER_KEY) || localStorage.getItem(LEGACY_AUTH_USER_KEY)
+    const token = getStoredItem(AUTH_TOKEN_KEY, LEGACY_AUTH_TOKEN_KEY)
+    const user = getStoredItem(AUTH_USER_KEY, LEGACY_AUTH_USER_KEY)
 
-    if (token && !localStorage.getItem(AUTH_TOKEN_KEY)) {
-      localStorage.setItem(AUTH_TOKEN_KEY, token)
+    if (token && !sessionStorage.getItem(AUTH_TOKEN_KEY)) {
+      sessionStorage.setItem(AUTH_TOKEN_KEY, token)
     }
-    if (user && !localStorage.getItem(AUTH_USER_KEY)) {
-      localStorage.setItem(AUTH_USER_KEY, user)
+    if (user && !sessionStorage.getItem(AUTH_USER_KEY)) {
+      sessionStorage.setItem(AUTH_USER_KEY, user)
     }
 
     return {
@@ -182,13 +188,17 @@ export const useAppStore = create<AppState>((set, get) => ({
   setCurrentPage: (page) => set({ currentPage: page }),
 
   setAuth: (token, user) => {
-    localStorage.setItem(AUTH_TOKEN_KEY, token)
-    localStorage.setItem(AUTH_USER_KEY, JSON.stringify(user))
+    sessionStorage.setItem(AUTH_TOKEN_KEY, token)
+    sessionStorage.setItem(AUTH_USER_KEY, JSON.stringify(user))
+    localStorage.removeItem(AUTH_TOKEN_KEY)
+    localStorage.removeItem(AUTH_USER_KEY)
     localStorage.removeItem(LEGACY_AUTH_TOKEN_KEY)
     localStorage.removeItem(LEGACY_AUTH_USER_KEY)
     set({ token, user })
   },
   clearAuth: () => {
+    sessionStorage.removeItem(AUTH_TOKEN_KEY)
+    sessionStorage.removeItem(AUTH_USER_KEY)
     localStorage.removeItem(AUTH_TOKEN_KEY)
     localStorage.removeItem(AUTH_USER_KEY)
     localStorage.removeItem(LEGACY_AUTH_TOKEN_KEY)

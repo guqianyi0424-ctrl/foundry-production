@@ -251,3 +251,72 @@ def test_preview_only_mpnn_and_rf3_do_not_persist(monkeypatch):
     assert mpnn["success"] is True
     assert rf3["success"] is True
     assert persisted == []
+
+
+def test_run_rf3_updates_persisted_design_metrics_from_real_validation(monkeypatch):
+    design_router = patch_services(monkeypatch)
+    db = SessionLocal()
+    try:
+        exp = Experiment(id="exp_rf3_update", name="RF3 update", status="mpnn_completed")
+        db.add(exp)
+        rfd3_design = design_router.ExperimentDesign(
+            id="design_rfd3",
+            experiment_id=exp.id,
+            design_name="batch0_design0",
+            sequence="",
+            pdb_content="RFD3_PDB",
+            plddt=88.0,
+            rmsd=None,
+            ranking_score=None,
+            passed_validation=False,
+            plddt_source="rfd3",
+            ranking_source="none",
+            validation_status="not_validated",
+        )
+        design = design_router.ExperimentDesign(
+            id="design_mpnn",
+            experiment_id=exp.id,
+            design_name="seq_0",
+            sequence="ACD",
+            pdb_content="MPNN_PDB",
+            plddt=None,
+            rmsd=None,
+            ranking_score=-1.0,
+            passed_validation=False,
+            plddt_source="none",
+            ranking_source="mpnn",
+            validation_status="not_validated",
+        )
+        db.add(rfd3_design)
+        db.add(design)
+        db.commit()
+
+        data = asyncio.run(
+            design_router.run_rf3(
+                design_router.RF3Request(
+                    mpnn_pdb_content="MPNN_PDB",
+                    rfd3_pdb_content="RFD3_PDB",
+                    experiment_id=exp.id,
+                )
+            )
+        )
+
+        db.refresh(design)
+        db.refresh(rfd3_design)
+        assert data["success"] is True
+        assert rfd3_design.rmsd is None
+        assert rfd3_design.validation_status == "not_validated"
+        assert design.plddt == 90.0
+        assert design.rmsd == 1.0
+        assert design.ranking_score == 0.8
+        assert design.passed_validation is True
+        assert design.plddt_source == "rf3"
+        assert design.ranking_source == "rf3"
+        assert design.validation_status == "validated"
+    finally:
+        db.query(design_router.ExperimentDesign).filter(
+            design_router.ExperimentDesign.experiment_id == "exp_rf3_update"
+        ).delete()
+        db.query(Experiment).filter(Experiment.id == "exp_rf3_update").delete()
+        db.commit()
+        db.close()

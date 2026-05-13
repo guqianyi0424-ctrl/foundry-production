@@ -103,7 +103,7 @@ class RF3Runner:
 
         plddt_list = []
         if conf and 'atom_plddts' in conf:
-            plddt_list = np.round(conf['atom_plddts'], 2).tolist()
+            plddt_list = self._normalize_plddt_list(conf['atom_plddts'])
 
         pae_data = None
         if conf and 'pae' in conf:
@@ -135,6 +135,9 @@ class RF3Runner:
         except Exception:
             pass
 
+        avg_plddt = self._normalize_plddt_value(summary.get("overall_plddt", 0.0))
+        summary_overall_plddt = avg_plddt / 100.0 if avg_plddt is not None else 0.0
+
         return {
             "success": True,
             "predicted_pdb": predicted_pdb,
@@ -142,7 +145,7 @@ class RF3Runner:
             "num_models": num_models,
             "summary": {
                 "chain_ptm": summary.get("chain_ptm", []),
-                "overall_plddt": summary.get("overall_plddt", 0.0),
+                "overall_plddt": summary_overall_plddt,
                 "overall_pde": summary.get("overall_pde", 0.0),
                 "overall_pae": summary.get("overall_pae", 0.0),
                 "ptm": summary.get("ptm", 0.0),
@@ -152,13 +155,32 @@ class RF3Runner:
             },
             "pae": pae_data,
             "plddt": plddt_list,
-            "avg_plddt": round(float(summary.get("overall_plddt", 0.0)), 1),
+            "avg_plddt": avg_plddt or 0.0,
             "rmsd": round(rmsd_value, 2),
             "rmsd_interpretation": rmsd_interpretation,
             "per_res_rmsd": per_res_rmsd,
             "passed": rmsd_value >= 0 and rmsd_value < 2.0,
             "output_dir": str(job_dir),
         }
+
+    def _normalize_plddt_value(self, value: Any) -> Optional[float]:
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError):
+            return None
+        if not np.isfinite(numeric) or numeric < 0:
+            return None
+        if numeric <= 1.0:
+            numeric *= 100.0
+        return round(float(numeric), 1)
+
+    def _normalize_plddt_list(self, values: Any) -> List[float]:
+        normalized = []
+        for value in np.asarray(values).reshape(-1):
+            item = self._normalize_plddt_value(value)
+            if item is not None:
+                normalized.append(item)
+        return normalized
 
     def _pdb_to_atom_array(self, pdb_content: str):
         try:

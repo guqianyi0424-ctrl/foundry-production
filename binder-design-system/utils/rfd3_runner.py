@@ -257,17 +257,22 @@ class RFD3Runner:
         lines.append("END")
         return "\n".join(lines) + "\n"
 
-    def _extract_plddt(self, atom_array) -> float:
+    def _extract_plddt(self, atom_array) -> Optional[float]:
         try:
             if hasattr(atom_array, 'b_factor'):
                 b_factors = atom_array.b_factor
                 ca_mask = (atom_array.atom_name == 'CA') if hasattr(atom_array, 'atom_name') else None
+                values = b_factors[ca_mask] if ca_mask is not None and ca_mask.any() else b_factors
+                values = np.asarray(values, dtype=float)
+                values = values[np.isfinite(values)]
+                if values.size == 0 or float(values.max()) <= 0:
+                    return None
                 if ca_mask is not None and ca_mask.any():
-                    return float(b_factors[ca_mask].mean())
-                return float(b_factors.mean())
+                    return round(float(values.mean()), 1)
+                return round(float(values.mean()), 1)
         except Exception:
             pass
-        return 0.0
+        return None
 
     def _mock_run(
         self,

@@ -369,18 +369,21 @@ async def export_experiment_csv(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_login),
 ):
-    from fastapi.responses import FileResponse
+    from fastapi.responses import Response
 
     exp = get_accessible_experiment(db, experiment_id, current_user)
     report = build_experiment_report(exp)
     csv_path = Path(report["archive"]["candidates_csv"])
     if not csv_path.is_file():
         raise HTTPException(status_code=404, detail="候选设计CSV不存在")
-    safe_name = "".join(ch if ch.isalnum() or ch in "._-" else "_" for ch in exp.name)
-    return FileResponse(
-        csv_path,
+    safe_name = "".join(
+        ch if ch.isascii() and (ch.isalnum() or ch in "._-") else "_"
+        for ch in exp.name
+    )
+    return Response(
+        csv_path.read_text(),
         media_type="text/csv",
-        filename=f"{safe_name}_candidates.csv",
+        headers={"Content-Disposition": f'attachment; filename="{safe_name}_candidates.csv"'},
     )
 
 

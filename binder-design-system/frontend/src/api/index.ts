@@ -6,13 +6,19 @@ const LEGACY_AUTH_PREFIX = 'ode' + 'sign'
 const LEGACY_AUTH_TOKEN_KEY = `${LEGACY_AUTH_PREFIX}_token`
 const LEGACY_AUTH_USER_KEY = `${LEGACY_AUTH_PREFIX}_user`
 
+const getAuthToken = () => (
+  sessionStorage.getItem(AUTH_TOKEN_KEY)
+  || localStorage.getItem(AUTH_TOKEN_KEY)
+  || localStorage.getItem(LEGACY_AUTH_TOKEN_KEY)
+)
+
 const api = axios.create({
   baseURL: '/api',
   timeout: 1800000,
 })
 
 api.interceptors.request.use((config) => {
-  const token = localStorage.getItem(AUTH_TOKEN_KEY) || localStorage.getItem(LEGACY_AUTH_TOKEN_KEY)
+  const token = getAuthToken()
   if (token) {
     config.headers.Authorization = `Bearer ${token}`
   }
@@ -23,6 +29,8 @@ api.interceptors.response.use(
   (res) => res,
   (err) => {
     if (err.response?.status === 401) {
+      sessionStorage.removeItem(AUTH_TOKEN_KEY)
+      sessionStorage.removeItem(AUTH_USER_KEY)
       localStorage.removeItem(AUTH_TOKEN_KEY)
       localStorage.removeItem(AUTH_USER_KEY)
       localStorage.removeItem(LEGACY_AUTH_TOKEN_KEY)

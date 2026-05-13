@@ -107,11 +107,64 @@ def _save_designs(experiment_id: str, designs: list):
                 rmsd=d.get("rmsd"),
                 ranking_score=d.get("ranking_score"),
                 passed_validation=d.get("passed_validation", False),
+                plddt_source=d.get("plddt_source"),
+                ranking_source=d.get("ranking_source"),
+                validation_status=d.get("validation_status"),
             )
             db.add(design)
         db.commit()
     except Exception as e:
         logger.error("save_designs_failed", experiment_id=experiment_id, error=str(e))
+    finally:
+        db.close()
+
+
+def _update_validated_design(experiment_id: str, result: dict, mpnn_pdb_content: str | None = None):
+    if not experiment_id:
+        return
+    ensure_schema_compatibility()
+    db = SessionLocal()
+    try:
+        design = None
+        if mpnn_pdb_content:
+            design = (
+                db.query(ExperimentDesign)
+                .filter(ExperimentDesign.experiment_id == experiment_id)
+                .filter(ExperimentDesign.pdb_content == mpnn_pdb_content)
+                .first()
+            )
+        if not design:
+            design = (
+                db.query(ExperimentDesign)
+                .filter(ExperimentDesign.experiment_id == experiment_id)
+                .filter(ExperimentDesign.sequence != "")
+                .filter(ExperimentDesign.validation_status != "validated")
+                .order_by(ExperimentDesign.id.asc())
+                .first()
+            )
+        if not design:
+            design = (
+                db.query(ExperimentDesign)
+                .filter(ExperimentDesign.experiment_id == experiment_id)
+                .order_by(ExperimentDesign.id.asc())
+                .first()
+            )
+        if not design:
+            return
+
+        summary = result.get("summary") or {}
+        avg_plddt = result.get("avg_plddt")
+        ranking_score = summary.get("ranking_score")
+        design.plddt = avg_plddt if avg_plddt is not None else design.plddt
+        design.rmsd = result.get("rmsd")
+        design.ranking_score = ranking_score if ranking_score is not None else design.ranking_score
+        design.passed_validation = bool(result.get("passed", False))
+        design.plddt_source = "rf3" if avg_plddt is not None else design.plddt_source or "none"
+        design.ranking_source = "rf3" if ranking_score is not None else design.ranking_source or "none"
+        design.validation_status = "validated" if result.get("success") else "failed"
+        db.commit()
+    except Exception as e:
+        logger.error("update_validated_design_failed", experiment_id=experiment_id, error=str(e))
     finally:
         db.close()
 
@@ -227,6 +280,9 @@ async def run_rfd3(
                     "sequence": "",
                     "pdb_content": d.get("pdb_content", ""),
                     "plddt": d.get("plddt"),
+                    "plddt_source": "rfd3" if d.get("plddt") is not None else "none",
+                    "ranking_source": "none",
+                    "validation_status": "not_validated",
                 })
             _save_designs(experiment_id, designs)
 
@@ -275,6 +331,7 @@ async def run_mpnn(req: MPNNRequest):
                         "pdb_content": s.get("pdb_content", ""),
                         "ranking_score": s.get("score"),
                         "ranking_source": "mpnn" if s.get("score") is not None else "none",
+                        "plddt_source": "none",
                         "validation_status": "not_validated",
                     })
                 _save_designs(req.experiment_id, designs)
@@ -308,6 +365,7 @@ async def run_rf3(req: RF3Request):
             _save_experiment_step(req.experiment_id, "rf3", sanitize_model_result(result), config)
 
         if result.get("success") and req.experiment_id and not req.preview_only:
+            _update_validated_design(req.experiment_id, result, req.mpnn_pdb_content)
             db = SessionLocal()
             try:
                 exp = db.query(Experiment).filter(Experiment.id == req.experiment_id).first()
