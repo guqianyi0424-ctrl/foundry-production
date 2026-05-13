@@ -66,7 +66,6 @@ export function DeNovoDesignPage() {
         backbone_pdb_content: selectedBackbone.pdb_content,
         batch_size: clampNumber(mpnnBatchSize, 1, 50),
         ...(rfd3Results?.experiment_id ? { experiment_id: rfd3Results.experiment_id } : {}),
-        preview_only: true,
       })
       setMpnnResults(result)
       setSelectedSequence(result.sequences?.[0] ?? null)
@@ -87,7 +86,6 @@ export function DeNovoDesignPage() {
         rfd3_pdb_content: selectedBackbone?.pdb_content,
         example_id: 'denovo_design',
         ...(rfd3Results?.experiment_id ? { experiment_id: rfd3Results.experiment_id } : {}),
-        preview_only: true,
       })
       setRf3Results(result)
     } catch (err) {

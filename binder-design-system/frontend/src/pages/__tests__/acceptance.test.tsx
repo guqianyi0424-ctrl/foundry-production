@@ -221,7 +221,7 @@ describe('system acceptance page flows', () => {
     expect(screen.queryByText('DeepBinder v2.0')).not.toBeInTheDocument()
   })
 
-  it('runs the De Novo preview task without mutating formal MPNN/RF3 results', async () => {
+  it('runs the De Novo design task and persists MPNN/RF3 experiment results', async () => {
     useAppStore.getState().setAuth('researcher-token', researcher)
     mockRunDeNovoRFD3.mockResolvedValue({
       success: true,
@@ -359,7 +359,6 @@ describe('system acceptance page flows', () => {
       backbone_pdb_content: 'RFD3_PDB',
       batch_size: 10,
       experiment_id: 'exp-denovo-preview',
-      preview_only: true,
     })
     expect(screen.getByText(/ProteinMPNN 生成的是氨基酸序列/)).toBeInTheDocument()
 
@@ -370,7 +369,6 @@ describe('system acceptance page flows', () => {
       rfd3_pdb_content: 'RFD3_PDB',
       example_id: 'denovo_design',
       experiment_id: 'exp-denovo-preview',
-      preview_only: true,
     })
     expect(screen.getByText('1.35 Å')).toBeInTheDocument()
   })
@@ -450,12 +448,11 @@ describe('system acceptance page flows', () => {
       backbone_pdb_content: 'RFD3_1',
       batch_size: 10,
       fixed_chains: ['A'],
-      preview_only: true,
     })
     expect(screen.queryAllByRole('button', { name: /送入MPNN/ })).toHaveLength(0)
   })
 
-  it('shows only two RFD3 preview designs and sends preview-only MPNN/RF3 calls', async () => {
+  it('shows only two RFD3 preview designs and sends formal MPNN/RF3 experiment calls', async () => {
     useAppStore.getState().setAuth('researcher-token', researcher)
     useAppStore.getState().setPdbContent('TARGET_PDB')
     useAppStore.getState().setRfd3Config({
@@ -539,7 +536,6 @@ describe('system acceptance page flows', () => {
       batch_size: 10,
       fixed_chains: ['A'],
       experiment_id: 'exp-preview',
-      preview_only: true,
     })
 
     await user.click(screen.getByRole('button', { name: /送入RF3验证/ }))
@@ -549,7 +545,6 @@ describe('system acceptance page flows', () => {
       rfd3_pdb_content: 'RFD3_0',
       example_id: 'binder_design',
       experiment_id: 'exp-preview',
-      preview_only: true,
     })
   })
 

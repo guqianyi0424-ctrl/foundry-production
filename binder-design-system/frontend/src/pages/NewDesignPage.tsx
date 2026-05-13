@@ -315,7 +315,6 @@ export function NewDesignPage() {
         batch_size: 10,
         fixed_chains: targetChains.length > 0 ? targetChains : undefined,
         ...(rfd3Results?.experiment_id ? { experiment_id: rfd3Results.experiment_id } : {}),
-        preview_only: true,
       })
       setMpnnResults(res)
       setSelectedMPNNSeq(res.sequences?.[0] ?? null)
@@ -333,7 +332,6 @@ export function NewDesignPage() {
         rfd3_pdb_content: rfd3Pdb,
         example_id: 'binder_design',
         ...(rfd3Results?.experiment_id ? { experiment_id: rfd3Results.experiment_id } : {}),
-        preview_only: true,
       })
       setRf3Results(res)
       setActiveStep(2)

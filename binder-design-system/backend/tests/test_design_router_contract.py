@@ -320,3 +320,138 @@ def test_run_rf3_updates_persisted_design_metrics_from_real_validation(monkeypat
         db.query(Experiment).filter(Experiment.id == "exp_rf3_update").delete()
         db.commit()
         db.close()
+
+
+def test_formal_mpnn_and_rf3_fill_existing_rfd3_candidate(monkeypatch):
+    design_router = patch_services(monkeypatch)
+    db = SessionLocal()
+    try:
+        exp = Experiment(id="exp_candidate_fill", name="Candidate fill", status="rfd3_completed")
+        db.add(exp)
+        db.add(
+            design_router.ExperimentDesign(
+                id="design_rfd3_fill",
+                experiment_id=exp.id,
+                design_name="denovo_0",
+                sequence="",
+                pdb_content="RFD3_PDB",
+                plddt=88.0,
+                rmsd=None,
+                ranking_score=None,
+                passed_validation=False,
+                plddt_source="rfd3",
+                ranking_source="none",
+                validation_status="not_validated",
+            )
+        )
+        db.commit()
+
+        mpnn = asyncio.run(
+            design_router.run_mpnn(
+                design_router.MPNNRequest(
+                    backbone_pdb_content="RFD3_PDB",
+                    experiment_id=exp.id,
+                )
+            )
+        )
+        rf3 = asyncio.run(
+            design_router.run_rf3(
+                design_router.RF3Request(
+                    mpnn_pdb_content="MPNN_PDB",
+                    rfd3_pdb_content="RFD3_PDB",
+                    experiment_id=exp.id,
+                )
+            )
+        )
+
+        db.expire_all()
+        designs = (
+            db.query(design_router.ExperimentDesign)
+            .filter(design_router.ExperimentDesign.experiment_id == exp.id)
+            .order_by(design_router.ExperimentDesign.id.asc())
+            .all()
+        )
+
+        assert mpnn["success"] is True
+        assert rf3["success"] is True
+        assert len(designs) == 1
+        assert designs[0].sequence == "ACD"
+        assert designs[0].pdb_content == "MPNN_PDB"
+        assert designs[0].plddt == 90.0
+        assert designs[0].rmsd == 1.0
+        assert designs[0].ranking_score == 0.8
+        assert designs[0].passed_validation is True
+        assert designs[0].plddt_source == "rf3"
+        assert designs[0].ranking_source == "rf3"
+        assert designs[0].validation_status == "validated"
+    finally:
+        db.query(design_router.ExperimentDesign).filter(
+            design_router.ExperimentDesign.experiment_id == "exp_candidate_fill"
+        ).delete()
+        db.query(Experiment).filter(Experiment.id == "exp_candidate_fill").delete()
+        db.commit()
+        db.close()
+
+
+def test_formal_mpnn_fills_candidate_matching_selected_backbone(monkeypatch):
+    design_router = patch_services(monkeypatch)
+    db = SessionLocal()
+    try:
+        exp = Experiment(id="exp_candidate_match", name="Candidate match", status="rfd3_completed")
+        db.add(exp)
+        db.add_all(
+            [
+                design_router.ExperimentDesign(
+                    id="design_rfd3_first",
+                    experiment_id=exp.id,
+                    design_name="rfd3_0",
+                    sequence="",
+                    pdb_content="RFD3_0",
+                    plddt=80.0,
+                    passed_validation=False,
+                    plddt_source="rfd3",
+                    ranking_source="none",
+                    validation_status="not_validated",
+                ),
+                design_router.ExperimentDesign(
+                    id="design_rfd3_second",
+                    experiment_id=exp.id,
+                    design_name="rfd3_1",
+                    sequence="",
+                    pdb_content="RFD3_1",
+                    plddt=81.0,
+                    passed_validation=False,
+                    plddt_source="rfd3",
+                    ranking_source="none",
+                    validation_status="not_validated",
+                ),
+            ]
+        )
+        db.commit()
+
+        mpnn = asyncio.run(
+            design_router.run_mpnn(
+                design_router.MPNNRequest(
+                    backbone_pdb_content="RFD3_1",
+                    experiment_id=exp.id,
+                )
+            )
+        )
+
+        db.expire_all()
+        first = db.query(design_router.ExperimentDesign).filter_by(id="design_rfd3_first").one()
+        second = db.query(design_router.ExperimentDesign).filter_by(id="design_rfd3_second").one()
+
+        assert mpnn["success"] is True
+        assert first.sequence == ""
+        assert first.pdb_content == "RFD3_0"
+        assert second.sequence == "ACD"
+        assert second.pdb_content == "MPNN_PDB"
+        assert second.ranking_score == -1.0
+    finally:
+        db.query(design_router.ExperimentDesign).filter(
+            design_router.ExperimentDesign.experiment_id == "exp_candidate_match"
+        ).delete()
+        db.query(Experiment).filter(Experiment.id == "exp_candidate_match").delete()
+        db.commit()
+        db.close()

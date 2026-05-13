@@ -119,6 +119,60 @@ def _save_designs(experiment_id: str, designs: list):
         db.close()
 
 
+def _upsert_mpnn_designs(
+    experiment_id: str,
+    sequences: list,
+    backbone_pdb_content: str | None = None,
+):
+    if not experiment_id or not sequences:
+        return
+    ensure_schema_compatibility()
+    db = SessionLocal()
+    try:
+        for index, sequence in enumerate(sequences):
+            design = None
+            backbone_pdb = sequence.get("backbone_pdb_content") or (
+                backbone_pdb_content if index == 0 else None
+            )
+            if backbone_pdb:
+                design = (
+                    db.query(ExperimentDesign)
+                    .filter(ExperimentDesign.experiment_id == experiment_id)
+                    .filter(ExperimentDesign.pdb_content == backbone_pdb)
+                    .first()
+                )
+            if not design and index == 0:
+                design = (
+                    db.query(ExperimentDesign)
+                    .filter(ExperimentDesign.experiment_id == experiment_id)
+                    .filter(ExperimentDesign.sequence == "")
+                    .filter(ExperimentDesign.validation_status != "validated")
+                    .order_by(ExperimentDesign.id.asc())
+                    .first()
+                )
+            if not design:
+                design = ExperimentDesign(
+                    id=str(uuid.uuid4()),
+                    experiment_id=experiment_id,
+                    design_name=sequence.get("name", f"seq_{sequence.get('index', index)}"),
+                    passed_validation=False,
+                )
+                db.add(design)
+
+            design.design_name = sequence.get("name", design.design_name or f"seq_{index}")
+            design.sequence = sequence.get("sequence", "")
+            design.pdb_content = sequence.get("pdb_content", "")
+            design.ranking_score = sequence.get("score")
+            design.ranking_source = "mpnn" if sequence.get("score") is not None else "none"
+            design.plddt_source = design.plddt_source or "none"
+            design.validation_status = design.validation_status or "not_validated"
+        db.commit()
+    except Exception as e:
+        logger.error("upsert_mpnn_designs_failed", experiment_id=experiment_id, error=str(e))
+    finally:
+        db.close()
+
+
 def _update_validated_design(experiment_id: str, result: dict, mpnn_pdb_content: str | None = None):
     if not experiment_id:
         return
@@ -323,18 +377,11 @@ async def run_mpnn(req: MPNNRequest):
             _save_experiment_step(req.experiment_id, "mpnn", sanitize_model_result(result), config)
 
             if result.get("success") and result.get("sequences"):
-                designs = []
-                for s in result["sequences"]:
-                    designs.append({
-                        "name": s.get("name", f"seq_{s.get('index', 0)}"),
-                        "sequence": s.get("sequence", ""),
-                        "pdb_content": s.get("pdb_content", ""),
-                        "ranking_score": s.get("score"),
-                        "ranking_source": "mpnn" if s.get("score") is not None else "none",
-                        "plddt_source": "none",
-                        "validation_status": "not_validated",
-                    })
-                _save_designs(req.experiment_id, designs)
+                _upsert_mpnn_designs(
+                    req.experiment_id,
+                    result["sequences"],
+                    req.backbone_pdb_content,
+                )
 
         return result
     except Exception as e:
