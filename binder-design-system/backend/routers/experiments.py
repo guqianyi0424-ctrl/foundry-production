@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from typing import Optional, List
 from sqlalchemy.orm import Session
-from sqlalchemy import desc
+from sqlalchemy import desc, func
 from datetime import datetime
 import uuid
 import json
@@ -159,7 +159,13 @@ async def list_experiments(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_login),
 ):
-    query = db.query(Experiment)
+    query = db.query(
+        Experiment,
+        User,
+        func.count(ExperimentDesign.id).label("num_designs"),
+    ).outerjoin(User, Experiment.user_id == User.id).outerjoin(
+        ExperimentDesign, Experiment.id == ExperimentDesign.experiment_id
+    )
     if current_user.role != "admin":
         query = query.filter(Experiment.user_id == current_user.id)
     elif user_id:
@@ -168,12 +174,12 @@ async def list_experiments(
         query = query.filter(Experiment.status == status)
     if keyword:
         query = query.filter(Experiment.name.contains(keyword))
-    query = query.order_by(desc(Experiment.created_at))
+    query = query.group_by(Experiment.id, User.id).order_by(desc(Experiment.created_at))
     total = query.count()
     items = query.offset((page - 1) * page_size).limit(page_size).all()
 
     result = []
-    for exp in items:
+    for exp, owner, num_designs in items:
         exp_dict = {
             "id": exp.id,
             "name": exp.name,
@@ -186,12 +192,12 @@ async def list_experiments(
             "gpu_info": exp.gpu_info,
             "user_id": exp.user_id,
             "user": {
-                "id": exp.user.id,
-                "username": exp.user.username,
-                "email": exp.user.email,
-                "role": exp.user.role,
-            } if exp.user else None,
-            "num_designs": len(exp.designs) if exp.designs else 0,
+                "id": owner.id,
+                "username": owner.username,
+                "email": owner.email,
+                "role": owner.role,
+            } if owner else None,
+            "num_designs": num_designs,
             "rfd3_config": exp.rfd3_config,
         }
         result.append(exp_dict)

@@ -4,6 +4,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.exceptions import RequestValidationError
 from fastapi.encoders import jsonable_encoder
+from sqlalchemy.exc import OperationalError
 import os
 
 from routers import design, upload, jobs
@@ -34,6 +35,7 @@ def error_code_for_status(status_code: int) -> str:
         422: "validation_error",
         429: "too_many_requests",
         500: "internal_error",
+        503: "service_unavailable",
     }.get(status_code, "request_error")
 
 
@@ -57,6 +59,15 @@ async def http_exception_handler(request: Request, exc: HTTPException):
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
     return error_response(422, "请求参数校验失败", exc.errors())
+
+
+@app.exception_handler(OperationalError)
+async def database_operational_error_handler(request: Request, exc: OperationalError):
+    message = str(exc).lower()
+    if "database is locked" in message or "database is busy" in message:
+        return error_response(503, "数据库繁忙，请稍后重试")
+    logger.error("database_operational_error", path=request.url.path, error=str(exc))
+    return error_response(500, "数据库操作失败")
 
 app.add_middleware(
     CORSMiddleware,

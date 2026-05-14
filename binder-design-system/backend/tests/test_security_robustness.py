@@ -5,6 +5,7 @@ import sys
 
 import httpx
 import pytest
+from sqlalchemy.exc import OperationalError
 from jose import jwt
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -452,3 +453,42 @@ def test_monitor_status_survives_system_metric_collection_errors(monkeypatch):
     assert status["cpu_percent"] is None
     assert status["memory"] == {"total_gb": None, "used_gb": None, "percent": None}
     assert status["disk"] == {"total_gb": None, "used_gb": None, "percent": None}
+
+
+def test_experiment_list_returns_service_unavailable_when_database_is_locked(monkeypatch):
+    from routers.auth import create_access_token
+
+    class BrokenQuery:
+        def filter(self, *args, **kwargs):
+            return self
+
+        def first(self):
+            raise OperationalError("SELECT count(*) FROM experiments", {}, Exception("database is locked"))
+
+    class BrokenSession:
+        def query(self, model):
+            return BrokenQuery()
+
+    async def override_locked_db():
+        yield BrokenSession()
+
+    async def scenario():
+        app.dependency_overrides[get_db] = override_locked_db
+        token = create_access_token({"sub": "admin", "role": "admin"})
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app),
+            base_url="http://testserver",
+        ) as client:
+            response = await client.get(
+                "/api/experiments",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+        app.dependency_overrides.clear()
+
+        assert response.status_code == 503
+        assert response.json()["message"] == "数据库繁忙，请稍后重试"
+
+    try:
+        asyncio.run(scenario())
+    finally:
+        app.dependency_overrides.clear()
