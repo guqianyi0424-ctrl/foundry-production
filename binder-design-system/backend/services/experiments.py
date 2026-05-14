@@ -44,3 +44,12 @@ class ExperimentService:
             results=payload["results"],
             designs=payload["designs"],
         )
+
+    def create_pipeline_job(self, job_id: str, status: str = "running") -> None:
+        self.repository.create_pipeline_job(job_id, status)
+
+    def update_pipeline_job(self, job_id: str, **updates: Any) -> None:
+        self.repository.update_pipeline_job(job_id, **updates)
+
+    def get_pipeline_job(self, job_id: str) -> dict[str, Any] | None:
+        return self.repository.get_pipeline_job(job_id)

@@ -1,7 +1,8 @@
 # 基于深度学习的蛋白质Binder生成系统
 
-[![Python 3.11](https://img.shields.io/badge/Python-3.11-blue.svg)](https://www.python.org/downloads/)
-[![Streamlit](https://img.shields.io/badge/Streamlit-1.30+-red.svg)](https://streamlit.io/)
+[![Python 3.12](https://img.shields.io/badge/Python-3.12-blue.svg)](https://www.python.org/downloads/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-009688.svg)](https://fastapi.tiangolo.com/)
+[![React](https://img.shields.io/badge/React-18-61dafb.svg)](https://react.dev/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 ## 📖 项目简介
@@ -22,16 +23,16 @@
 
 ```
 foundry-production/
-├── binder-design-system/       # Streamlit Web应用
-│   ├── app/                    # 应用主程序
-│   │   └── main.py            # 主应用
+├── binder-design-system/       # DeepBinder Web应用
+│   ├── backend/                # FastAPI API、服务层、测试
+│   ├── frontend/               # React + Vite + TypeScript 前端
 │   ├── utils/                  # 工具模块
 │   │   ├── structure_parser.py # 蛋白质结构解析
 │   │   └── ...
 │   ├── config/                 # 配置文件
 │   ├── data/                   # 测试数据
 │   ├── outputs/                # 输出结果
-│   ├── requirements.txt        # 依赖列表
+│   ├── environment.yml         # Conda 环境
 │   └── README.md              # 详细说明
 │
 ├── hotspot-prediction/          # 深度学习热点预测模型
@@ -70,13 +71,23 @@ cd foundry-production
 
 ```bash
 cd binder-design-system
-pip install -r requirements.txt
+conda env create -f environment.yml
+conda activate deepbinder
 ```
 
-### 3. 运行应用
+### 3. 运行后端
 
 ```bash
-streamlit run app/main.py
+cd binder-design-system/backend
+python -m uvicorn main:app --host 0.0.0.0 --port 8000
+```
+
+### 4. 运行前端
+
+```bash
+cd binder-design-system/frontend
+npm install
+npm run dev
 ```
 
 ---
@@ -86,12 +97,19 @@ streamlit run app/main.py
 ### Cloud Studio（推荐）
 
 ```bash
-# 一键部署
-cd /root && \
-git clone https://gitee.com/gu-qianyi0424/foundry-production.git && \
-cd foundry-production/binder-design-system && \
-pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple && \
-streamlit run app/main.py --server.port 8501 --server.address 0.0.0.0
+export DEEPBINDER_ENV=production
+export DEEPBINDER_SECRET_KEY="请替换为不少于32位的随机密钥"
+export DEEPBINDER_CORS_ORIGINS="https://your-domain.example.edu"
+export DEEPBINDER_ALLOW_MOCK=0
+export DEEPBINDER_BOOTSTRAP_ADMIN_USERNAME="admin"
+export DEEPBINDER_BOOTSTRAP_ADMIN_PASSWORD="请替换为强密码"
+
+cd foundry-production/binder-design-system/frontend
+npm install
+npm run build
+
+cd ../backend
+python -m uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
 详细部署说明请查看 [binder-design-system/CLOUD_DEPLOY_COMMANDS.md](binder-design-system/CLOUD_DEPLOY_COMMANDS.md)
@@ -101,11 +119,12 @@ streamlit run app/main.py --server.port 8501 --server.address 0.0.0.0
 ## 🔬 技术栈
 
 ### 前端
-- **Streamlit**: Web应用框架
-- **py3Dmol**: 3D分子可视化
+- **React 18 / Vite / TypeScript**: Web应用框架
+- **Molstar**: 3D分子可视化
 
 ### 后端
-- **Python 3.11**: 主要编程语言
+- **Python 3.12**: 主要编程语言
+- **FastAPI**: API服务
 - **Biotite**: 蛋白质结构处理
 - **PyTorch**: 深度学习框架
 
@@ -160,6 +179,14 @@ RF3结构验证
 - [ ] MPNN序列设计
 - [ ] RF3结构验证
 - [ ] 结果评估与导出
+
+## 🧹 仓库治理
+
+模型权重、训练特征、推理输出、日志和大体积实验产物不建议直接进入 Git 历史。当前项目包含热点预测模型、特征数据和 AutoGluon 模型目录，后续维护建议：
+
+- 将 `*.pth`、`*.pkl`、`*.npy`、训练日志和大体积结果迁移到 Git LFS、对象存储或发布包。
+- 仓库内只保留小型示例数据、下载脚本和模型校验信息。
+- 不直接重写公共分支历史；需要清理历史体积时，先和协作者确认窗口，再使用 `git filter-repo` 或仓库托管平台的 LFS 迁移工具。
 
 ---
 

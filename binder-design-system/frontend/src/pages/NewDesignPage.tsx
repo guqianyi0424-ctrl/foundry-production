@@ -305,7 +305,7 @@ export function NewDesignPage() {
         target_filename: targetFile?.name,
         chain_type: 'proteinChain',
       })
-      if (res) setActiveStep(1)
+      if (res) setActiveStep(res.rfd3_results ? 0 : 1)
     } catch (err) { alert('完整流水线运行失败: ' + String(err)) }
   }, [pdbContent, rfd3Config, committedHotspotItems, startProteinRfd3Run, targetFile])
 
@@ -425,14 +425,20 @@ export function NewDesignPage() {
         {/* RFD3 Results */}
         {activeStep === 0 && (
           <div>
-            {isRFD3Running && (
+            {isRFD3Running && !rfd3Results && (
               <div className="flex items-center justify-center py-12">
                 <div className="animate-spin w-8 h-8 border-3 border-blue-500 border-t-transparent rounded-full mr-3" />
                 <span className="text-gray-600">完整流水线正在运行...</span>
               </div>
             )}
-            {rfd3Results && !isRFD3Running && (
+            {rfd3Results && (
               <div className="space-y-4">
+                {isRFD3Running && (
+                  <div className="flex items-center rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-sm text-blue-700">
+                    <div className="animate-spin w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full mr-2" />
+                    <span>完整流水线正在运行...</span>
+                  </div>
+                )}
                 <div className="flex items-center justify-between">
                   <div className="text-sm text-gray-600">
                     生成 <span className="font-semibold text-gray-900">{rfd3Results.num_designs}</span> 个骨架结构

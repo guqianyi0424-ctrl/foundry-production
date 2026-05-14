@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Any
 import uuid
 
-from database import Experiment, ExperimentDesign, ensure_schema_compatibility
+from database import Experiment, ExperimentDesign, PipelineJob, ensure_schema_compatibility
 
 
 class ExperimentRepository:
@@ -154,6 +154,62 @@ class ExperimentRepository:
                     }
                     for design in experiment.designs
                 ],
+            }
+        finally:
+            db.close()
+
+    def create_pipeline_job(self, job_id: str, status: str = "running") -> None:
+        db = self.session_factory()
+        try:
+            existing = db.query(PipelineJob).filter(PipelineJob.id == job_id).first()
+            if existing:
+                existing.status = status
+                existing.updated_at = datetime.utcnow()
+            else:
+                db.add(PipelineJob(id=job_id, status=status))
+            db.commit()
+        finally:
+            db.close()
+
+    def update_pipeline_job(self, job_id: str, **updates: Any) -> None:
+        db = self.session_factory()
+        try:
+            job = db.query(PipelineJob).filter(PipelineJob.id == job_id).first()
+            if not job:
+                job = PipelineJob(id=job_id)
+                db.add(job)
+            allowed_fields = {
+                "status",
+                "experiment_id",
+                "failed_step",
+                "error",
+                "rfd3_results",
+                "mpnn_results",
+                "rf3_results",
+            }
+            for key, value in updates.items():
+                if key in allowed_fields:
+                    setattr(job, key, value)
+            job.updated_at = datetime.utcnow()
+            db.commit()
+        finally:
+            db.close()
+
+    def get_pipeline_job(self, job_id: str) -> dict[str, Any] | None:
+        db = self.session_factory()
+        try:
+            job = db.query(PipelineJob).filter(PipelineJob.id == job_id).first()
+            if not job:
+                return None
+            return {
+                "job_id": job.id,
+                "experiment_id": job.experiment_id,
+                "status": job.status,
+                "failed_step": job.failed_step,
+                "error": job.error,
+                "rfd3_results": job.rfd3_results,
+                "mpnn_results": job.mpnn_results,
+                "rf3_results": job.rf3_results,
             }
         finally:
             db.close()

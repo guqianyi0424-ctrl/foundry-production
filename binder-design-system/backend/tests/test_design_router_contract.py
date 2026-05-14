@@ -1,4 +1,5 @@
 import asyncio
+import threading
 
 from database import SessionLocal, Experiment
 from schemas.domain import AdapterResult, PipelineResult
@@ -32,6 +33,7 @@ class FakeHotspotService:
 
 class FakePipelineService:
     last_call = None
+    calls = 0
 
     def run_pipeline(
         self,
@@ -48,7 +50,9 @@ class FakePipelineService:
         task_name=None,
         target_filename=None,
         chain_type=None,
+        progress_callback=None,
     ):
+        self.calls += 1
         self.last_call = {
             "pdb_content": pdb_content,
             "hotspots": hotspots,
@@ -231,6 +235,194 @@ def test_run_pipeline_contract(monkeypatch):
     assert FakeServices.pipeline.last_call["task_name"] == "Pipeline Protein"
     assert FakeServices.pipeline.last_call["target_filename"] == "target.pdb"
     assert FakeServices.pipeline.last_call["chain_type"] == "proteinChain"
+
+
+def test_run_pipeline_async_mode_returns_running_job_and_allows_polling(monkeypatch):
+    design_router = patch_services(monkeypatch)
+    FakeServices.pipeline.last_call = None
+    FakeServices.pipeline.calls = 0
+    design_router._pipeline_jobs.clear()
+    persisted_jobs = {}
+    monkeypatch.setattr(
+        design_router,
+        "_create_pipeline_job",
+        lambda job_id, status="running": persisted_jobs.setdefault(
+            job_id,
+            {
+                "job_id": job_id,
+                "experiment_id": None,
+                "status": status,
+                "failed_step": None,
+                "error": None,
+                "rfd3_results": None,
+                "mpnn_results": None,
+                "rf3_results": None,
+            },
+        ),
+    )
+
+    def update_job(job_id, **updates):
+        persisted_jobs[job_id].update(updates)
+
+    monkeypatch.setattr(design_router, "_update_pipeline_job", update_job)
+    monkeypatch.setattr(design_router, "_get_pipeline_job", lambda job_id: persisted_jobs.get(job_id))
+
+    data = asyncio.run(
+        design_router.run_pipeline(
+            design_router.PipelineRequest(
+                pdb_content="ATOM",
+                hotspots=[{"chain": "A", "residue": 10}],
+                binder_length=80,
+                async_mode=True,
+            )
+        )
+    )
+
+    assert data["status"] == "running"
+    assert data["experiment_id"] is None
+    assert data["job_id"].startswith("job_")
+    job = asyncio.run(design_router.get_pipeline_job(data["job_id"]))
+    assert job["status"] == "completed"
+    assert job["experiment_id"] == "exp_1"
+    assert job["rfd3_results"]["success"] is True
+    assert FakeServices.pipeline.calls == 1
+
+
+def test_run_pipeline_async_mode_allocates_unique_job_ids(monkeypatch):
+    design_router = patch_services(monkeypatch)
+    design_router._pipeline_jobs.clear()
+    persisted_jobs = {}
+    monkeypatch.setattr(design_router, "_create_pipeline_job", lambda job_id, status="running": persisted_jobs.setdefault(job_id, {}))
+    monkeypatch.setattr(design_router, "_update_pipeline_job", lambda job_id, **updates: persisted_jobs.setdefault(job_id, {}).update(updates))
+    monkeypatch.setattr(design_router, "_get_pipeline_job", lambda job_id: persisted_jobs.get(job_id))
+
+    first = asyncio.run(
+        design_router.run_pipeline(
+            design_router.PipelineRequest(
+                pdb_content="ATOM",
+                hotspots=[{"chain": "A", "residue": 10}],
+                binder_length=80,
+                async_mode=True,
+            )
+        )
+    )
+    second = asyncio.run(
+        design_router.run_pipeline(
+            design_router.PipelineRequest(
+                pdb_content="ATOM",
+                hotspots=[{"chain": "A", "residue": 10}],
+                binder_length=80,
+                async_mode=True,
+            )
+        )
+    )
+
+    assert first["job_id"] != second["job_id"]
+
+
+class ProgressPipelineService:
+    rfd3_reported = threading.Event()
+    allow_finish = threading.Event()
+
+    def run_pipeline(
+        self,
+        pdb_content,
+        hotspots,
+        binder_length,
+        job_id,
+        user_id=None,
+        target=None,
+        length_min=40,
+        length_max=120,
+        diffusion_batch_size=2,
+        n_batches=2,
+        task_name=None,
+        target_filename=None,
+        chain_type=None,
+        progress_callback=None,
+    ):
+        partial = PipelineResult(
+            job_id=job_id,
+            experiment_id="exp_progress",
+            status="running_mpnn",
+            rfd3=AdapterResult(
+                success=True,
+                data={"success": True, "first_backbone_pdb": "RFD3_READY", "designs": []},
+            ),
+        )
+        progress_callback(partial)
+        self.rfd3_reported.set()
+        self.allow_finish.wait(timeout=2)
+        return PipelineResult(
+            job_id=job_id,
+            experiment_id="exp_progress",
+            status="completed",
+            rfd3=partial.rfd3,
+            mpnn=AdapterResult(success=True, data={"success": True, "sequences": []}),
+            rf3=AdapterResult(success=True, data={"success": True, "passed": True}),
+        )
+
+
+class ProgressServices:
+    hotspot_prediction = FakeHotspotService()
+    pipeline = ProgressPipelineService()
+    rfd3 = FakeRFD3Service()
+    mpnn = FakeMPNNService()
+    rf3 = FakeRF3Service()
+
+
+def test_run_pipeline_async_mode_exposes_rfd3_progress_before_completion(monkeypatch):
+    import routers.design as design_router
+
+    services = ProgressServices()
+    services.pipeline.rfd3_reported.clear()
+    services.pipeline.allow_finish.clear()
+    monkeypatch.setattr(design_router, "get_design_services", lambda: services)
+    design_router._pipeline_jobs.clear()
+    persisted_jobs = {}
+    monkeypatch.setattr(
+        design_router,
+        "_create_pipeline_job",
+        lambda job_id, status="running": persisted_jobs.setdefault(
+            job_id,
+            {
+                "job_id": job_id,
+                "experiment_id": None,
+                "status": status,
+                "failed_step": None,
+                "error": None,
+                "rfd3_results": None,
+                "mpnn_results": None,
+                "rf3_results": None,
+            },
+        ),
+    )
+
+    def update_job(job_id, **updates):
+        persisted_jobs[job_id].update(updates)
+
+    monkeypatch.setattr(design_router, "_update_pipeline_job", update_job)
+    monkeypatch.setattr(design_router, "_get_pipeline_job", lambda job_id: persisted_jobs.get(job_id))
+
+    submitted = asyncio.run(
+        design_router.run_pipeline(
+            design_router.PipelineRequest(
+                pdb_content="ATOM",
+                hotspots=[{"chain": "A", "residue": 10}],
+                binder_length=80,
+                async_mode=True,
+            )
+        )
+    )
+
+    assert services.pipeline.rfd3_reported.wait(timeout=2)
+    progress = asyncio.run(design_router.get_pipeline_job(submitted["job_id"]))
+    assert progress["status"] == "running_mpnn"
+    assert progress["experiment_id"] == "exp_progress"
+    assert progress["rfd3_results"]["first_backbone_pdb"] == "RFD3_READY"
+    assert progress["mpnn_results"] is None
+
+    services.pipeline.allow_finish.set()
 
 
 class RecordingExperimentService:

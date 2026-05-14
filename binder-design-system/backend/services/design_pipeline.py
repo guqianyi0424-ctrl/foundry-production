@@ -36,6 +36,7 @@ class DesignPipelineService:
         task_name: str | None = None,
         target_filename: str | None = None,
         chain_type: str | None = None,
+        progress_callback=None,
     ) -> PipelineResult:
         start = time.time()
         rfd3_config = {
@@ -82,12 +83,24 @@ class DesignPipelineService:
         )
         if not rfd3_result.success:
             self.experiment_service.finish(experiment_id, "failed", time.time() - start)
-            return PipelineResult(
+            result = PipelineResult(
                 job_id,
                 experiment_id,
                 "failed",
                 rfd3=rfd3_result,
                 failed_step="rfd3",
+            )
+            if progress_callback:
+                progress_callback(result)
+            return result
+        if progress_callback:
+            progress_callback(
+                PipelineResult(
+                    job_id,
+                    experiment_id,
+                    "running_mpnn",
+                    rfd3=rfd3_result,
+                )
             )
 
         target_chains = sorted({str(item["chain"]) for item in hotspots})
@@ -112,13 +125,26 @@ class DesignPipelineService:
 
         if not mpnn_result.success:
             self.experiment_service.finish(experiment_id, "failed", time.time() - start)
-            return PipelineResult(
+            result = PipelineResult(
                 job_id,
                 experiment_id,
                 "failed",
                 rfd3=rfd3_result,
                 mpnn=mpnn_result,
                 failed_step="mpnn",
+            )
+            if progress_callback:
+                progress_callback(result)
+            return result
+        if progress_callback:
+            progress_callback(
+                PipelineResult(
+                    job_id,
+                    experiment_id,
+                    "running_rf3",
+                    rfd3=rfd3_result,
+                    mpnn=mpnn_result,
+                )
             )
 
         rf3_work_items = self._build_rf3_work_items(mpnn_tasks)
@@ -135,7 +161,7 @@ class DesignPipelineService:
         )
         if not rf3_result.success:
             self.experiment_service.finish(experiment_id, "failed", time.time() - start)
-            return PipelineResult(
+            result = PipelineResult(
                 job_id,
                 experiment_id,
                 "failed",
@@ -144,6 +170,9 @@ class DesignPipelineService:
                 rf3=rf3_result,
                 failed_step="rf3",
             )
+            if progress_callback:
+                progress_callback(result)
+            return result
 
         self.experiment_service.save_designs(
             experiment_id,
@@ -152,7 +181,7 @@ class DesignPipelineService:
         self.experiment_service.finish(experiment_id, "completed", time.time() - start)
         if hasattr(self.experiment_service, "write_archive"):
             self.experiment_service.write_archive(experiment_id)
-        return PipelineResult(
+        result = PipelineResult(
             job_id,
             experiment_id,
             "completed",
@@ -160,6 +189,9 @@ class DesignPipelineService:
             mpnn=mpnn_result,
             rf3=rf3_result,
         )
+        if progress_callback:
+            progress_callback(result)
+        return result
 
     def _extract_backbone_tasks(self, rfd3_data: dict[str, Any]) -> list[dict[str, Any]]:
         designs = rfd3_data.get("designs") or []

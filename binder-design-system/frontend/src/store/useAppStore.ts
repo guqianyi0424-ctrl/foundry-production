@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import type { ChainInfo, HotspotResidue, RFD3Design, MPNNResult, RF3Result } from '@/types'
 import type { RFD3Response, MPNNResponse, RF3Response, RunPipelineResponse } from '@/api'
-import { runPipeline } from '@/api'
+import { getPipelineJob, runPipeline } from '@/api'
 
 const AUTH_TOKEN_KEY = 'deepbinder_token'
 const AUTH_USER_KEY = 'deepbinder_user'
@@ -107,7 +107,7 @@ interface AppState {
     task_name: string;
     target_filename?: string;
     chain_type?: string;
-  }) => Promise<RFD3Response | null>;
+  }) => Promise<RunPipelineResponse | null>;
 
   mpnnResults: MPNNResponse | null;
   setMpnnResults: (results: MPNNResponse | null) => void;
@@ -181,6 +181,70 @@ const normalizePipelineRf3Results = (result: RF3Response | any | null): RF3Respo
     tasks: result.tasks,
     aggregate_summary: result.summary,
   } as RF3Response
+}
+
+const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms))
+
+const isPipelineTerminal = (status: string) => status !== 'running' && status !== 'queued' && !status.startsWith('running_')
+
+const applyPipelineResult = (
+  result: RunPipelineResponse,
+  params: { task_name: string },
+  set: any,
+  get: () => AppState,
+) => {
+  set({
+    rfd3Results: result.rfd3_results ? { ...result.rfd3_results, experiment_id: result.experiment_id || undefined } : get().rfd3Results,
+    mpnnResults: result.mpnn_results ? normalizePipelineMpnnResults(result.mpnn_results) : get().mpnnResults,
+    rf3Results: result.rf3_results ? normalizePipelineRf3Results(result.rf3_results) : get().rf3Results,
+  })
+  if (result.experiment_id) {
+    set({ currentExperimentId: result.experiment_id })
+  }
+  if (isPipelineTerminal(result.status) && result.experiment_id) {
+    get().addJob({
+      id: `rfd3_${result.experiment_id}`,
+      name: params.task_name,
+      status: result.status,
+      time: new Date().toLocaleString('zh-CN'),
+    })
+  }
+}
+
+const waitForPipelineVisualResult = async (jobId: string): Promise<RunPipelineResponse> => {
+  while (true) {
+    const result = await getPipelineJob(jobId)
+    if (result.rfd3_results || isPipelineTerminal(result.status)) {
+      return result
+    }
+    await sleep(3000)
+  }
+}
+
+const continuePipelinePolling = async (
+  jobId: string,
+  params: { task_name: string },
+  set: any,
+  get: () => AppState,
+) => {
+  while (true) {
+    const result = await getPipelineJob(jobId)
+    applyPipelineResult(result, params, set, get)
+    if (result.status === 'failed') {
+      throw new Error(result.error || `完整流水线运行失败: ${result.failed_step || 'unknown'}`)
+    }
+    if (isPipelineTerminal(result.status)) {
+      set((state) => ({
+        proteinRfd3Run: {
+          ...state.proteinRfd3Run,
+          status: 'completed',
+          error: null,
+        },
+      }))
+      return
+    }
+    await sleep(3000)
+  }
 }
 
 const initialState = {
@@ -342,20 +406,31 @@ export const useAppStore = create<AppState>((set, get) => ({
         task_name: params.task_name,
         target_filename: params.target_filename,
         chain_type: params.chain_type,
+        async_mode: true,
       })
-      set({
-        rfd3Results: result.rfd3_results ? { ...result.rfd3_results, experiment_id: result.experiment_id } : null,
-        mpnnResults: normalizePipelineMpnnResults(result.mpnn_results || null),
-        rf3Results: normalizePipelineRf3Results(result.rf3_results || null),
-      })
-      if (result.experiment_id) {
-        set({ currentExperimentId: result.experiment_id })
-        get().addJob({
-          id: `rfd3_${result.experiment_id}`,
-          name: params.task_name,
-          status: result.status,
-          time: new Date().toLocaleString('zh-CN'),
+      const visualResult = result.rfd3_results || isPipelineTerminal(result.status)
+        ? result
+        : await waitForPipelineVisualResult(result.job_id)
+      if (visualResult.status === 'failed') {
+        throw new Error(visualResult.error || `完整流水线运行失败: ${visualResult.failed_step || 'unknown'}`)
+      }
+      applyPipelineResult(visualResult, params, set, get)
+      if (!isPipelineTerminal(visualResult.status)) {
+        continuePipelinePolling(result.job_id, params, set, get).catch((err) => {
+          const message = err instanceof Error ? err.message : String(err)
+          set((state) => ({
+            proteinRfd3Run: {
+              ...state.proteinRfd3Run,
+              status: 'failed',
+              error: message,
+            },
+          }))
         })
+        return visualResult
+      }
+      const finalResult = visualResult
+      if (finalResult.status === 'failed') {
+        throw new Error(finalResult.error || `完整流水线运行失败: ${finalResult.failed_step || 'unknown'}`)
       }
       set((state) => ({
         proteinRfd3Run: {
@@ -364,7 +439,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           error: null,
         },
       }))
-      return result
+      return finalResult
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       set((state) => ({

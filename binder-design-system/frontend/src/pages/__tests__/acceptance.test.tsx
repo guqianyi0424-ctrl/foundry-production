@@ -5,9 +5,15 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import App from '@/App'
 import { useAppStore } from '@/store/useAppStore'
 
-vi.mock('@/components/MolstarViewer', () => ({
-  MolstarViewer: () => <div data-testid="molstar-viewer">Molstar viewer mock</div>,
-}))
+vi.mock('@/components/MolstarViewer', async () => {
+  const store = await vi.importActual<typeof import('@/store/useAppStore')>('@/store/useAppStore')
+  return {
+    MolstarViewer: () => {
+      const pdbContent = store.useAppStore((s: any) => s.pdbContent)
+      return <div data-testid="molstar-viewer">{pdbContent ? `PDB:${pdbContent}` : 'Molstar viewer mock'}</div>
+    },
+  }
+})
 
 vi.mock('@/components/SilentStructureViewer', () => ({
   SilentStructureViewer: ({
@@ -32,6 +38,7 @@ const mockRunDeNovoRFD3 = vi.fn()
 const mockRunMPNN = vi.fn()
 const mockRunRF3 = vi.fn()
 const mockRunPipeline = vi.fn()
+const mockGetPipelineJob = vi.fn()
 const mockGetExperiments = vi.fn()
 const mockGetExperiment = vi.fn()
 const mockGetUsers = vi.fn()
@@ -47,6 +54,7 @@ vi.mock('@/api', async () => {
     runMPNN: (...args: unknown[]) => mockRunMPNN(...args),
     runRF3: (...args: unknown[]) => mockRunRF3(...args),
     runPipeline: (...args: unknown[]) => mockRunPipeline(...args),
+    getPipelineJob: (...args: unknown[]) => mockGetPipelineJob(...args),
     getExperiments: (...args: unknown[]) => mockGetExperiments(...args),
     getExperiment: (...args: unknown[]) => mockGetExperiment(...args),
     getUsers: (...args: unknown[]) => mockGetUsers(...args),
@@ -76,6 +84,7 @@ beforeEach(() => {
   mockRunMPNN.mockReset()
   mockRunRF3.mockReset()
   mockRunPipeline.mockReset()
+  mockGetPipelineJob.mockReset()
   mockGetExperiments.mockResolvedValue({ total: 0, items: [] })
   mockGetExperiment.mockReset()
   mockGetUsers.mockResolvedValue({ users: [] })
@@ -680,13 +689,45 @@ describe('system acceptance page flows', () => {
       hotspots: 'A/42',
     })
     let resolvePipeline: (value: any) => void = () => {}
-    mockRunPipeline.mockReturnValue(new Promise((resolve) => { resolvePipeline = resolve }))
+    mockRunPipeline.mockResolvedValue({
+      job_id: 'job-running',
+      experiment_id: null,
+      status: 'running',
+    })
+    mockGetPipelineJob
+      .mockResolvedValueOnce({
+        job_id: 'job-running',
+        experiment_id: 'exp-running',
+        status: 'running_mpnn',
+        rfd3_results: {
+          success: true,
+          designs: [
+            { index: 0, batch: 0, design_in_batch: 0, name: 'rfd3_early', pdb_path: '', pdb_content: 'RFD3_EARLY', plddt: 80 },
+          ],
+          batches: [
+            {
+              batch_idx: 0,
+              num_structures: 1,
+              designs: [
+                { index: 0, batch: 0, design_in_batch: 0, name: 'rfd3_early', pdb_path: '', pdb_content: 'RFD3_EARLY', plddt: 80 },
+              ],
+            },
+          ],
+          num_batches: 1,
+          num_designs: 1,
+          first_backbone_pdb: 'RFD3_EARLY',
+          output_dir: '',
+        },
+      })
+      .mockReturnValue(new Promise((resolve) => { resolvePipeline = resolve }))
 
     const user = userEvent.setup()
     render(<App />)
 
     await user.click(screen.getByRole('button', { name: '新建任务' }))
     await user.click(screen.getByRole('button', { name: '开始生成' }))
+    expect(mockRunPipeline).toHaveBeenCalledWith(expect.objectContaining({ async_mode: true }))
+    expect(await screen.findByText('rfd3_early')).toBeInTheDocument()
     expect(await screen.findByText('完整流水线正在运行...')).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: /实验记录/ }))
@@ -729,6 +770,7 @@ describe('system acceptance page flows', () => {
 
     expect(await screen.findByText('rfd3_done')).toBeInTheDocument()
     expect(screen.queryByText('完整流水线正在运行...')).not.toBeInTheDocument()
+    expect(mockGetPipelineJob).toHaveBeenCalledWith('job-running')
   })
 
   it('keeps predicted hotspot markers after selecting target range', async () => {
@@ -761,6 +803,23 @@ describe('system acceptance page flows', () => {
     })
     expect(useAppStore.getState().predictedHotspots).toEqual([{ chain: 'A', residue: 3, score: 0.91 }])
     expect(screen.getByTitle('A/3 · 预测热点')).toBeInTheDocument()
+  })
+
+  it('keeps uploaded target structure visible after navigating away and back', async () => {
+    useAppStore.getState().setAuth('researcher-token', researcher)
+    useAppStore.getState().setPdbContent('TARGET_PDB')
+    mockGetExperiments.mockResolvedValue({ total: 0, items: [] })
+
+    const user = userEvent.setup()
+    render(<App />)
+
+    expect(screen.getByTestId('molstar-viewer')).toHaveTextContent('PDB:TARGET_PDB')
+
+    await user.click(screen.getByRole('button', { name: /实验记录/ }))
+    expect(screen.queryByTestId('molstar-viewer')).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: /新建设计/ }))
+    expect(screen.getByTestId('molstar-viewer')).toHaveTextContent('PDB:TARGET_PDB')
   })
 
   it('loads experiment records through the experiments page', async () => {
@@ -798,6 +857,62 @@ describe('system acceptance page flows', () => {
     expect(within(table).getByText('已完成')).toBeInTheDocument()
     expect(within(table).getByText('protein')).toBeInTheDocument()
     expect(within(table).getByText('exp-1')).toBeInTheDocument()
+  })
+
+  it('keeps experiment records usable while refreshing running tasks', async () => {
+    useAppStore.getState().setAuth('researcher-token', researcher)
+    let resolveRefresh: (value: any) => void = () => {}
+    mockGetExperiments
+      .mockResolvedValueOnce({
+        total: 2,
+        items: [
+          {
+            id: 'exp-running',
+            name: '后台运行任务',
+            status: 'running',
+            created_at: '2026-05-10T12:00:00',
+            updated_at: null,
+            target: 'A/1-2',
+            hotspots: [],
+            duration_seconds: null,
+            gpu_info: null,
+            user_id: 'u-researcher',
+            num_designs: 0,
+          },
+          {
+            id: 'exp-done',
+            name: '可查看完成任务',
+            status: 'completed',
+            created_at: '2026-05-10T11:00:00',
+            updated_at: '2026-05-10T11:05:00',
+            target: 'A/1-2',
+            hotspots: [],
+            duration_seconds: 5,
+            gpu_info: null,
+            user_id: 'u-researcher',
+            num_designs: 1,
+          },
+        ],
+      })
+      .mockReturnValueOnce(new Promise((resolve) => { resolveRefresh = resolve }))
+
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(screen.getByRole('button', { name: /实验记录/ }))
+    const table = await screen.findByRole('table')
+    expect(within(table).getByText('后台运行任务')).toBeInTheDocument()
+    expect(within(table).getByText('运行中')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: /刷新/ }))
+
+    expect(screen.queryByText('加载中...')).not.toBeInTheDocument()
+    expect(screen.getByText('后台运行任务')).toBeInTheDocument()
+    expect(screen.getByText('可查看完成任务')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '可查看完成任务' }))
+    expect(useAppStore.getState().currentPage).toBe('experiment_exp-done')
+
+    resolveRefresh({ total: 2, items: [] })
   })
 
   it('renders unavailable RF3 RMSD as not calculated in experiment detail', async () => {

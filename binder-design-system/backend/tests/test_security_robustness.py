@@ -27,6 +27,57 @@ END
 """
 
 
+def test_init_db_does_not_create_default_admin_in_production(monkeypatch, tmp_path):
+    import database
+
+    db_path = tmp_path / "prod.db"
+    engine = create_engine(
+        f"sqlite:///{db_path}",
+        connect_args={"check_same_thread": False},
+    )
+    TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+    monkeypatch.setenv("DEEPBINDER_ENV", "production")
+    monkeypatch.setattr(database, "engine", engine)
+    monkeypatch.setattr(database, "SessionLocal", TestingSessionLocal)
+
+    database.init_db()
+
+    db = TestingSessionLocal()
+    try:
+        assert db.query(User).filter(User.username == "admin").first() is None
+    finally:
+        db.close()
+
+
+def test_init_db_can_seed_admin_from_environment(monkeypatch, tmp_path):
+    import database
+
+    db_path = tmp_path / "seeded.db"
+    engine = create_engine(
+        f"sqlite:///{db_path}",
+        connect_args={"check_same_thread": False},
+    )
+    TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+    monkeypatch.setenv("DEEPBINDER_ENV", "production")
+    monkeypatch.setenv("DEEPBINDER_BOOTSTRAP_ADMIN_USERNAME", "root")
+    monkeypatch.setenv("DEEPBINDER_BOOTSTRAP_ADMIN_PASSWORD", "long-secret-password")
+    monkeypatch.setenv("DEEPBINDER_BOOTSTRAP_ADMIN_EMAIL", "root@test.local")
+    monkeypatch.setattr(database, "engine", engine)
+    monkeypatch.setattr(database, "SessionLocal", TestingSessionLocal)
+
+    database.init_db()
+
+    db = TestingSessionLocal()
+    try:
+        admin = db.query(User).filter(User.username == "root").one()
+        assert admin.email == "root@test.local"
+        assert admin.role == "admin"
+    finally:
+        db.close()
+
+
 async def run_with_client(monkeypatch, scenario):
     engine = create_engine(
         "sqlite://",

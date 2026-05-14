@@ -34,6 +34,7 @@ export function ExperimentsPage({ userId }: ExperimentsPageProps) {
 
   const isAdmin = currentUser?.role === 'admin'
   const scopedUser = experiments.find((item) => item.user_id === userId)?.user
+  const showInitialLoading = loading && experiments.length === 0
 
   const fetchExperiments = useCallback(async () => {
     setLoading(true)
@@ -140,9 +141,10 @@ export function ExperimentsPage({ userId }: ExperimentsPageProps) {
           )}
           <button
             onClick={fetchExperiments}
+            disabled={loading}
             className="flex items-center gap-1.5 px-3 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50"
           >
-            <RefreshCw size={14} /> 刷新
+            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} /> 刷新
           </button>
           <button
             onClick={() => setCurrentPage('新建设计')}
@@ -178,7 +180,7 @@ export function ExperimentsPage({ userId }: ExperimentsPageProps) {
         <span className="text-sm text-gray-500">共 {total} 条记录</span>
       </div>
 
-      {loading ? (
+      {showInitialLoading ? (
         <div className="text-center py-20 text-gray-400">
           <RefreshCw size={32} className="animate-spin mx-auto mb-3" />
           加载中...

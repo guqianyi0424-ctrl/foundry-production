@@ -64,12 +64,21 @@ python -m uvicorn main:app --host 0.0.0.0 --port 8000
 export DEEPBINDER_ENV=production
 export DEEPBINDER_SECRET_KEY="请替换为不少于32位的随机密钥"
 export DEEPBINDER_CORS_ORIGINS="https://your-domain.example.edu"
+export DEEPBINDER_ALLOW_MOCK=0
+export DEEPBINDER_BOOTSTRAP_ADMIN_USERNAME="admin"
+export DEEPBINDER_BOOTSTRAP_ADMIN_PASSWORD="请替换为强密码"
 export DEEPBINDER_MAX_LOGIN_FAILURES=5
 export DEEPBINDER_LOGIN_FAILURE_WINDOW_SECONDS=300
 ```
 
 其中 `DEEPBINDER_SECRET_KEY` 用于签发 JWT，生产环境不能使用默认开发密钥。`DEEPBINDER_CORS_ORIGINS` 用逗号分隔允许访问后端 API 的前端源。
+生产环境默认不会创建 `admin/admin123`，如需初始化管理员，请显式设置 `DEEPBINDER_BOOTSTRAP_ADMIN_USERNAME` 和 `DEEPBINDER_BOOTSTRAP_ADMIN_PASSWORD`。
+生产环境默认禁用模型 mock 回退，只有显式设置 `DEEPBINDER_ALLOW_MOCK=1` 才会允许演示结果。
 `DEEPBINDER_MAX_LOGIN_FAILURES` 和 `DEEPBINDER_LOGIN_FAILURE_WINDOW_SECONDS` 用于控制登录失败限流。配置模板见 [.env.example](.env.example)。
+
+## 作业状态
+
+完整设计流水线支持异步提交，`/api/run-pipeline` 可传 `async_mode: true`，再通过 `/api/pipeline-jobs/{job_id}` 查询进度。作业状态会写入后端数据库，服务重启后仍可查询已持久化的阶段结果。
 
 ## 验证
 

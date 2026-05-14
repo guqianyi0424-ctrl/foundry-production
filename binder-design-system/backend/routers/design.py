@@ -1,3 +1,6 @@
+from concurrent.futures import Future, ThreadPoolExecutor
+from threading import Lock
+
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.params import Depends as DependsParam
 from pydantic import BaseModel
@@ -13,6 +16,10 @@ from adapters.model_adapters import sanitize_model_result
 from services.factory import get_design_services
 
 router = APIRouter()
+
+_pipeline_executor = ThreadPoolExecutor(max_workers=2)
+_pipeline_jobs: dict[str, dict] = {}
+_pipeline_jobs_lock = Lock()
 
 
 class HotspotRequest(BaseModel):
@@ -64,6 +71,76 @@ class PipelineRequest(BaseModel):
     task_name: Optional[str] = None
     target_filename: Optional[str] = None
     chain_type: Optional[str] = None
+    async_mode: bool = False
+
+
+def _pipeline_result_response(result: object) -> dict:
+    return {
+        "job_id": result.job_id,
+        "experiment_id": result.experiment_id,
+        "status": result.status,
+        "failed_step": result.failed_step,
+        "rfd3_results": result.rfd3.data if result.rfd3 else None,
+        "mpnn_results": result.mpnn.data if result.mpnn else None,
+        "rf3_results": result.rf3.data if result.rf3 else None,
+    }
+
+
+def _set_pipeline_job(job_id: str, updates: dict):
+    with _pipeline_jobs_lock:
+        current = _pipeline_jobs.get(job_id, {"job_id": job_id})
+        current.update(updates)
+        _pipeline_jobs[job_id] = current
+    persisted_updates = {
+        key: value
+        for key, value in updates.items()
+        if key not in {"job_id", "future"}
+    }
+    if persisted_updates:
+        _update_pipeline_job(job_id, **persisted_updates)
+
+
+def _create_pipeline_job(job_id: str, status: str = "running"):
+    get_design_services().experiments.create_pipeline_job(job_id, status)
+
+
+def _update_pipeline_job(job_id: str, **updates):
+    get_design_services().experiments.update_pipeline_job(job_id, **updates)
+
+
+def _get_pipeline_job(job_id: str):
+    return get_design_services().experiments.get_pipeline_job(job_id)
+
+
+def _run_pipeline_job(job_id: str, call_args: dict):
+    start = time.time()
+    try:
+        call_args = {
+            **call_args,
+            "progress_callback": lambda result: _set_pipeline_job(
+                job_id,
+                _pipeline_result_response(result),
+            ),
+        }
+        result = get_design_services().pipeline.run_pipeline(**call_args)
+        duration = time.time() - start
+        record_task(
+            "run_pipeline",
+            "success" if result.status == "completed" else "failed",
+            duration,
+        )
+        _set_pipeline_job(job_id, _pipeline_result_response(result))
+    except Exception as e:
+        duration = time.time() - start
+        record_task("run_pipeline", "failed", duration, {"error": str(e)})
+        _set_pipeline_job(
+            job_id,
+            {
+                "status": "failed",
+                "error": f"运行失败: {str(e)}",
+                "failed_step": "pipeline",
+            },
+        )
 
 
 def _save_experiment_step(experiment_id: str, step: str, results: dict, config: dict = None):
@@ -444,29 +521,55 @@ async def run_pipeline(
     req: PipelineRequest,
     current_user: User | None = Depends(get_current_user),
 ):
-    job_id = f"job_{int(time.time())}"
+    job_id = f"job_{int(time.time())}_{uuid.uuid4().hex[:8]}"
     start = time.time()
 
     try:
-        result = get_design_services().pipeline.run_pipeline(
-            pdb_content=req.pdb_content,
-            hotspots=req.hotspots,
-            binder_length=req.binder_length,
-            job_id=job_id,
-            user_id=(
+        call_args = {
+            "pdb_content": req.pdb_content,
+            "hotspots": req.hotspots,
+            "binder_length": req.binder_length,
+            "job_id": job_id,
+            "user_id": (
                 current_user.id
                 if current_user and not isinstance(current_user, DependsParam)
                 else None
             ),
-            target=req.target,
-            length_min=req.length_min,
-            length_max=req.length_max,
-            diffusion_batch_size=req.diffusion_batch_size,
-            n_batches=req.n_batches,
-            task_name=req.task_name,
-            target_filename=req.target_filename,
-            chain_type=req.chain_type,
-        )
+            "target": req.target,
+            "length_min": req.length_min,
+            "length_max": req.length_max,
+            "diffusion_batch_size": req.diffusion_batch_size,
+            "n_batches": req.n_batches,
+            "task_name": req.task_name,
+            "target_filename": req.target_filename,
+            "chain_type": req.chain_type,
+        }
+        if req.async_mode:
+            _create_pipeline_job(job_id, "running")
+            _set_pipeline_job(
+                job_id,
+                {
+                    "status": "running",
+                    "experiment_id": None,
+                    "failed_step": None,
+                    "rfd3_results": None,
+                    "mpnn_results": None,
+                    "rf3_results": None,
+                },
+            )
+            future: Future = _pipeline_executor.submit(_run_pipeline_job, job_id, call_args)
+            _set_pipeline_job(job_id, {"future": future})
+            return {
+                "job_id": job_id,
+                "experiment_id": None,
+                "status": "running",
+                "failed_step": None,
+                "rfd3_results": None,
+                "mpnn_results": None,
+                "rf3_results": None,
+            }
+
+        result = get_design_services().pipeline.run_pipeline(**call_args)
         duration = time.time() - start
         record_task(
             "run_pipeline",
@@ -474,16 +577,20 @@ async def run_pipeline(
             duration,
         )
 
-        return {
-            "job_id": result.job_id,
-            "experiment_id": result.experiment_id,
-            "status": result.status,
-            "failed_step": result.failed_step,
-            "rfd3_results": result.rfd3.data if result.rfd3 else None,
-            "mpnn_results": result.mpnn.data if result.mpnn else None,
-            "rf3_results": result.rf3.data if result.rf3 else None,
-        }
+        return _pipeline_result_response(result)
     except Exception as e:
         duration = time.time() - start
         record_task("run_pipeline", "failed", duration, {"error": str(e)})
         raise HTTPException(status_code=500, detail=f"运行失败: {str(e)}")
+
+
+@router.get("/pipeline-jobs/{job_id}", summary="查询完整流水线作业状态")
+async def get_pipeline_job(job_id: str):
+    persisted = _get_pipeline_job(job_id)
+    if persisted:
+        return persisted
+    with _pipeline_jobs_lock:
+        job = _pipeline_jobs.get(job_id)
+        if not job:
+            raise HTTPException(status_code=404, detail="流水线作业不存在")
+        return {key: value for key, value in job.items() if key != "future"}

@@ -97,9 +97,10 @@ export interface MPNNResponse {
 
 export interface RunPipelineResponse {
   job_id: string
-  experiment_id: string
+  experiment_id: string | null
   status: string
   failed_step?: string | null
+  error?: string | null
   rfd3_results?: RFD3Response
   mpnn_results?: MPNNResponse
   rf3_results?: RF3Response
@@ -214,8 +215,14 @@ export const runPipeline = async (params: {
   task_name?: string
   target_filename?: string
   chain_type?: string
+  async_mode?: boolean
 }): Promise<RunPipelineResponse> => {
   const res = await api.post('/run-pipeline', params)
+  return res.data
+}
+
+export const getPipelineJob = async (jobId: string): Promise<RunPipelineResponse> => {
+  const res = await api.get(`/pipeline-jobs/${jobId}`)
   return res.data
 }
 

@@ -86,7 +86,7 @@ async def run_with_acceptance_client(monkeypatch, scenario, tmp_path=None):
 
 
 class FakePipelineService:
-    def run_pipeline(self, pdb_content, hotspots, binder_length, job_id, user_id=None):
+    def run_pipeline(self, pdb_content, hotspots, binder_length, job_id, user_id=None, **kwargs):
         return PipelineResult(
             job_id=job_id,
             experiment_id="acceptance-exp-1",

@@ -20,9 +20,11 @@ def _env_bool(name: str, default: bool) -> bool:
 
 
 def load_runtime_settings() -> ModelRuntimeSettings:
+    env = os.getenv("DEEPBINDER_ENV", "development").strip().lower()
+    default_allow_mock = env not in {"prod", "production"}
     return ModelRuntimeSettings(
         foundry_mode=os.getenv("DEEPBINDER_FOUNDRY_MODE", "auto").strip().lower(),
-        allow_mock=_env_bool("DEEPBINDER_ALLOW_MOCK", True),
+        allow_mock=_env_bool("DEEPBINDER_ALLOW_MOCK", default_allow_mock),
         foundry_env=os.getenv("DEEPBINDER_FOUNDRY_ENV", "deepbinder"),
         model_timeout_seconds=int(os.getenv("DEEPBINDER_MODEL_TIMEOUT_SECONDS", "1800")),
         pipeline_mpnn_slots=max(1, int(os.getenv("DEEPBINDER_PIPELINE_MPNN_SLOTS", "1"))),

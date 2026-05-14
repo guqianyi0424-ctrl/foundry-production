@@ -116,3 +116,41 @@ def test_experiment_service_writes_archive_for_finished_experiment(tmp_path):
     assert archive is not None
     assert archive["candidates_csv"].endswith("candidates.csv")
     assert (tmp_path / "experiments" / experiment_id / "candidates.csv").is_file()
+
+
+def test_experiment_service_persists_pipeline_job_lifecycle():
+    from database import PipelineJob
+    from repositories.experiments import ExperimentRepository
+    from services.experiments import ExperimentService
+
+    session_factory = make_session_factory()
+    service = ExperimentService(ExperimentRepository(session_factory))
+
+    service.create_pipeline_job("job_1", "running")
+    service.update_pipeline_job(
+        "job_1",
+        status="running_mpnn",
+        experiment_id="exp_1",
+        rfd3_results={"success": True},
+    )
+
+    db = session_factory()
+    try:
+        job = db.query(PipelineJob).filter(PipelineJob.id == "job_1").one()
+        assert job.status == "running_mpnn"
+        assert job.experiment_id == "exp_1"
+        assert job.rfd3_results == {"success": True}
+    finally:
+        db.close()
+
+    payload = service.get_pipeline_job("job_1")
+    assert payload == {
+        "job_id": "job_1",
+        "experiment_id": "exp_1",
+        "status": "running_mpnn",
+        "failed_step": None,
+        "error": None,
+        "rfd3_results": {"success": True},
+        "mpnn_results": None,
+        "rf3_results": None,
+    }
