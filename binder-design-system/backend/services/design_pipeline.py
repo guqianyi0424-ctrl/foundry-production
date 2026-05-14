@@ -14,12 +14,14 @@ class DesignPipelineService:
         rf3_adapter,
         experiment_service,
         scheduler: PipelineTaskScheduler | None = None,
+        max_rf3_candidates: int = 10,
     ):
         self.rfd3_adapter = rfd3_adapter
         self.mpnn_adapter = mpnn_adapter
         self.rf3_adapter = rf3_adapter
         self.experiment_service = experiment_service
         self.scheduler = scheduler or PipelineTaskScheduler()
+        self.max_rf3_candidates = max(1, max_rf3_candidates)
 
     def run_pipeline(
         self,
@@ -147,7 +149,7 @@ class DesignPipelineService:
                 )
             )
 
-        rf3_work_items = self._build_rf3_work_items(mpnn_tasks)
+        rf3_work_items = self._select_rf3_work_items(self._build_rf3_work_items(mpnn_tasks))
         rf3_tasks = self.scheduler.run_rf3_tasks(
             rf3_work_items,
             lambda item: self._run_rf3_task(item, job_id),
@@ -289,6 +291,20 @@ class DesignPipelineService:
                 )
         return items
 
+    def _select_rf3_work_items(self, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        ranked = sorted(items, key=self._rf3_work_item_sort_key)
+        return ranked[: self.max_rf3_candidates]
+
+    def _rf3_work_item_sort_key(self, item: dict[str, Any]):
+        sequence_score = item["sequence"].get("score")
+        backbone_plddt = item["backbone"].get("plddt")
+        return (
+            -(sequence_score if sequence_score is not None else float("-inf")),
+            -(backbone_plddt if backbone_plddt is not None else float("-inf")),
+            item["backbone"].get("index", 0),
+            item["sequence_index"],
+        )
+
     def _run_rf3_task(self, item: dict[str, Any], job_id: str) -> dict[str, Any]:
         result = self.rf3_adapter.run(
             mpnn_pdb_content=item["sequence"]["pdb_content"],
@@ -363,12 +379,17 @@ class DesignPipelineService:
                         "ranking_source": "rf3" if rf3_ranking is not None else (
                             "mpnn" if sequence_score is not None else "none"
                         ),
-                        "validation_status": "validated"
-                        if rf3_result and rf3_result.success
-                        else "failed",
+                        "validation_status": self._candidate_validation_status(rf3_result),
                     }
                 )
         return sorted(candidates, key=self._candidate_sort_key)
+
+    def _candidate_validation_status(self, rf3_result: AdapterResult | None) -> str:
+        if rf3_result is None:
+            return "not_validated"
+        if rf3_result.success:
+            return "validated"
+        return "failed"
 
     def _candidate_sort_key(self, candidate: dict[str, Any]):
         plddt = candidate.get("plddt")

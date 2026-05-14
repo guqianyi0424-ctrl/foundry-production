@@ -422,3 +422,33 @@ def test_monitor_status_falls_back_to_nvidia_smi_gpu_info(monkeypatch):
         "utilization_percent": 35,
         "source": "nvidia-smi",
     }
+
+
+def test_monitor_status_survives_system_metric_collection_errors(monkeypatch):
+    import routers.monitor as monitor_router
+
+    def broken_metric(*args, **kwargs):
+        raise RuntimeError("metric unavailable")
+
+    monkeypatch.setattr(monitor_router.psutil, "cpu_percent", broken_metric)
+    monkeypatch.setattr(monitor_router.psutil, "virtual_memory", broken_metric)
+    monkeypatch.setattr(monitor_router.psutil, "disk_usage", broken_metric)
+    monkeypatch.setattr(
+        monitor_router,
+        "get_gpu_status",
+        lambda: {
+            "name": "N/A",
+            "memory": "N/A",
+            "memory_used_mib": None,
+            "memory_total_mib": None,
+            "utilization_percent": None,
+            "source": "unavailable",
+        },
+    )
+
+    status = asyncio.run(monitor_router.system_status(current_user=User(role="admin")))
+
+    assert status["status"] == "running"
+    assert status["cpu_percent"] is None
+    assert status["memory"] == {"total_gb": None, "used_gb": None, "percent": None}
+    assert status["disk"] == {"total_gb": None, "used_gb": None, "percent": None}

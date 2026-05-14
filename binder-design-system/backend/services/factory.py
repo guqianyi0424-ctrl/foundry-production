@@ -39,7 +39,14 @@ def get_design_services() -> DesignServices:
     )
     return DesignServices(
         hotspot_prediction=HotspotPredictionService(HotspotModelAdapter()),
-        pipeline=DesignPipelineService(rfd3, mpnn, rf3, experiment_service, scheduler=scheduler),
+        pipeline=DesignPipelineService(
+            rfd3,
+            mpnn,
+            rf3,
+            experiment_service,
+            scheduler=scheduler,
+            max_rf3_candidates=settings.runtime.pipeline_max_rf3_candidates,
+        ),
         experiments=experiment_service,
         rfd3=rfd3,
         mpnn=mpnn,

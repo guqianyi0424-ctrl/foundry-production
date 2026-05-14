@@ -33,6 +33,7 @@ def test_runtime_settings_read_environment(monkeypatch):
     monkeypatch.setenv("DEEPBINDER_MODEL_TIMEOUT_SECONDS", "45")
     monkeypatch.setenv("DEEPBINDER_PIPELINE_MPNN_SLOTS", "2")
     monkeypatch.setenv("DEEPBINDER_PIPELINE_RF3_SLOTS", "3")
+    monkeypatch.setenv("DEEPBINDER_PIPELINE_MAX_RF3_CANDIDATES", "7")
 
     from config.settings import build_settings
 
@@ -44,6 +45,7 @@ def test_runtime_settings_read_environment(monkeypatch):
     assert settings.runtime.model_timeout_seconds == 45
     assert settings.runtime.pipeline_mpnn_slots == 2
     assert settings.runtime.pipeline_rf3_slots == 3
+    assert settings.runtime.pipeline_max_rf3_candidates == 7
 
 
 def test_runtime_settings_disable_mock_by_default_in_production(monkeypatch):

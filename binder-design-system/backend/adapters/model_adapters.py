@@ -119,13 +119,18 @@ class MPNNAdapter:
 class RF3Adapter:
     def __init__(self, runner_factory: Callable[[], Any] | None = None):
         self.runner_factory = runner_factory
+        self._cached_runner = None
 
     def _runner(self):
+        if self._cached_runner is not None:
+            return self._cached_runner
         if self.runner_factory:
-            return self.runner_factory()
+            self._cached_runner = self.runner_factory()
+            return self._cached_runner
         from utils.rf3_runner import RF3Runner
 
-        return RF3Runner()
+        self._cached_runner = RF3Runner()
+        return self._cached_runner
 
     def run(
         self,

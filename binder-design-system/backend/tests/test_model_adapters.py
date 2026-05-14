@@ -21,6 +21,15 @@ class FakeFailingRunner:
         raise RuntimeError("boom")
 
 
+class FakeRF3Runner:
+    def __init__(self):
+        self.calls = []
+
+    def run_rf3(self, **kwargs):
+        self.calls.append(kwargs)
+        return {"success": True, "avg_plddt": 91.0, "mock": False}
+
+
 class FakeHotspotPredictor:
     def __init__(self):
         self.calls = []
@@ -83,6 +92,27 @@ def test_hotspot_adapter_reuses_predictor_instance():
     assert second.success is True
     assert len(created) == 1
     assert created[0].calls == [("ATOM 1", 3), ("ATOM 2", 4)]
+
+
+def test_rf3_adapter_reuses_runner_instance():
+    from adapters.model_adapters import RF3Adapter
+
+    created = []
+
+    def factory():
+        runner = FakeRF3Runner()
+        created.append(runner)
+        return runner
+
+    adapter = RF3Adapter(runner_factory=factory)
+
+    first = adapter.run("MPNN_A", "RFD3_A", "example_a", "job_a")
+    second = adapter.run("MPNN_B", "RFD3_B", "example_b", "job_b")
+
+    assert first.success is True
+    assert second.success is True
+    assert len(created) == 1
+    assert [call["mpnn_pdb_content"] for call in created[0].calls] == ["MPNN_A", "MPNN_B"]
 
 
 def test_sanitize_model_result_strips_nested_pdb_payloads():

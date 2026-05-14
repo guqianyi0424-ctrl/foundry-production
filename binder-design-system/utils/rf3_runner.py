@@ -27,6 +27,7 @@ class RF3Runner:
         self.output_dir = self.base_path / "binder-design-system" / "outputs" / "rf3"
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self._api_available = self._check_api()
+        self._cached_engine = None
 
     def _check_api(self) -> bool:
         try:
@@ -39,6 +40,14 @@ class RF3Runner:
 
     def is_available(self) -> bool:
         return self._api_available
+
+    def _engine(self):
+        if self._cached_engine is not None:
+            return self._cached_engine
+        from rf3.inference_engines.rf3 import RF3InferenceEngine
+
+        self._cached_engine = RF3InferenceEngine(ckpt_path='rf3', verbose=False)
+        return self._cached_engine
 
     def run_rf3(
         self,
@@ -66,13 +75,12 @@ class RF3Runner:
         example_id: str,
         job_id: str
     ) -> Dict[str, Any]:
-        from rf3.inference_engines.rf3 import RF3InferenceEngine
         from rf3.utils.inference import InferenceInput
 
         job_dir = self.output_dir / job_id
         job_dir.mkdir(parents=True, exist_ok=True)
 
-        inference_engine = RF3InferenceEngine(ckpt_path='rf3', verbose=False)
+        inference_engine = self._engine()
 
         if mpnn_pdb_content:
             atom_array = self._pdb_to_atom_array(mpnn_pdb_content)

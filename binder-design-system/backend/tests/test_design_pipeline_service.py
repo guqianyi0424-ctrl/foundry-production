@@ -284,11 +284,11 @@ def test_pipeline_service_fans_out_mpnn_and_rf3_then_sorts_candidates():
 
     assert result.status == "completed"
     assert mpnn.calls == ["BACKBONE_A", "BACKBONE_B"]
-    assert rf3.calls == [
+    assert sorted(rf3.calls) == sorted([
         ("A_SEQ_LOW_PDB", "BACKBONE_A"),
         ("A_SEQ_HIGH_PDB", "BACKBONE_A"),
         ("B_SEQ_MID_PDB", "BACKBONE_B"),
-    ]
+    ])
     saved_designs = experiments.designs[-1][1]
     assert [design["name"] for design in saved_designs] == [
         "backbone_b/b_seq_mid",
@@ -299,6 +299,36 @@ def test_pipeline_service_fans_out_mpnn_and_rf3_then_sorts_candidates():
     assert [design["rmsd"] for design in saved_designs] == [1.1, 1.4, 2.0]
     assert result.mpnn.data["tasks"][0]["backbone_name"] == "backbone_a"
     assert result.rf3.data["summary"]["validated_count"] == 3
+
+
+def test_pipeline_service_limits_rf3_validation_candidates_and_keeps_unvalidated_designs():
+    from services.design_pipeline import DesignPipelineService
+    from services.pipeline_scheduler import PipelineTaskScheduler
+
+    experiments = RecordingExperimentService()
+    rf3 = SequenceAwareRF3()
+    service = DesignPipelineService(
+        rfd3_adapter=MultiBackboneRFD3(),
+        mpnn_adapter=BackboneAwareMPNN(),
+        rf3_adapter=rf3,
+        experiment_service=experiments,
+        scheduler=PipelineTaskScheduler(mpnn_slots=2, rf3_slots=1),
+        max_rf3_candidates=2,
+    )
+
+    result = service.run_pipeline("ATOM", [{"chain": "A", "residue": 10}], 80, "job_1")
+
+    assert result.status == "completed"
+    assert rf3.calls == [
+        ("A_SEQ_HIGH_PDB", "BACKBONE_A"),
+        ("B_SEQ_MID_PDB", "BACKBONE_B"),
+    ]
+    saved_designs = experiments.designs[-1][1]
+    assert len(saved_designs) == 3
+    not_validated = next(design for design in saved_designs if design["name"] == "backbone_a/a_seq_low")
+    assert not_validated["validation_status"] == "not_validated"
+    assert not_validated["ranking_source"] == "mpnn"
+    assert result.rf3.data["summary"]["task_count"] == 2
 
 
 def test_pipeline_scheduler_respects_mpnn_slot_limit():

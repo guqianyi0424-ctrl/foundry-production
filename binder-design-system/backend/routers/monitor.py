@@ -12,6 +12,37 @@ router = APIRouter()
 _start_time = time.time()
 
 
+def _safe_cpu_percent() -> float | None:
+    try:
+        return psutil.cpu_percent(interval=0.5)
+    except Exception:
+        return None
+
+
+def _safe_memory_status() -> dict:
+    try:
+        memory = psutil.virtual_memory()
+        return {
+            "total_gb": round(memory.total / 1024**3, 1),
+            "used_gb": round(memory.used / 1024**3, 1),
+            "percent": memory.percent,
+        }
+    except Exception:
+        return {"total_gb": None, "used_gb": None, "percent": None}
+
+
+def _safe_disk_status(path: str = "/") -> dict:
+    try:
+        disk = psutil.disk_usage(path)
+        return {
+            "total_gb": round(disk.total / 1024**3, 1),
+            "used_gb": round(disk.used / 1024**3, 1),
+            "percent": disk.percent,
+        }
+    except Exception:
+        return {"total_gb": None, "used_gb": None, "percent": None}
+
+
 def _parse_nvidia_smi_csv(output: str) -> dict | None:
     first_line = output.strip().splitlines()[0] if output.strip() else ""
     if not first_line:
@@ -91,17 +122,9 @@ async def system_status(current_user: User = Depends(require_role(["admin"]))):
         "uptime_seconds": round(time.time() - _start_time, 1),
         "platform": platform.platform(),
         "python_version": platform.python_version(),
-        "cpu_percent": psutil.cpu_percent(interval=0.5),
-        "memory": {
-            "total_gb": round(psutil.virtual_memory().total / 1024**3, 1),
-            "used_gb": round(psutil.virtual_memory().used / 1024**3, 1),
-            "percent": psutil.virtual_memory().percent,
-        },
-        "disk": {
-            "total_gb": round(psutil.disk_usage("/").total / 1024**3, 1),
-            "used_gb": round(psutil.disk_usage("/").used / 1024**3, 1),
-            "percent": psutil.disk_usage("/").percent,
-        },
+        "cpu_percent": _safe_cpu_percent(),
+        "memory": _safe_memory_status(),
+        "disk": _safe_disk_status(),
         "gpu": gpu,
     }
 
