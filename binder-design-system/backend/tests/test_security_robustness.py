@@ -389,3 +389,36 @@ print(",".join(middleware.kwargs["allow_origins"]))
     )
 
     assert result.stdout.strip() == "https://deepbinder.example.edu,http://localhost:5173"
+
+
+def test_monitor_status_falls_back_to_nvidia_smi_gpu_info(monkeypatch):
+    import routers.monitor as monitor_router
+
+    class FakeCuda:
+        @staticmethod
+        def is_available():
+            return False
+
+    class FakeTorch:
+        cuda = FakeCuda()
+
+    class FakeCompletedProcess:
+        stdout = "NVIDIA RTX 4090, 8192 MiB, 24576 MiB, 35\n"
+
+    monkeypatch.setitem(sys.modules, "torch", FakeTorch())
+    monkeypatch.setattr(
+        monitor_router.subprocess,
+        "run",
+        lambda *args, **kwargs: FakeCompletedProcess(),
+    )
+
+    status = asyncio.run(monitor_router.system_status(current_user=User(role="admin")))
+
+    assert status["gpu"] == {
+        "name": "NVIDIA RTX 4090",
+        "memory": "8192 / 24576 MiB",
+        "memory_used_mib": 8192,
+        "memory_total_mib": 24576,
+        "utilization_percent": 35,
+        "source": "nvidia-smi",
+    }

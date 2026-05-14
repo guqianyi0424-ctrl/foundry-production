@@ -2,6 +2,15 @@ import { useState, useEffect } from 'react'
 import { getMonitorStatus, getMonitorTasks } from '@/api'
 import { Cpu, Server, HardDrive, Activity, Clock, CheckCircle, XCircle } from 'lucide-react'
 
+const formatGpuMemory = (gpu: any) => {
+  if (!gpu) return ''
+  if (gpu.memory && gpu.memory !== 'N/A') return gpu.memory
+  if (typeof gpu.memory_used_mib === 'number' && typeof gpu.memory_total_mib === 'number') {
+    return `${gpu.memory_used_mib} / ${gpu.memory_total_mib} MiB`
+  }
+  return ''
+}
+
 export function MonitorPage() {
   const [status, setStatus] = useState<any>(null)
   const [tasks, setTasks] = useState<any[]>([])
@@ -63,7 +72,10 @@ export function MonitorPage() {
               <span className="text-sm text-gray-500">GPU</span>
             </div>
             <div className="text-lg font-bold">{status.gpu?.name || 'N/A'}</div>
-            <div className="text-xs text-gray-400 mt-1">{status.gpu?.memory || ''}</div>
+            <div className="text-xs text-gray-400 mt-1">{formatGpuMemory(status.gpu)}</div>
+            {typeof status.gpu?.utilization_percent === 'number' && (
+              <div className="text-xs text-gray-400 mt-0.5">利用率 {status.gpu.utilization_percent}%</div>
+            )}
           </div>
         </div>
       )}

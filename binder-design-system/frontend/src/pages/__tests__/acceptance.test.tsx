@@ -805,6 +805,39 @@ describe('system acceptance page flows', () => {
     expect(screen.getByTitle('A/3 · 预测热点')).toBeInTheDocument()
   })
 
+  it('keeps trimmed target fixed while dragging a new sequence range', async () => {
+    useAppStore.getState().setAuth('researcher-token', researcher)
+    useAppStore.getState().setChains([
+      {
+        chain_id: 'A',
+        sequence: 'ACDEFGHIK',
+        length: 9,
+        resSeqs: [1, 2, 3, 4, 5, 6, 7, 8, 9],
+      },
+    ])
+    useAppStore.getState().setPdbContent('TARGET_PDB')
+
+    const user = userEvent.setup()
+    render(<App />)
+
+    fireEvent.mouseDown(screen.getByTitle('A/2 (先拖拽选择范围)'))
+    fireEvent.mouseEnter(screen.getByTitle('A/5 (先拖拽选择范围)'))
+    fireEvent.mouseMove(screen.getByTitle('A/5 (先拖拽选择范围)'))
+    fireEvent.mouseUp(screen.getByTitle('A/5 (先拖拽选择范围)'))
+
+    vi.spyOn(window, 'confirm').mockReturnValueOnce(true)
+    await user.click(screen.getByRole('button', { name: /裁剪靶点/ }))
+    expect(screen.getByText('固定靶标: A/2-5')).toBeInTheDocument()
+
+    fireEvent.mouseDown(screen.getByTitle('A/6 (先拖拽选择范围)'))
+    fireEvent.mouseEnter(screen.getByTitle('A/8 (先拖拽选择范围)'))
+    fireEvent.mouseMove(screen.getByTitle('A/8 (先拖拽选择范围)'))
+    fireEvent.mouseUp(screen.getByTitle('A/8 (先拖拽选择范围)'))
+
+    expect(useAppStore.getState().rfd3Config.targetStructure).toBe('A/2-5')
+    expect(screen.getByText('固定靶标: A/2-5')).toBeInTheDocument()
+  })
+
   it('keeps uploaded target structure visible after navigating away and back', async () => {
     useAppStore.getState().setAuth('researcher-token', researcher)
     useAppStore.getState().setPdbContent('TARGET_PDB')

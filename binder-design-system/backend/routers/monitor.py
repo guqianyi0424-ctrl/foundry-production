@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends
 import platform
 import psutil
+import subprocess
 import time
 
 from database import User
@@ -11,17 +12,79 @@ router = APIRouter()
 _start_time = time.time()
 
 
-@router.get("/monitor/status", summary="系统状态")
-async def system_status(current_user: User = Depends(require_role(["admin"]))):
-    gpu_info = "N/A"
-    gpu_mem = "N/A"
+def _parse_nvidia_smi_csv(output: str) -> dict | None:
+    first_line = output.strip().splitlines()[0] if output.strip() else ""
+    if not first_line:
+        return None
+    parts = [part.strip() for part in first_line.split(",")]
+    if len(parts) < 4:
+        return None
+    try:
+        memory_used = int(float(parts[1].replace("MiB", "").strip()))
+        memory_total = int(float(parts[2].replace("MiB", "").strip()))
+        utilization = int(float(parts[3].replace("%", "").strip()))
+    except ValueError:
+        return None
+    return {
+        "name": parts[0],
+        "memory": f"{memory_used} / {memory_total} MiB",
+        "memory_used_mib": memory_used,
+        "memory_total_mib": memory_total,
+        "utilization_percent": utilization,
+        "source": "nvidia-smi",
+    }
+
+
+def get_gpu_status() -> dict:
     try:
         import torch
         if torch.cuda.is_available():
-            gpu_info = torch.cuda.get_device_name(0)
-            gpu_mem = f"{torch.cuda.get_device_properties(0).total_mem / 1024**3:.1f} GB"
+            properties = torch.cuda.get_device_properties(0)
+            total_bytes = getattr(properties, "total_memory", getattr(properties, "total_mem", 0))
+            total_mib = int(total_bytes / 1024**2)
+            allocated_mib = int(torch.cuda.memory_allocated(0) / 1024**2)
+            return {
+                "name": torch.cuda.get_device_name(0),
+                "memory": f"{allocated_mib} / {total_mib} MiB",
+                "memory_used_mib": allocated_mib,
+                "memory_total_mib": total_mib,
+                "utilization_percent": None,
+                "source": "torch",
+            }
     except Exception:
         pass
+
+    try:
+        result = subprocess.run(
+            [
+                "nvidia-smi",
+                "--query-gpu=name,memory.used,memory.total,utilization.gpu",
+                "--format=csv,noheader,nounits",
+            ],
+            text=True,
+            capture_output=True,
+            timeout=2,
+            check=True,
+        )
+        parsed = _parse_nvidia_smi_csv(result.stdout)
+        if parsed:
+            return parsed
+    except Exception:
+        pass
+
+    return {
+        "name": "N/A",
+        "memory": "N/A",
+        "memory_used_mib": None,
+        "memory_total_mib": None,
+        "utilization_percent": None,
+        "source": "unavailable",
+    }
+
+
+@router.get("/monitor/status", summary="系统状态")
+async def system_status(current_user: User = Depends(require_role(["admin"]))):
+    gpu = get_gpu_status()
 
     return {
         "status": "running",
@@ -39,10 +102,7 @@ async def system_status(current_user: User = Depends(require_role(["admin"]))):
             "used_gb": round(psutil.disk_usage("/").used / 1024**3, 1),
             "percent": psutil.disk_usage("/").percent,
         },
-        "gpu": {
-            "name": gpu_info,
-            "memory": gpu_mem,
-        },
+        "gpu": gpu,
     }
 
 

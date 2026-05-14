@@ -271,7 +271,9 @@ export function NewDesignPage() {
   const handleTrimTarget = () => {
     if (!selectedRange) { alert('请先选择残基范围'); return }
     const targetStr = `${selectedRange.chain}/${selectedRange.startResSeq}-${selectedRange.endResSeq}`
-    if (confirm(`裁剪结构为 ${targetStr}，是否确认？`)) setRfd3Config({ targetStructure: targetStr })
+    if (confirm(`裁剪结构为 ${targetStr}，是否确认？`)) {
+      setRfd3Config({ targetStructure: targetStr })
+    }
   }
 
   const handleSpecifyHotspot = () => {
@@ -403,6 +405,12 @@ export function NewDesignPage() {
             </button>
           </div>
         </div>
+        {rfd3Config.targetStructure && (
+          <div className="mb-3 inline-flex items-center gap-2 rounded-lg border border-green-200 bg-green-50 px-3 py-1.5 text-xs font-medium text-green-700">
+            <Target size={14} />
+            <span>固定靶标: {rfd3Config.targetStructure}</span>
+          </div>
+        )}
         <div className="grid grid-cols-2 gap-5">
           <SequenceViewer />
           <MolstarViewer />
