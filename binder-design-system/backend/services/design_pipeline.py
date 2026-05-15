@@ -64,6 +64,7 @@ class DesignPipelineService:
             user_id=user_id,
         )
 
+        self.experiment_service.set_status(experiment_id, "rfd3_running")
         rfd3_result = self.rfd3_adapter.run(
             RFD3JobConfig(
                 pdb_content=pdb_content,
@@ -107,6 +108,7 @@ class DesignPipelineService:
 
         target_chains = sorted({str(item["chain"]) for item in hotspots})
         backbones = self._extract_backbone_tasks(rfd3_result.data or {})
+        self.experiment_service.set_status(experiment_id, "mpnn_running")
         mpnn_tasks = self.scheduler.run_mpnn_tasks(
             backbones,
             lambda backbone: self._run_mpnn_task(backbone, target_chains, job_id),
@@ -149,12 +151,18 @@ class DesignPipelineService:
                 )
             )
 
-        rf3_work_items = self._select_rf3_work_items(self._build_rf3_work_items(mpnn_tasks))
+        self.experiment_service.set_status(experiment_id, "rf3_running")
+        all_rf3_work_items = self._build_rf3_work_items(mpnn_tasks)
+        rf3_work_items = self._select_rf3_work_items(all_rf3_work_items)
         rf3_tasks = self.scheduler.run_rf3_tasks(
             rf3_work_items,
             lambda item: self._run_rf3_task(item, job_id),
         )
-        rf3_result = self._aggregate_rf3_results(rf3_tasks)
+        rf3_result = self._aggregate_rf3_results(
+            rf3_tasks,
+            candidate_count=len(all_rf3_work_items),
+            max_candidates=self.max_rf3_candidates,
+        )
         self.experiment_service.save_step(
             experiment_id,
             "rf3",
@@ -317,8 +325,15 @@ class DesignPipelineService:
             "result": result,
         }
 
-    def _aggregate_rf3_results(self, tasks: list[dict[str, Any]]) -> AdapterResult[dict[str, Any]]:
+    def _aggregate_rf3_results(
+        self,
+        tasks: list[dict[str, Any]],
+        candidate_count: int | None = None,
+        max_candidates: int | None = None,
+    ) -> AdapterResult[dict[str, Any]]:
         successful = [task for task in tasks if task["result"].success]
+        total_candidates = len(tasks) if candidate_count is None else candidate_count
+        candidate_limit = self.max_rf3_candidates if max_candidates is None else max_candidates
         return AdapterResult(
             success=bool(successful),
             data={
@@ -335,6 +350,9 @@ class DesignPipelineService:
                 ],
                 "summary": {
                     "task_count": len(tasks),
+                    "candidate_count": total_candidates,
+                    "skipped_count": max(0, total_candidates - len(tasks)),
+                    "max_candidates": candidate_limit,
                     "validated_count": len(successful),
                     "failed_count": len(tasks) - len(successful),
                 },

@@ -9,12 +9,16 @@ class RecordingExperimentService:
         self.steps = []
         self.finished = []
         self.designs = []
+        self.statuses = []
 
     def create_pipeline_experiment(self, name, input_pdb, hotspots, rfd3_config, user_id=None):
         return "exp_1"
 
     def save_step(self, experiment_id, step, results, config=None):
         self.steps.append((experiment_id, step, results, config))
+
+    def set_status(self, experiment_id, status):
+        self.statuses.append((experiment_id, status))
 
     def finish(self, experiment_id, status, duration_seconds):
         self.finished.append((experiment_id, status, duration_seconds))
@@ -329,6 +333,14 @@ def test_pipeline_service_limits_rf3_validation_candidates_and_keeps_unvalidated
     assert not_validated["validation_status"] == "not_validated"
     assert not_validated["ranking_source"] == "mpnn"
     assert result.rf3.data["summary"]["task_count"] == 2
+    assert result.rf3.data["summary"]["candidate_count"] == 3
+    assert result.rf3.data["summary"]["skipped_count"] == 1
+    assert result.rf3.data["summary"]["max_candidates"] == 2
+    assert [status for _, status in experiments.statuses] == [
+        "rfd3_running",
+        "mpnn_running",
+        "rf3_running",
+    ]
 
 
 def test_pipeline_scheduler_respects_mpnn_slot_limit():

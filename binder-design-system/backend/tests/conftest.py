@@ -14,3 +14,7 @@ def pytest_configure():
             sys.path.insert(0, path)
     os.environ.setdefault("DEEPBINDER_ALLOW_MOCK", "1")
     os.environ.setdefault("DEEPBINDER_FOUNDRY_MODE", "mock")
+    os.environ.setdefault(
+        "DEEPBINDER_DATABASE_URL",
+        "postgresql+psycopg://deepbinder:test@localhost:5432/deepbinder_test",
+    )

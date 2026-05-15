@@ -38,6 +38,24 @@ const hotspotChainFromConfig = (input: string): string | null => {
 const hasRmsd = (value: unknown): value is number =>
   typeof value === 'number' && Number.isFinite(value) && value >= 0
 
+const pipelineStageLabel = (stage: string | null) => {
+  if (stage === 'queued' || stage === 'running') return '等待后台执行'
+  if (stage === 'rfd3' || stage === 'running_rfd3') return 'RFD3 正在生成骨架'
+  if (stage === 'mpnn' || stage === 'running_mpnn') return 'MPNN 正在设计序列'
+  if (stage === 'rf3' || stage === 'running_rf3') return 'RF3 正在验证 Top 候选'
+  if (stage === 'completed') return '完整流水线已完成'
+  if (stage === 'failed') return '完整流水线失败'
+  return '后台任务运行中'
+}
+
+const rf3CandidateSummary = (summary: RF3Response['summary'] | undefined) => {
+  if (!summary || typeof summary.candidate_count !== 'number') return null
+  const validated = summary.task_count ?? 0
+  const total = summary.candidate_count
+  const skipped = summary.skipped_count ?? Math.max(0, total - validated)
+  return `RF3 已从 ${total} 条 MPNN 候选中选择 Top ${validated} 验证${skipped > 0 ? `，跳过 ${skipped} 条` : ''}`
+}
+
 const mergeHotspotSelections = (...groups: HotspotResidue[][]): HotspotResidue[] => {
   const seen = new Set<string>()
   const merged: HotspotResidue[] = []
@@ -235,6 +253,8 @@ export function NewDesignPage() {
   const visibleRFD3Batches = getPreviewBatches(rfd3Results)
   const previewDesignCount = visibleRFD3Batches.reduce((total, batch) => total + batch.designs.length, 0)
   const isRFD3Running = proteinRfd3Run.status === 'running'
+  const pipelineStatusText = pipelineStageLabel(proteinRfd3Run.stage)
+  const rf3SummaryText = rf3CandidateSummary(rf3Results?.summary)
 
   const handleUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -437,6 +457,7 @@ export function NewDesignPage() {
               <div className="flex items-center justify-center py-12">
                 <div className="animate-spin w-8 h-8 border-3 border-blue-500 border-t-transparent rounded-full mr-3" />
                 <span className="text-gray-600">完整流水线正在运行...</span>
+                <span className="ml-2 text-xs text-blue-600">{pipelineStatusText}</span>
               </div>
             )}
             {rfd3Results && (
@@ -445,6 +466,7 @@ export function NewDesignPage() {
                   <div className="flex items-center rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-sm text-blue-700">
                     <div className="animate-spin w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full mr-2" />
                     <span>完整流水线正在运行...</span>
+                    <span className="ml-2 text-xs">{pipelineStatusText}</span>
                   </div>
                 )}
                 <div className="flex items-center justify-between">
@@ -564,6 +586,11 @@ export function NewDesignPage() {
             )}
             {rf3Results && !isRF3Running && (
               <div className="space-y-5">
+                {rf3SummaryText && (
+                  <div className="rounded-lg border border-orange-100 bg-orange-50 px-3 py-2 text-sm text-orange-700">
+                    {rf3SummaryText}
+                  </div>
+                )}
                 {/* Summary Cards */}
                 <div className="grid grid-cols-4 gap-4">
                   <div className="p-4 rounded-xl border border-gray-100 bg-white">

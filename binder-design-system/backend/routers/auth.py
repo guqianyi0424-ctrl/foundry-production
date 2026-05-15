@@ -95,6 +95,23 @@ async def get_current_user(token: Optional[str] = Depends(oauth2_scheme), db: Se
     return user
 
 
+async def get_token_user(token: Optional[str] = Depends(oauth2_scheme)):
+    if not token:
+        return None
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        username: str = payload.get("sub")
+        if username is None:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="请先登录")
+    except JWTError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="请先登录")
+    return {
+        "username": username,
+        "id": payload.get("user_id") or payload.get("id") or username,
+        "role": payload.get("role"),
+    }
+
+
 async def require_login(current_user: Optional[User] = Depends(get_current_user)):
     if not current_user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="请先登录")

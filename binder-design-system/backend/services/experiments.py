@@ -27,6 +27,9 @@ class ExperimentService:
     ) -> None:
         self.repository.save_step(experiment_id, step, results, config)
 
+    def set_status(self, experiment_id: str, status: str) -> None:
+        self.repository.set_status(experiment_id, status)
+
     def finish(self, experiment_id: str, status: str, duration_seconds: float) -> None:
         self.repository.finish(experiment_id, status, duration_seconds)
 

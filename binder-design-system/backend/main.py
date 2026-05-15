@@ -4,7 +4,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.exceptions import RequestValidationError
 from fastapi.encoders import jsonable_encoder
-from sqlalchemy.exc import OperationalError
+from sqlalchemy.exc import OperationalError, TimeoutError
 import os
 
 from routers import design, upload, jobs
@@ -68,6 +68,12 @@ async def database_operational_error_handler(request: Request, exc: OperationalE
         return error_response(503, "数据库繁忙，请稍后重试")
     logger.error("database_operational_error", path=request.url.path, error=str(exc))
     return error_response(500, "数据库操作失败")
+
+
+@app.exception_handler(TimeoutError)
+async def database_timeout_error_handler(request: Request, exc: TimeoutError):
+    logger.error("database_timeout_error", path=request.url.path, error=str(exc))
+    return error_response(503, "数据库连接繁忙，请稍后重试")
 
 app.add_middleware(
     CORSMiddleware,

@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Any
 import uuid
 
-from database import Experiment, ExperimentDesign, PipelineJob, ensure_schema_compatibility
+from database import Experiment, ExperimentDesign, PipelineJob, User, ensure_schema_compatibility
 
 
 class ExperimentRepository:
@@ -19,6 +19,9 @@ class ExperimentRepository:
     ) -> str:
         db = self.session_factory()
         try:
+            persisted_user_id = user_id
+            if persisted_user_id and not db.query(User).filter(User.id == persisted_user_id).first():
+                persisted_user_id = None
             experiment = Experiment(
                 id=str(uuid.uuid4()),
                 name=name,
@@ -26,7 +29,7 @@ class ExperimentRepository:
                 input_pdb=input_pdb,
                 hotspots=hotspots,
                 rfd3_config=rfd3_config,
-                user_id=user_id,
+                user_id=persisted_user_id,
             )
             db.add(experiment)
             db.commit()
@@ -61,6 +64,18 @@ class ExperimentRepository:
                 if config is not None:
                     experiment.rf3_config = config
                 experiment.status = "completed"
+            experiment.updated_at = datetime.utcnow()
+            db.commit()
+        finally:
+            db.close()
+
+    def set_status(self, experiment_id: str, status: str) -> None:
+        db = self.session_factory()
+        try:
+            experiment = db.query(Experiment).filter(Experiment.id == experiment_id).first()
+            if not experiment:
+                return
+            experiment.status = status
             experiment.updated_at = datetime.utcnow()
             db.commit()
         finally:

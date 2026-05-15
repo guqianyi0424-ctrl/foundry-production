@@ -9,7 +9,7 @@ import time
 import uuid
 
 from database import SessionLocal, Experiment, ExperimentDesign, User, ensure_schema_compatibility
-from routers.auth import get_current_user
+from routers.auth import get_current_user, get_token_user
 from logger import logger, record_task
 from schemas.domain import RFD3JobConfig
 from adapters.model_adapters import sanitize_model_result
@@ -79,10 +79,33 @@ def _pipeline_result_response(result: object) -> dict:
         "job_id": result.job_id,
         "experiment_id": result.experiment_id,
         "status": result.status,
+        "stage": _pipeline_stage(result.status),
         "failed_step": result.failed_step,
         "rfd3_results": result.rfd3.data if result.rfd3 else None,
         "mpnn_results": result.mpnn.data if result.mpnn else None,
         "rf3_results": result.rf3.data if result.rf3 else None,
+    }
+
+
+def _pipeline_stage(status: str | None) -> str:
+    if status == "queued":
+        return "queued"
+    if status == "running":
+        return "queued"
+    if status == "running_mpnn":
+        return "mpnn"
+    if status == "running_rf3":
+        return "rf3"
+    if status in {"completed", "failed"}:
+        return status
+    return "rfd3"
+
+
+def _pipeline_job_response(job: dict) -> dict:
+    status = job.get("status")
+    return {
+        **job,
+        "stage": job.get("stage") or _pipeline_stage(status),
     }
 
 
@@ -311,6 +334,9 @@ def _update_validated_design(experiment_id: str, result: dict, mpnn_pdb_content:
 def _create_rfd3_experiment(req: RFD3Request, config: dict, user_id: str | None = None) -> str:
     db = SessionLocal()
     try:
+        persisted_user_id = user_id
+        if persisted_user_id and not db.query(User).filter(User.id == persisted_user_id).first():
+            persisted_user_id = None
         experiment = Experiment(
             id=str(uuid.uuid4()),
             name=req.task_name or f"RFD3_{time.strftime('%Y%m%d_%H%M%S')}",
@@ -319,7 +345,7 @@ def _create_rfd3_experiment(req: RFD3Request, config: dict, user_id: str | None 
             target=req.target,
             hotspots=req.hotspots or [],
             rfd3_config=config,
-            user_id=user_id,
+            user_id=persisted_user_id,
         )
         db.add(experiment)
         db.commit()
@@ -519,22 +545,21 @@ async def run_rf3(req: RF3Request):
 @router.post("/run-pipeline", summary="完整设计流水线", description="自动执行RFD3→MPNN→RF3全流程")
 async def run_pipeline(
     req: PipelineRequest,
-    current_user: User | None = Depends(get_current_user),
+    token_user: dict | None = Depends(get_token_user),
 ):
     job_id = f"job_{int(time.time())}_{uuid.uuid4().hex[:8]}"
     start = time.time()
 
     try:
+        user_id = None
+        if token_user and not isinstance(token_user, DependsParam):
+            user_id = token_user.get("id")
         call_args = {
             "pdb_content": req.pdb_content,
             "hotspots": req.hotspots,
             "binder_length": req.binder_length,
             "job_id": job_id,
-            "user_id": (
-                current_user.id
-                if current_user and not isinstance(current_user, DependsParam)
-                else None
-            ),
+            "user_id": user_id,
             "target": req.target,
             "length_min": req.length_min,
             "length_max": req.length_max,
@@ -550,6 +575,7 @@ async def run_pipeline(
                 job_id,
                 {
                     "status": "running",
+                    "stage": "queued",
                     "experiment_id": None,
                     "failed_step": None,
                     "rfd3_results": None,
@@ -563,6 +589,7 @@ async def run_pipeline(
                 "job_id": job_id,
                 "experiment_id": None,
                 "status": "running",
+                "stage": "queued",
                 "failed_step": None,
                 "rfd3_results": None,
                 "mpnn_results": None,
@@ -588,9 +615,9 @@ async def run_pipeline(
 async def get_pipeline_job(job_id: str):
     persisted = _get_pipeline_job(job_id)
     if persisted:
-        return persisted
+        return _pipeline_job_response(persisted)
     with _pipeline_jobs_lock:
         job = _pipeline_jobs.get(job_id)
         if not job:
             raise HTTPException(status_code=404, detail="流水线作业不存在")
-        return {key: value for key, value in job.items() if key != "future"}
+        return _pipeline_job_response({key: value for key, value in job.items() if key != "future"})

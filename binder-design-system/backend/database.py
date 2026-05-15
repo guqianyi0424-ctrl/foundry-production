@@ -1,26 +1,27 @@
-from sqlalchemy import create_engine, Column, String, Integer, Float, Boolean, Text, DateTime, ForeignKey, JSON, inspect, text, event
+from sqlalchemy import create_engine, Column, String, Integer, Float, Boolean, Text, DateTime, ForeignKey, JSON, inspect, text
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 from datetime import datetime
 import os
 
-DATABASE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
-os.makedirs(DATABASE_DIR, exist_ok=True)
-DATABASE_URL = f"sqlite:///{os.path.join(DATABASE_DIR, 'deepbinder.db')}"
+DATABASE_URL = os.getenv("DEEPBINDER_DATABASE_URL")
+if not DATABASE_URL:
+    raise RuntimeError("必须设置 PostgreSQL 数据库连接：DEEPBINDER_DATABASE_URL")
+if not (
+    DATABASE_URL.startswith("postgresql://")
+    or DATABASE_URL.startswith("postgresql+psycopg://")
+    or DATABASE_URL.startswith("postgresql+psycopg2://")
+):
+    raise RuntimeError("DEEPBINDER_DATABASE_URL 必须使用 PostgreSQL，旧 SQLite 架构已停用")
 
-engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False, "timeout": 30})
+engine = create_engine(
+    DATABASE_URL,
+    pool_pre_ping=True,
+    pool_size=int(os.getenv("DEEPBINDER_DB_POOL_SIZE", "10")),
+    max_overflow=int(os.getenv("DEEPBINDER_DB_MAX_OVERFLOW", "20")),
+    pool_timeout=int(os.getenv("DEEPBINDER_DB_POOL_TIMEOUT", "30")),
+)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
-
-
-@event.listens_for(engine, "connect")
-def configure_sqlite_connection(dbapi_connection, connection_record):
-    cursor = dbapi_connection.cursor()
-    try:
-        cursor.execute("PRAGMA journal_mode=WAL")
-        cursor.execute("PRAGMA busy_timeout=30000")
-        cursor.execute("PRAGMA foreign_keys=ON")
-    finally:
-        cursor.close()
 
 
 def get_db():

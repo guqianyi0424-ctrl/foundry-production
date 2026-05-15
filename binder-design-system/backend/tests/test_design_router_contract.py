@@ -1,7 +1,11 @@
 import asyncio
 import threading
 
-from database import SessionLocal, Experiment
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
+
+from database import Base, Experiment, ExperimentDesign, User
 from schemas.domain import AdapterResult, PipelineResult
 from services.design_pipeline import DesignPipelineService
 
@@ -179,6 +183,19 @@ def patch_services(monkeypatch):
     return design_router
 
 
+def isolated_design_router_db(monkeypatch, design_router):
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    Base.metadata.create_all(bind=engine)
+    monkeypatch.setattr(design_router, "SessionLocal", TestingSessionLocal)
+    monkeypatch.setattr(design_router, "ensure_schema_compatibility", lambda: None)
+    return TestingSessionLocal
+
+
 def test_predict_hotspot_contract(monkeypatch):
     design_router = patch_services(monkeypatch)
     FakeServices.hotspot_prediction.last_top_k = None
@@ -279,13 +296,34 @@ def test_run_pipeline_async_mode_returns_running_job_and_allows_polling(monkeypa
     )
 
     assert data["status"] == "running"
+    assert data["stage"] == "queued"
     assert data["experiment_id"] is None
     assert data["job_id"].startswith("job_")
     job = asyncio.run(design_router.get_pipeline_job(data["job_id"]))
     assert job["status"] == "completed"
+    assert job["stage"] == "completed"
     assert job["experiment_id"] == "exp_1"
     assert job["rfd3_results"]["success"] is True
     assert FakeServices.pipeline.calls == 1
+
+
+def test_run_pipeline_accepts_token_user_context_without_database_session(monkeypatch):
+    design_router = patch_services(monkeypatch)
+    FakeServices.pipeline.last_call = None
+
+    data = asyncio.run(
+        design_router.run_pipeline(
+            design_router.PipelineRequest(
+                pdb_content="ATOM",
+                hotspots=[{"chain": "A", "residue": 10}],
+                binder_length=80,
+            ),
+            token_user={"id": "user_from_token"},
+        )
+    )
+
+    assert data["status"] == "completed"
+    assert FakeServices.pipeline.last_call["user_id"] == "user_from_token"
 
 
 def test_run_pipeline_async_mode_allocates_unique_job_ids(monkeypatch):
@@ -418,6 +456,7 @@ def test_run_pipeline_async_mode_exposes_rfd3_progress_before_completion(monkeyp
     assert services.pipeline.rfd3_reported.wait(timeout=2)
     progress = asyncio.run(design_router.get_pipeline_job(submitted["job_id"]))
     assert progress["status"] == "running_mpnn"
+    assert progress["stage"] == "mpnn"
     assert progress["experiment_id"] == "exp_progress"
     assert progress["rfd3_results"]["first_backbone_pdb"] == "RFD3_READY"
     assert progress["mpnn_results"] is None
@@ -432,6 +471,7 @@ class RecordingExperimentService:
         self.designs = []
         self.finished = None
         self.archived = None
+        self.statuses = []
 
     def create_pipeline_experiment(self, **kwargs):
         self.created = kwargs
@@ -446,6 +486,9 @@ class RecordingExperimentService:
                 "config": config,
             }
         )
+
+    def set_status(self, experiment_id, status):
+        self.statuses.append({"experiment_id": experiment_id, "status": status})
 
     def save_designs(self, experiment_id, designs):
         self.designs.append({"experiment_id": experiment_id, "designs": designs})
@@ -590,8 +633,36 @@ def test_pipeline_service_persists_sanitized_steps_and_candidate_designs():
 
 def test_run_rfd3_accepts_denovo_request_without_target(monkeypatch):
     design_router = patch_services(monkeypatch)
+    TestingSessionLocal = isolated_design_router_db(monkeypatch, design_router)
     services = FakeServices()
     monkeypatch.setattr(design_router, "get_design_services", lambda: services)
+    db = TestingSessionLocal()
+    try:
+        experiment_ids = [
+            row[0]
+            for row in db.query(Experiment.id)
+            .filter(Experiment.user_id == "user_rfd3")
+            .all()
+        ]
+        if experiment_ids:
+            db.query(ExperimentDesign).filter(ExperimentDesign.experiment_id.in_(experiment_ids)).delete(
+                synchronize_session=False
+            )
+        db.query(Experiment).filter(Experiment.user_id == "user_rfd3").delete()
+        db.query(User).filter(User.id == "user_rfd3").delete()
+        db.commit()
+        db.add(
+            User(
+                id="user_rfd3",
+                username="user_rfd3",
+                email="user_rfd3@test.local",
+                hashed_password="test",
+                role="researcher",
+            )
+        )
+        db.commit()
+    finally:
+        db.close()
 
     data = asyncio.run(
         design_router.run_rfd3(
@@ -610,12 +681,15 @@ def test_run_rfd3_accepts_denovo_request_without_target(monkeypatch):
     assert services.rfd3.config.target is None
     assert services.rfd3.config.hotspots == []
     assert services.rfd3.config.binder_length == 72
-    db = SessionLocal()
+    db = TestingSessionLocal()
     try:
         exp = db.query(Experiment).filter(Experiment.id == data["experiment_id"]).one()
         assert exp.user_id == "user_rfd3"
     finally:
+        db.query(ExperimentDesign).filter(ExperimentDesign.experiment_id == exp.id).delete()
         db.delete(exp)
+        db.commit()
+        db.query(User).filter(User.id == "user_rfd3").delete()
         db.commit()
         db.close()
 
@@ -661,7 +735,8 @@ def test_preview_only_mpnn_and_rf3_do_not_persist(monkeypatch):
 
 def test_run_rf3_updates_persisted_design_metrics_from_real_validation(monkeypatch):
     design_router = patch_services(monkeypatch)
-    db = SessionLocal()
+    TestingSessionLocal = isolated_design_router_db(monkeypatch, design_router)
+    db = TestingSessionLocal()
     try:
         exp = Experiment(id="exp_rf3_update", name="RF3 update", status="mpnn_completed")
         db.add(exp)
@@ -730,7 +805,8 @@ def test_run_rf3_updates_persisted_design_metrics_from_real_validation(monkeypat
 
 def test_formal_mpnn_and_rf3_fill_existing_rfd3_candidate(monkeypatch):
     design_router = patch_services(monkeypatch)
-    db = SessionLocal()
+    TestingSessionLocal = isolated_design_router_db(monkeypatch, design_router)
+    db = TestingSessionLocal()
     try:
         exp = Experiment(id="exp_candidate_fill", name="Candidate fill", status="rfd3_completed")
         db.add(exp)
@@ -801,7 +877,8 @@ def test_formal_mpnn_and_rf3_fill_existing_rfd3_candidate(monkeypatch):
 
 def test_formal_mpnn_fills_candidate_matching_selected_backbone(monkeypatch):
     design_router = patch_services(monkeypatch)
-    db = SessionLocal()
+    TestingSessionLocal = isolated_design_router_db(monkeypatch, design_router)
+    db = TestingSessionLocal()
     try:
         exp = Experiment(id="exp_candidate_match", name="Candidate match", status="rfd3_completed")
         db.add(exp)

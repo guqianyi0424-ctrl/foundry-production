@@ -91,6 +91,8 @@ interface AppState {
 
   proteinRfd3Run: {
     status: 'idle' | 'running' | 'completed' | 'failed';
+    jobId: string | null;
+    stage: string | null;
     taskName: string | null;
     startedAt: string | null;
     error: string | null;
@@ -198,6 +200,13 @@ const applyPipelineResult = (
     mpnnResults: result.mpnn_results ? normalizePipelineMpnnResults(result.mpnn_results) : get().mpnnResults,
     rf3Results: result.rf3_results ? normalizePipelineRf3Results(result.rf3_results) : get().rf3Results,
   })
+  set((state: AppState) => ({
+    proteinRfd3Run: {
+      ...state.proteinRfd3Run,
+      jobId: result.job_id || state.proteinRfd3Run.jobId,
+      stage: result.stage || result.status || state.proteinRfd3Run.stage,
+    },
+  }))
   if (result.experiment_id) {
     set({ currentExperimentId: result.experiment_id })
   }
@@ -274,6 +283,8 @@ const initialState = {
   rfd3Results: null as RFD3Response | null,
   proteinRfd3Run: {
     status: 'idle' as const,
+    jobId: null as string | null,
+    stage: null as string | null,
     taskName: null as string | null,
     startedAt: null as string | null,
     error: null as string | null,
@@ -377,6 +388,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({
       proteinRfd3Run: {
         status: 'running',
+        jobId: null,
+        stage: 'queued',
         taskName: params.task_name,
         startedAt: new Date().toISOString(),
         error: null,
@@ -411,6 +424,13 @@ export const useAppStore = create<AppState>((set, get) => ({
       const visualResult = result.rfd3_results || isPipelineTerminal(result.status)
         ? result
         : await waitForPipelineVisualResult(result.job_id)
+      set((state) => ({
+        proteinRfd3Run: {
+          ...state.proteinRfd3Run,
+          jobId: result.job_id,
+          stage: visualResult.stage || visualResult.status,
+        },
+      }))
       if (visualResult.status === 'failed') {
         throw new Error(visualResult.error || `完整流水线运行失败: ${visualResult.failed_step || 'unknown'}`)
       }
@@ -422,6 +442,7 @@ export const useAppStore = create<AppState>((set, get) => ({
             proteinRfd3Run: {
               ...state.proteinRfd3Run,
               status: 'failed',
+              stage: 'failed',
               error: message,
             },
           }))
@@ -436,6 +457,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         proteinRfd3Run: {
           ...state.proteinRfd3Run,
           status: 'completed',
+          stage: 'completed',
           error: null,
         },
       }))
@@ -446,6 +468,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         proteinRfd3Run: {
           ...state.proteinRfd3Run,
           status: 'failed',
+          stage: 'failed',
           error: message,
         },
       }))

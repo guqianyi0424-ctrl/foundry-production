@@ -99,6 +99,7 @@ export interface RunPipelineResponse {
   job_id: string
   experiment_id: string | null
   status: string
+  stage?: string
   failed_step?: string | null
   error?: string | null
   rfd3_results?: RFD3Response
@@ -160,6 +161,12 @@ export interface RF3Summary {
   iptm: number
   has_clash: boolean
   ranking_score: number
+  task_count?: number
+  candidate_count?: number
+  skipped_count?: number
+  max_candidates?: number
+  validated_count?: number
+  failed_count?: number
 }
 
 export interface RF3Response {

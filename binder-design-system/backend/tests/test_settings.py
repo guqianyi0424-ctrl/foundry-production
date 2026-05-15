@@ -34,6 +34,7 @@ def test_runtime_settings_read_environment(monkeypatch):
     monkeypatch.setenv("DEEPBINDER_PIPELINE_MPNN_SLOTS", "2")
     monkeypatch.setenv("DEEPBINDER_PIPELINE_RF3_SLOTS", "3")
     monkeypatch.setenv("DEEPBINDER_PIPELINE_MAX_RF3_CANDIDATES", "7")
+    monkeypatch.setenv("DEEPBINDER_DATABASE_URL", "postgresql+psycopg://deepbinder:secret@db/deepbinder")
 
     from config.settings import build_settings
 
@@ -46,6 +47,33 @@ def test_runtime_settings_read_environment(monkeypatch):
     assert settings.runtime.pipeline_mpnn_slots == 2
     assert settings.runtime.pipeline_rf3_slots == 3
     assert settings.runtime.pipeline_max_rf3_candidates == 7
+    assert settings.runtime.database_url == "postgresql+psycopg://deepbinder:secret@db/deepbinder"
+
+
+def test_runtime_settings_require_postgresql_database_url(monkeypatch):
+    monkeypatch.delenv("DEEPBINDER_DATABASE_URL", raising=False)
+
+    from config.settings import build_settings
+
+    try:
+        build_settings()
+    except RuntimeError as exc:
+        assert "DEEPBINDER_DATABASE_URL" in str(exc)
+    else:
+        raise AssertionError("missing PostgreSQL database URL should fail startup")
+
+
+def test_runtime_settings_reject_sqlite_database_url(monkeypatch):
+    monkeypatch.setenv("DEEPBINDER_DATABASE_URL", "sqlite:///backend/data/deepbinder.db")
+
+    from config.settings import build_settings
+
+    try:
+        build_settings()
+    except RuntimeError as exc:
+        assert "PostgreSQL" in str(exc)
+    else:
+        raise AssertionError("SQLite database URL should fail startup")
 
 
 def test_runtime_settings_disable_mock_by_default_in_production(monkeypatch):

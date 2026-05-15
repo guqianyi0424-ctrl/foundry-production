@@ -5,7 +5,7 @@ DeepBinder 是基于 React + FastAPI 的蛋白质 Binder 智能设计平台，�
 ## 技术栈
 
 - 前端: React 18, Vite, TypeScript, Zustand, Molstar
-- 后端: FastAPI, Python 3.12
+- 后端: FastAPI, Python 3.12, PostgreSQL
 - 模型运行: PyTorch, rc-foundry, RFD3, MPNN, RF3
 - 部署: conda + Nginx
 
@@ -30,6 +30,7 @@ binder-design-system/
 
 ```bash
 cd binder-design-system/backend
+export DEEPBINDER_DATABASE_URL='postgresql+psycopg://deepbinder:password@127.0.0.1:5432/deepbinder'
 python -m uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
@@ -51,6 +52,7 @@ cd frontend
 npm install
 npm run build
 cd ../backend
+export DEEPBINDER_DATABASE_URL='postgresql+psycopg://deepbinder:password@127.0.0.1:5432/deepbinder'
 python -m uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
@@ -63,6 +65,7 @@ python -m uvicorn main:app --host 0.0.0.0 --port 8000
 ```bash
 export DEEPBINDER_ENV=production
 export DEEPBINDER_SECRET_KEY="请替换为不少于32位的随机密钥"
+export DEEPBINDER_DATABASE_URL="postgresql+psycopg://deepbinder:password@127.0.0.1:5432/deepbinder"
 export DEEPBINDER_CORS_ORIGINS="https://your-domain.example.edu"
 export DEEPBINDER_ALLOW_MOCK=0
 export DEEPBINDER_BOOTSTRAP_ADMIN_USERNAME="admin"
@@ -75,6 +78,17 @@ export DEEPBINDER_LOGIN_FAILURE_WINDOW_SECONDS=300
 生产环境默认不会创建 `admin/admin123`，如需初始化管理员，请显式设置 `DEEPBINDER_BOOTSTRAP_ADMIN_USERNAME` 和 `DEEPBINDER_BOOTSTRAP_ADMIN_PASSWORD`。
 生产环境默认禁用模型 mock 回退，只有显式设置 `DEEPBINDER_ALLOW_MOCK=1` 才会允许演示结果。
 `DEEPBINDER_MAX_LOGIN_FAILURES` 和 `DEEPBINDER_LOGIN_FAILURE_WINDOW_SECONDS` 用于控制登录失败限流。配置模板见 [.env.example](.env.example)。
+
+## PostgreSQL
+
+后端已强制使用 PostgreSQL，不再支持旧 SQLite 数据库。新服务器可运行：
+
+```bash
+cd binder-design-system
+sudo -E bash scripts/install_postgresql.sh
+```
+
+安装脚本会创建 `deepbinder` 数据库和用户。现有 SQLite 数据不会迁移，新库从空数据开始。
 
 ## 作业状态
 

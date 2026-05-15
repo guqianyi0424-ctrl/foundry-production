@@ -5,11 +5,11 @@ import sys
 
 import httpx
 import pytest
-from sqlalchemy.exc import OperationalError
+from sqlalchemy.exc import OperationalError, TimeoutError
 from jose import jwt
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.pool import QueuePool, StaticPool
 
 from database import Base, User, get_db
 from main import app
@@ -77,6 +77,12 @@ def test_init_db_can_seed_admin_from_environment(monkeypatch, tmp_path):
         assert admin.role == "admin"
     finally:
         db.close()
+
+
+def test_postgresql_engine_uses_bounded_pool():
+    import database
+
+    assert isinstance(database.engine.pool, QueuePool)
 
 
 async def run_with_client(monkeypatch, scenario):
@@ -487,6 +493,40 @@ def test_experiment_list_returns_service_unavailable_when_database_is_locked(mon
 
         assert response.status_code == 503
         assert response.json()["message"] == "数据库繁忙，请稍后重试"
+
+    try:
+        asyncio.run(scenario())
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_experiment_list_returns_service_unavailable_when_connection_pool_is_exhausted(monkeypatch):
+    from routers.auth import create_access_token
+
+    class ExhaustedSession:
+        def query(self, model):
+            raise TimeoutError(
+                "QueuePool limit of size 5 overflow 10 reached, connection timed out, timeout 30.00"
+            )
+
+    async def override_exhausted_db():
+        yield ExhaustedSession()
+
+    async def scenario():
+        app.dependency_overrides[get_db] = override_exhausted_db
+        token = create_access_token({"sub": "admin", "role": "admin"})
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app),
+            base_url="http://testserver",
+        ) as client:
+            response = await client.get(
+                "/api/experiments",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+        app.dependency_overrides.clear()
+
+        assert response.status_code == 503
+        assert response.json()["message"] == "数据库连接繁忙，请稍后重试"
 
     try:
         asyncio.run(scenario())
