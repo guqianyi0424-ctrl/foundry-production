@@ -9,7 +9,7 @@ import time
 import uuid
 
 from database import SessionLocal, Experiment, ExperimentDesign, User, ensure_schema_compatibility
-from routers.auth import get_current_user, get_token_user
+from routers.auth import get_current_user, require_login
 from logger import logger, record_task
 from schemas.domain import RFD3JobConfig
 from adapters.model_adapters import sanitize_model_result
@@ -545,15 +545,15 @@ async def run_rf3(req: RF3Request):
 @router.post("/run-pipeline", summary="完整设计流水线", description="自动执行RFD3→MPNN→RF3全流程")
 async def run_pipeline(
     req: PipelineRequest,
-    token_user: dict | None = Depends(get_token_user),
+    current_user: User = Depends(require_login),
 ):
     job_id = f"job_{int(time.time())}_{uuid.uuid4().hex[:8]}"
     start = time.time()
 
     try:
         user_id = None
-        if token_user and not isinstance(token_user, DependsParam):
-            user_id = token_user.get("id")
+        if current_user and not isinstance(current_user, DependsParam):
+            user_id = current_user.id
         call_args = {
             "pdb_content": req.pdb_content,
             "hotspots": req.hotspots,

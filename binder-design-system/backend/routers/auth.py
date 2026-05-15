@@ -95,7 +95,7 @@ async def get_current_user(token: Optional[str] = Depends(oauth2_scheme), db: Se
     return user
 
 
-async def get_token_user(token: Optional[str] = Depends(oauth2_scheme)):
+async def get_token_user(token: Optional[str] = Depends(oauth2_scheme), db: Session = Depends(get_db)):
     if not token:
         return None
     try:
@@ -105,9 +105,15 @@ async def get_token_user(token: Optional[str] = Depends(oauth2_scheme)):
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="请先登录")
     except JWTError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="请先登录")
+    user_id = payload.get("user_id") or payload.get("id")
+    if not user_id:
+        user = db.query(User).filter(User.username == username).first()
+        if not user:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="请先登录")
+        user_id = user.id
     return {
         "username": username,
-        "id": payload.get("user_id") or payload.get("id") or username,
+        "id": user_id,
         "role": payload.get("role"),
     }
 
@@ -223,7 +229,7 @@ async def login(request: Request, db: Session = Depends(get_db)):
     db.add(audit)
     db.commit()
 
-    access_token = create_access_token(data={"sub": user.username, "role": user.role})
+    access_token = create_access_token(data={"sub": user.username, "user_id": user.id, "role": user.role})
     return {
         "access_token": access_token,
         "token_type": "bearer",

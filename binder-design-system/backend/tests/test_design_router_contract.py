@@ -176,6 +176,10 @@ class FakeUser:
     id = "user_rfd3"
 
 
+class FakePipelineUser:
+    id = "user_from_token"
+
+
 def patch_services(monkeypatch):
     import routers.design as design_router
 
@@ -234,7 +238,8 @@ def test_run_pipeline_contract(monkeypatch):
                 task_name="Pipeline Protein",
                 target_filename="target.pdb",
                 chain_type="proteinChain",
-            )
+            ),
+            current_user=FakePipelineUser(),
         )
     )
 
@@ -291,7 +296,8 @@ def test_run_pipeline_async_mode_returns_running_job_and_allows_polling(monkeypa
                 hotspots=[{"chain": "A", "residue": 10}],
                 binder_length=80,
                 async_mode=True,
-            )
+            ),
+            current_user=FakePipelineUser(),
         )
     )
 
@@ -307,7 +313,7 @@ def test_run_pipeline_async_mode_returns_running_job_and_allows_polling(monkeypa
     assert FakeServices.pipeline.calls == 1
 
 
-def test_run_pipeline_accepts_token_user_context_without_database_session(monkeypatch):
+def test_run_pipeline_accepts_authenticated_user_context_without_database_session(monkeypatch):
     design_router = patch_services(monkeypatch)
     FakeServices.pipeline.last_call = None
 
@@ -318,7 +324,7 @@ def test_run_pipeline_accepts_token_user_context_without_database_session(monkey
                 hotspots=[{"chain": "A", "residue": 10}],
                 binder_length=80,
             ),
-            token_user={"id": "user_from_token"},
+            current_user=FakePipelineUser(),
         )
     )
 
@@ -341,7 +347,8 @@ def test_run_pipeline_async_mode_allocates_unique_job_ids(monkeypatch):
                 hotspots=[{"chain": "A", "residue": 10}],
                 binder_length=80,
                 async_mode=True,
-            )
+            ),
+            current_user=FakePipelineUser(),
         )
     )
     second = asyncio.run(
@@ -351,7 +358,8 @@ def test_run_pipeline_async_mode_allocates_unique_job_ids(monkeypatch):
                 hotspots=[{"chain": "A", "residue": 10}],
                 binder_length=80,
                 async_mode=True,
-            )
+            ),
+            current_user=FakePipelineUser(),
         )
     )
 
@@ -449,7 +457,8 @@ def test_run_pipeline_async_mode_exposes_rfd3_progress_before_completion(monkeyp
                 hotspots=[{"chain": "A", "residue": 10}],
                 binder_length=80,
                 async_mode=True,
-            )
+            ),
+            current_user=FakePipelineUser(),
         )
     )
 

@@ -13,7 +13,7 @@ from sqlalchemy.pool import QueuePool, StaticPool
 
 from database import Base, User, get_db
 from main import app
-from routers.auth import ALGORITHM, get_password_hash
+from routers.auth import ALGORITHM, SECRET_KEY, get_password_hash
 
 
 PDB_CONTENT = """\
@@ -282,6 +282,15 @@ def test_run_rfd3_rejects_invalid_bearer_token(monkeypatch):
 
         assert response.status_code == 401
         assert response.json()["code"] == "unauthorized"
+
+    asyncio.run(run_with_client(monkeypatch, scenario))
+
+
+def test_login_token_contains_database_user_id_for_pipeline_ownership(monkeypatch):
+    async def scenario(client):
+        owner = await register_and_login(client, "pipeline_owner")
+        payload = jwt.decode(owner["access_token"], SECRET_KEY, algorithms=[ALGORITHM])
+        assert payload["user_id"] == owner["user"]["id"]
 
     asyncio.run(run_with_client(monkeypatch, scenario))
 

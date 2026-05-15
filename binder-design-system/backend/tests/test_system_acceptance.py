@@ -369,8 +369,11 @@ def test_admin_can_filter_experiments_by_user_and_rows_include_owner(monkeypatch
 
 def test_mock_pipeline_end_to_end_acceptance(monkeypatch):
     async def scenario(client):
+        login_data = await login_admin(client)
+        headers = {"Authorization": f"Bearer {login_data['access_token']}"}
         response = await client.post(
             "/api/run-pipeline",
+            headers=headers,
             json={
                 "pdb_content": PDB_CONTENT,
                 "hotspots": [{"chain": "A", "residue": 1}],
@@ -385,5 +388,21 @@ def test_mock_pipeline_end_to_end_acceptance(monkeypatch):
         assert data["rfd3_results"]["first_backbone_pdb"] == "RFD3_PDB"
         assert data["mpnn_results"]["first_sequence_pdb"] == "MPNN_PDB"
         assert data["rf3_results"]["passed"] is True
+
+    asyncio.run(run_with_acceptance_client(monkeypatch, scenario))
+
+
+def test_pipeline_requires_login_acceptance(monkeypatch):
+    async def scenario(client):
+        response = await client.post(
+            "/api/run-pipeline",
+            json={
+                "pdb_content": PDB_CONTENT,
+                "hotspots": [{"chain": "A", "residue": 1}],
+                "binder_length": 80,
+            },
+        )
+
+        assert response.status_code == 401
 
     asyncio.run(run_with_acceptance_client(monkeypatch, scenario))
